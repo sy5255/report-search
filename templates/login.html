@@ -1,0 +1,21 @@
+<html>
+  <head>
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/login.css') }}">
+  </head>
+  <body>
+    <div class="wrapper fadeInDown">
+      <div id="formContent">
+        <h2 class="active"> Sign In </h2>
+        <form method="post">
+          <input type="text" id="id" class="fadeIn second" name="id" placeholder="id">
+          <input type="password" id="password" class="fadeIn third" name="password" placeholder="password">
+          <input type="submit" class="fadeIn fourth" value="Log In">
+        </form>
+        <div id="formFooter">
+          {{ message }}
+        </div>
+      </div>
+    </div>
+  </body>
+  <script src="{{ url_for('static', path='/js/login.js') }}"></script>
+</html>

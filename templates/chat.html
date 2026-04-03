@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>RAG Chat</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/css/chat.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+  <div id="app" class="layout">
+
+    <!-- LEFT -->
+    <div id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <div class="me">User: {{ user_id }}</div>
+        <button id="toggleSidebar" class="btn small" title="Toggle Sidebar">«</button>
+      </div>
+
+      <div class="sidebar-actions">
+        <button id="newSession" class="btn">+ New Chat</button>
+        <div class="sidebar-hint">* 세션은 첫 메시지 전송 시 생성됨</div>
+      </div>
+
+      <div id="sessionList" class="session-list"></div>
+    </div>
+
+    <!-- RESIZER 1 -->
+    <div id="resizer1" class="resizer vertical"></div>
+
+    <!-- CENTER -->
+    <div class="main">
+      <div class="topbar">
+        <div class="controls-left">
+          <label>Index</label>
+
+          <div class="multi-dd" id="indexPicker">
+            <button type="button" class="multi-dd-btn" id="indexPickerBtn">
+              <span id="indexPickerLabel">Select indexes</span>
+              <span class="chev">▾</span>
+            </button>
+
+            <div class="multi-dd-menu hidden" id="indexPickerMenu">
+              <div class="multi-dd-actions">
+                <button type="button" class="btn small" id="idxAll">All</button>
+                <button type="button" class="btn small" id="idxNone">None</button>
+              </div>
+
+              <div class="multi-dd-list" id="indexPickerList">
+                {% for x in index_options %}
+                  <label class="multi-dd-item">
+                    <input type="checkbox" name="indexNames" value="{{ x }}"
+                          {% if x == default_index %}checked{% endif %}>
+                    <span>{{ x }}</span>
+                  </label>
+                {% endfor %}
+              </div>
+            </div>
+
+          </div>
+
+          <label>TopK</label>
+          <input id="topK" type="number" min="1" max="20" value="{{ default_top_k }}" />
+        </div>
+
+      </div>
+
+      <div id="chatArea" class="chat-area"></div>
+
+      <div class="composer">
+        <textarea id="userInput" placeholder="질문을 입력하세요..." rows="2"></textarea>
+        <button id="sendBtn" class="btn primary">Send</button>
+      </div>
+    </div>
+
+    <!-- RESIZER 2 -->
+    <div id="resizer2" class="resizer vertical"></div>
+
+    <!-- RIGHT -->
+    <div class="right">
+      <div class="right-topbar">
+        <div class="right-title">Evidence</div>
+        <div class="right-actions">
+          <button id="themeToggle" class="btn small" title="Theme">🌙/☀️</button>
+          <button id="logout" class="btn danger small">Logout</button>
+        </div>        
+      </div>
+
+      <div class="right-body">
+        <div class="panel" data-panel="topdocs">
+          <div class="panel-head">
+            <div class="panel-title">Top Documents</div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <label class="mini">Show</label>
+              <input id="topDocsShowN" class="mini-input" type="number" min="1" max="20" value="5"/>
+              <button class="btn small panel-max" data-target="topdocs" title="Maximize">⤢</button>
+            </div>
+          </div>          
+          <div id="topDocs" class="topdocs"></div>
+        </div>
+
+        <div id="hresizer1" class="resizer horizontal"></div>
+
+        <div class="panel" data-panel="citations">
+          <div class="panel-head">
+            <div class="panel-title">Sentence Citations</div>
+            <button class="btn small panel-max" data-target="citations" title="Maximize">⤢</button>
+          </div>
+          <div id="citations" class="citations"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Document Viewer MODAL -->
+    <div id="docModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" id="docModalBackdrop"></div>
+      <div class="modal-card">
+        <div class="modal-head">
+          <div id="docModalTitle" class="modal-title">(Document)</div>
+          <div class="modal-actions">
+            <button id="docModalClose" class="btn small">Close</button>
+          </div>
+        </div>
+
+        <div class="modal-tabs">
+          <button class="tab active" data-tab="md">Markdown</button>
+          <button class="tab" data-tab="images">Images</button>
+        </div>
+
+        <div id="docModalMd" class="viewer viewer-active markdown-body"></div>
+        <div id="docModalImages" class="viewer"></div>
+      </div>
+    </div>
+
+    <!-- Fullscreen image preview -->
+    <div id="imgPreview" class="img-preview hidden"></div>
+
+  </div>
+
+  <script>
+    window.__BOOT__ = { defaultIndex: "{{ default_index }}" };
+  </script>
+  <script src="{{ url_for('static', path='/js/chat.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+<html>
+    <head>
+        <link rel="stylesheet" href="{{ url_for('static', path='/css/success.css') }}" />
+    </head>
+    <body>
+        <div id="container">
+            <div id="success-box">
+              <div class="dot"></div>
+              <div class="dot two"></div>
+              <div class="face">
+                <div class="eye"></div>
+                <div class="eye right"></div>
+                <div class="mouth happy"></div>
+              </div>
+              <div class="shadow scale"></div>
+              <div class="message"><h1 class="alert">Nice to meet you!</h1><p>{{ message }}</p></div>
+              <button id="logout" class="button-box"><h1 class="green">LogOut</h1></button>
+            </div>
+    </body>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="{{ url_for('static', path='/js/success.js') }}"></script>
+</html>
