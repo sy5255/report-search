@@ -377,4 +377,92 @@ def _call_answer_json_or_fallback_markdown(
     # 2) fallback: raw text 자체를 answer_markdown으로 사용
     return {
         "answer_markdown": stripped
-    } 
+    }
+
+# =====================================================================
+# [Phase 1] 사내 모델 Tool Calling(Function Calling) 지원 테스트 코드
+# =====================================================================
+def test_tool_calling(user_id: str) -> dict:
+    """
+    사내 모델(gpt-oss-120b)이 OpenAI 스펙의 tool_calls를 정상적으로 응답하는지 테스트합니다.
+    """
+    client = _make_client(user_id)
+
+    # 1. LLM에게 알려줄 가짜 함수(도구) 명세서
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_db_top_defects",
+                "description": "MySQL DB에서 특정 기간 동안 가장 많이 발생한 불량명 순위를 조회합니다.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "months": {
+                            "type": "integer",
+                            "description": "조회할 최근 개월 수 (예: 3)"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "조회할 상위 N개 갯수 (예: 1)"
+                        }
+                    },
+                    "required": ["months", "limit"]
+                }
+            }
+        }
+    ]
+
+    # 2. 도구를 사용해야만 대답할 수 있는 프롬프트 전송
+    messages = [
+        {"role": "system", "content": "You are an intelligent agent. Use the provided tools to answer the user's question."},
+        {"role": "user", "content": "최근 3개월간 가장 많이 발생한 불량명 1위가 뭐야?"}
+    ]
+
+    print("=== [Tool Calling Test Start] ===")
+    try:
+        completion = client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=messages,
+            tools=tools,
+            tool_choice="auto", # 모델이 함수 호출 여부를 스스로 결정
+            temperature=0.0,
+        )
+
+        message = completion.choices[0].message
+        print("Finish Reason:", completion.choices[0].finish_reason)
+
+        # 3. 모델이 tool_calls 형태로 응답했는지 검증
+        if getattr(message, 'tool_calls', None):
+            print("✅ Tool Calling 지원 확인됨!")
+            tool_calls_info = []
+           
+            for tc in message.tool_calls:
+                info = {
+                    "id": getattr(tc, 'id', ''),
+                    "type": getattr(tc, 'type', ''),
+                    "function_name": tc.function.name,
+                    "function_args": tc.function.arguments
+                }
+                tool_calls_info.append(info)
+                print(f" - 호출된 함수 이름: {tc.function.name}")
+                print(f" - 전달받은 파라미터: {tc.function.arguments}")
+               
+            return {"status": "success", "tool_calls": tool_calls_info}
+       
+        else:
+            print("❌ Tool Calling이 발생하지 않음 (일반 텍스트 형태로 응답함)")
+            print("응답 내용:", message.content)
+            return {"status": "no_tool_calls", "content": message.content}
+
+    except Exception as e:
+        print(f"❌ API 에러 발생: {e}")
+        return {"status": "error", "message": str(e)}
+
+if __name__ == "__main__":
+    # 파이썬에서 이 파일을 직접 실행하면 테스트가 수행되도록 합니다.
+    # 실행법: python app/llm_client.py
+    import pprint
+    res = test_tool_calling(user_id="test_admin")
+    print("\n[테스트 결과 요약]")
+    pprint.pprint(res)

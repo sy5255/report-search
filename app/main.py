@@ -17,8 +17,8 @@ from app.config import (
 )
 from app.db_schema import ensure_tables
 from app import repo
-from app.rag_client import rag_retrieve_rrf
-from app.llm_client import llm_answer_with_citations, rewrite_query_with_history
+from app.agent import run_agent_loop
+from app.llm_client import rewrite_query_with_history
 from app.query_normalizer import normalize_and_expand_query
 
 app = FastAPI(title="RAG Search Web", version=VERSION)
@@ -28,7 +28,6 @@ templates = Jinja2Templates(directory="templates")
 
 MAX_HISTORY_MESSAGES = 6  # 최근 6개 메시지 = 대략 최근 3턴
 RETRIEVE_TOP_K_DEFAULT = 12
-ANSWER_EVIDENCE_DOCS = 6
 EXCLUDED_TOPDOC_INDEXES = {"rp-term-ver1"}
 
 
@@ -37,31 +36,17 @@ def build_sliding_window_messages(
     current_user_msg_id: str | None = None,
     max_messages: int = MAX_HISTORY_MESSAGES
 ) -> list[dict]:
-    """
-    DB 전체 메시지 중 최근 N개만 남긴다.
-    current_user_msg_id가 주어지면 해당 메시지는 제외한다.
-    """
     history = []
-
     for msg in all_messages or []:
         if current_user_msg_id and msg.get("msg_id") == current_user_msg_id:
             continue
-
         role = msg.get("role")
         if role not in ("user", "assistant"):
             continue
-
-        history.append({
-            "role": role,
-            "content": msg.get("content", "")
-        })
-
+        history.append({"role": role, "content": msg.get("content", "")})
     history = history[-max_messages:]
-
-    # assistant로 시작하면 문맥이 어색하니 제거
     if history and history[0]["role"] == "assistant":
         history = history[1:]
-
     return history
 
 
@@ -76,62 +61,6 @@ def _require_user(request: Request) -> str:
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
     return user
-
-
-def _to_ui_doc_from_hit(h: dict) -> dict:
-    src = h.get("_source") or {}
-    return {
-        "doc_id": src.get("doc_id"),
-        "chunk_id": src.get("chunk_id") or h.get("_id"),
-        "title": src.get("title"),
-        "merge_title_content": src.get("merge_title_content") or "",
-        "score": h.get("_score"),
-        "additionalField": src.get("additionalField") or {},
-        "_index": h.get("_index"),
-        "_rank": h.get("_rank"),
-    }
-
-
-def dedupe_hits_by_doc_id_keep_best(hits: list[dict]) -> list[dict]:
-    """
-    같은 doc_id가 여러 번 나오면:
-    - _score가 가장 높은 chunk(hit) 1개만 남김
-    - 결과는 score desc로 정렬 (동점이면 rank asc)
-    """
-    best = {}
-    for h in hits or []:
-        src = h.get("_source") or {}
-        doc_id = src.get("doc_id")
-        if not doc_id:
-            continue
-
-        prev = best.get(doc_id)
-        if prev is None:
-            best[doc_id] = h
-            continue
-
-        if (h.get("_score") or 0) > (prev.get("_score") or 0):
-            best[doc_id] = h
-
-    out = list(best.values())
-    out.sort(key=lambda x: (-(x.get("_score") or 0), (x.get("_rank") or 10**9)))
-    return out
-
-
-def filter_hits_by_excluded_indexes(
-    hits: list[dict],
-    excluded_indexes: set[str] | None = None
-) -> list[dict]:
-    excluded = excluded_indexes or set()
-    out = []
-
-    for h in hits or []:
-        idx = (h.get("_index") or "").strip()
-        if idx in excluded:
-            continue
-        out.append(h)
-
-    return out
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -196,22 +125,17 @@ async def api_get_session_messages(session_id: str, request: Request):
     user = _require_user(request)
     msgs = repo.get_messages(session_id, user)
     search_logs = repo.list_search_logs_for_session(session_id, user)
-
     search_log_by_user_msg_id = {}
     for log in search_logs or []:
         user_msg_id = log.get("user_msg_id")
         if not user_msg_id:
             continue
         search_log_by_user_msg_id[user_msg_id] = log
-
-    return {
-        "messages": msgs,
-        "search_logs_by_user_msg_id": search_log_by_user_msg_id
-    }
+    return {"messages": msgs, "search_logs_by_user_msg_id": search_log_by_user_msg_id}
 
 
 # =========================
-# API: chat (RAG -> LLM Phase2 JSON citations)
+# API: chat (Agent Loop 적용)
 # =========================
 @app.post("/api/chat")
 async def api_chat(request: Request):
@@ -264,8 +188,7 @@ async def api_chat(request: Request):
             previous_messages=previous_messages,
         )
     except Exception as e:
-        print(f"Query rewrite failed, fallback to original query: {e}")
-        rewritten_query = user_text
+        print(f"Query rewrite failed: {e}")
 
     # 4) normalization + expansion
     query_norm = {
@@ -282,105 +205,42 @@ async def api_chat(request: Request):
             scope_candidates=scope_candidates,
         )
     except Exception as e:
-        print(f"Query normalization failed, fallback to rewritten query: {e}")
+        print(f"Query normalization failed: {e}")
 
     retrieval_query = (query_norm.get("expanded_query") or rewritten_query).strip() or rewritten_query
 
-    # 5) retrieve
-    rag_resp = None
-    hits = []
-
+    # 5) Agent Loop 실행
     try:
-        rag_resp = rag_retrieve_rrf(
-            index_name=index_names,
-            query_text=retrieval_query,
-            top_k=retrieve_top_k,
-            filters=filters
-        )
-        hits = (((rag_resp or {}).get("hits") or {}).get("hits") or [])
-    except Exception:
-        merged_hits = []
-        for idx in index_names:
-            try:
-                r = rag_retrieve_rrf(
-                    index_name=idx,
-                    query_text=retrieval_query,
-                    top_k=retrieve_top_k,
-                    filters=filters
-                )
-                hs = (((r or {}).get("hits") or {}).get("hits") or [])
-                merged_hits.extend(hs)
-            except Exception:
-                continue
-
-        hits_dedup = dedupe_hits_by_doc_id_keep_best(merged_hits)
-        hits = hits_dedup[:retrieve_top_k]
-        rag_resp = {"hits": {"hits": hits}}
-
-    # ✅ TopDocs / Sentence Citations / answer 근거에서 제외할 인덱스 제거
-    hits_dedup = dedupe_hits_by_doc_id_keep_best(hits)
-    hits_visible = filter_hits_by_excluded_indexes(
-        hits_dedup,
-        excluded_indexes=EXCLUDED_TOPDOC_INDEXES,
-    )
-
-    # ✅ answer / citations도 filtered hits 기준 사용
-    answer_hits = hits_visible[:ANSWER_EVIDENCE_DOCS]
-
-    rag_chunks = []
-    for h in answer_hits:
-        src = h.get("_source") or {}
-        rag_chunks.append({
-            "doc_id": src.get("doc_id"),
-            "chunk_id": src.get("chunk_id") or h.get("_id"),
-            "title": src.get("title"),
-            "merge_title_content": src.get("merge_title_content") or "",
-            "score": h.get("_score"),
-            "additionalField": src.get("additionalField") or {},
-            "_index": h.get("_index"),
-            "_rank": h.get("_rank"),
-        })
-
-    # 6) answer
-    try:
-        citations_json = llm_answer_with_citations(
+        agent_result = run_agent_loop(
             user_id=user,
-            user_question=user_text,
-            rag_chunks=rag_chunks,
+            user_query=retrieval_query,
             previous_messages=previous_messages,
+            excluded_indexes=EXCLUDED_TOPDOC_INDEXES,
+            ui_top_k=ui_top_k
         )
+        final_answer = agent_result.get("final_answer", "응답을 생성하지 못했습니다.")
+        citations_json = agent_result.get("citations", {"answer": [], "final": final_answer, "claims": []})
+        top_docs_ui = agent_result.get("top_docs", [])
+
     except Exception as e:
-        print(f"LLM error: {e}")
-        citations_json = {
-            "answer": [{
-                "sentence": "LLM 호출/파싱에 실패했습니다. (프롬프트/JSON 파싱/게이트웨이 응답을 확인해주세요.)",
-                "citations": []
-            }],
-            "final": "LLM 호출/파싱에 실패했습니다."
-        }
+        print(f"Agent error: {e}")
+        final_answer = "에이전트 처리 중 오류가 발생했습니다."
+        citations_json = {"answer": [], "final": final_answer, "claims": []}
+        top_docs_ui = []
 
-    final_answer = (citations_json.get("final") or "").strip()
-    if not final_answer:
-        parts = []
-        for a in (citations_json.get("answer") or []):
-            s = (a.get("sentence") or "").strip()
-            if s:
-                parts.append(s)
-        final_answer = "\n".join(parts).strip()
-
-    # 7) assistant message 저장
+    # 6) 데이터베이스 저장 및 응답 반환
     assistant_msg_id = repo.insert_message(session_id, user, "assistant", final_answer)
 
-    rag_resp_for_store = dict(rag_resp or {})
-    rag_resp_for_store["original_query"] = user_text
-    rag_resp_for_store["rewritten_query"] = rewritten_query
-    rag_resp_for_store["normalized_query"] = query_norm.get("normalized_query")
-    rag_resp_for_store["expanded_query"] = query_norm.get("expanded_query")
-    rag_resp_for_store["detected_terms"] = query_norm.get("detected_terms") or []
-    rag_resp_for_store["expansion_terms"] = query_norm.get("expansion_terms") or {}
-    rag_resp_for_store["top_docs"] = [_to_ui_doc_from_hit(h) for h in hits_visible]
-
-    # 8) artifact 저장
+    rag_resp_for_store = {
+        "agent_used": True,
+        "original_query": user_text,
+        "rewritten_query": rewritten_query,
+        "normalized_query": query_norm.get("normalized_query"),
+        "expanded_query": query_norm.get("expanded_query"),
+        "detected_terms": query_norm.get("detected_terms") or [],
+        "expansion_terms": query_norm.get("expansion_terms") or {},
+        "top_docs": top_docs_ui
+    }
     repo.insert_turn_artifact(
         session_id=session_id,
         user_id=user,
@@ -391,7 +251,6 @@ async def api_chat(request: Request):
         citations=citations_json
     )
 
-    # 9) search log 저장
     try:
         repo.insert_search_log(
             session_id=session_id,
@@ -406,20 +265,17 @@ async def api_chat(request: Request):
             detected_terms=query_norm.get("detected_terms") or [],
             expansion_terms=query_norm.get("expansion_terms") or {},
             filters=filters,
-            top_docs=[_to_ui_doc_from_hit(h) for h in hits_visible],
+            top_docs=top_docs_ui,
             retrieve_top_k=retrieve_top_k,
         )
     except Exception as e:
         print(f"search log insert failed: {e}")
 
-    # 10) 세션 제목 갱신
     try:
         if user_text:
             repo.touch_session(session_id, user, title=user_text[:60])
     except Exception:
         repo.touch_session(session_id, user)
-
-    top_docs_ui = [_to_ui_doc_from_hit(h) for h in hits_visible[:ui_top_k]]
 
     return {
         "session_id": session_id,
@@ -450,7 +306,6 @@ def _safe_join(root: Path, rel_path: str) -> Path:
 @app.get("/api/view/md")
 async def view_md(request: Request, rel: str):
     _ = _require_user(request)
-    # rel is PARSE_ROOT relative path (we stored parsed_md_rel_path relative to PARSE_ROOT)
     p = _safe_join(PARSE_ROOT, rel)
     if not p.exists() or not p.is_file():
         raise HTTPException(status_code=404, detail="Not found")
