@@ -789,3 +789,94 @@ body.dragging { user-select:none; }
 .msg.assistant{
   overflow: hidden;
 }
+
+/* =========================
+   에이전트 인텐트 뱃지 (상태 표시)
+========================= */
+.meta-left { display: flex; align-items: center; gap: 8px; }
+.intent-badge {
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+/* 인텐트별 색상 매핑 (다크/라이트 모드 범용) */
+.intent-db_analysis { background: rgba(42,98,255,0.15); color: #6495ED; border: 1px solid rgba(42,98,255,0.3); }
+.intent-rag_knowledge { background: rgba(25,169,116,0.15); color: #4ade80; border: 1px solid rgba(25,169,116,0.3); }
+.intent-hybrid_db_rag { background: rgba(255,176,32,0.15); color: #fbbf24; border: 1px solid rgba(255,176,32,0.3); }
+.intent-general_chat { background: rgba(255,255,255,0.1); color: var(--muted); border: 1px solid var(--border); }
+
+:root[data-theme="light"] .intent-db_analysis { color: #1e40af; }
+:root[data-theme="light"] .intent-rag_knowledge { color: #166534; }
+:root[data-theme="light"] .intent-hybrid_db_rag { color: #b45309; }
+
+/* =========================
+   액션 칩 (스위치 버튼)
+========================= */
+.action-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.action-chip {
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid rgba(42,98,255,0.4);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.action-chip:hover {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+  transform: translateY(-1px);
+}
+
+/* =========================
+   SQL 쿼리 폴딩 UI (details / summary)
+========================= */
+.markdown-body details {
+  background: rgba(0,0,0,0.15);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin: 14px 0;
+}
+.markdown-body summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--primary);
+  outline: none;
+  list-style: none; /* 기본 화살표 제거 (일부 브라우저) */
+  display: flex;
+  align-items: center;
+}
+/* 커스텀 화살표 아이콘 */
+.markdown-body summary::-webkit-details-marker { display: none; }
+.markdown-body summary::before {
+  content: "▶";
+  font-size: 10px;
+  margin-right: 8px;
+  transition: transform 0.2s;
+}
+.markdown-body details[open] summary::before {
+  transform: rotate(90deg);
+}
+.markdown-body details[open] summary {
+  margin-bottom: 12px;
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 10px;
+}
+/* 내부 코드 블록 여백 조정 */
+.markdown-body details pre { margin-top: 0; margin-bottom: 0; }
+

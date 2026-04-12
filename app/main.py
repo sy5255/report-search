@@ -150,6 +150,15 @@ async def api_chat(request: Request):
     if not user_text:
         raise HTTPException(status_code=400, detail="user_text required")
 
+    # 💡 [핵심 복구 1] 프론트엔드에서 날아온 [태그]를 LLM이 건드리기 전에 가로채서 분리합니다!
+    forced_intent = None
+    if user_text.startswith("[DB_ANALYSIS]"):
+        forced_intent = "DB_ANALYSIS"
+        user_text = user_text.replace("[DB_ANALYSIS]", "").strip()
+    elif user_text.startswith("[RAG_KNOWLEDGE]"):
+        forced_intent = "RAG_KNOWLEDGE"
+        user_text = user_text.replace("[RAG_KNOWLEDGE]", "").strip()
+
     index_names = body.get("index_names")
     if isinstance(index_names, list):
         index_names = [str(x).strip() for x in index_names if str(x).strip()]
@@ -209,24 +218,33 @@ async def api_chat(request: Request):
 
     retrieval_query = (query_norm.get("expanded_query") or rewritten_query).strip() or rewritten_query
 
-    # 5) Agent Loop 실행
+    # 5) Agent Loop 실행 및 변수 추출
     try:
         agent_result = run_agent_loop(
             user_id=user,
             user_query=retrieval_query,
             previous_messages=previous_messages,
             excluded_indexes=EXCLUDED_TOPDOC_INDEXES,
-            ui_top_k=ui_top_k
+            ui_top_k=ui_top_k,
+            forced_intent=forced_intent # 💡 [핵심 복구 2] 가로챈 태그를 에이전트에 다이렉트로 주입!
         )
         final_answer = agent_result.get("final_answer", "응답을 생성하지 못했습니다.")
         citations_json = agent_result.get("citations", {"answer": [], "final": final_answer, "claims": []})
         top_docs_ui = agent_result.get("top_docs", [])
+       
+        intent = agent_result.get("intent")
+        suggested_actions = agent_result.get("suggested_actions", [])
+        agent_steps = agent_result.get("steps", [])
 
     except Exception as e:
         print(f"Agent error: {e}")
         final_answer = "에이전트 처리 중 오류가 발생했습니다."
         citations_json = {"answer": [], "final": final_answer, "claims": []}
         top_docs_ui = []
+       
+        intent = "GENERAL_CHAT"
+        suggested_actions = []
+        agent_steps = [f"❌ 시스템 에러 발생: {str(e)}"]
 
     # 6) 데이터베이스 저장 및 응답 반환
     assistant_msg_id = repo.insert_message(session_id, user, "assistant", final_answer)
@@ -288,6 +306,9 @@ async def api_chat(request: Request):
         "expanded_query": query_norm.get("expanded_query"),
         "detected_terms": query_norm.get("detected_terms") or [],
         "expansion_terms": query_norm.get("expansion_terms") or {},
+        "intent": intent,
+        "suggested_actions": suggested_actions,
+        "agent_steps": agent_steps,
     }
 
 

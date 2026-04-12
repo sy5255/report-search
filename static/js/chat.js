@@ -1,3 +1,4 @@
+chat.js여기도 문제가 있을 수 있어. 
 let currentSessionId = null;
 
 // 현재 선택된 “assistant msg_id” 기준 evidence
@@ -9,6 +10,9 @@ let lastCitations = null;
 
 // UI에서 보여줄 topdocs 개수
 let topDocsShowN = 5;
+
+// 유저의 마지막 질문을 저장
+let lastRealUserQuery = "";
 
 function el(id){ return document.getElementById(id); }
 
@@ -127,7 +131,8 @@ function renderMarkdownSafe(mdText){
 
   if(typeof DOMPurify !== "undefined"){
     rendered = DOMPurify.sanitize(rendered, {
-      USE_PROFILES: { html: true }
+      USE_PROFILES: { html: true },
+      ADD_TAGS: ['details', 'summary'] // 추가 SQL 접기/펴기 태그 허용
     });
   }
 
@@ -145,7 +150,8 @@ function renderDocumentMarkdown(mdText){
 
   if(typeof DOMPurify !== "undefined"){
     rendered = DOMPurify.sanitize(rendered, {
-      USE_PROFILES: { html: true }
+      USE_PROFILES: { html: true },
+      ADD_TAGS: ['details', 'summary'] // 추가 SQL 접기/펴기 태그 허용
     });
   }
 
@@ -661,25 +667,77 @@ function appendMessage(role, content, metaText, msgId, extra = null){
   if(msgId) div.dataset.msgId = msgId;
 
   let extraHtml = "";
+  let intentHtml = "";
+  let chipsHtml = "";
+
+  // 1. 유저 메시지일 경우: 쿼리 해석기 카드 렌더링
   if(role === "user" && extra){
     extraHtml = buildQueryInterpretationCard(extra);
+  }
+
+  // 2. 어시스턴트 메시지일 경우: 인텐트 뱃지 & 액션 칩 렌더링
+  if(role === "assistant" && extra) {
+    // 🎯 인텐트 뱃지 생성
+    if(extra.intent) {
+      let intentLabel = extra.intent;
+      if(intentLabel === "DB_ANALYSIS") intentLabel = "📊 DB 통계 Agent";
+      else if(intentLabel === "RAG_KNOWLEDGE") intentLabel = "📖 문서 검색 Agent";
+      else if(intentLabel === "HYBRID_DB_RAG") intentLabel = "🔄 통합 분석 Agent";
+      else if(intentLabel === "GENERAL_CHAT") intentLabel = "💬 일반 대화";
+
+      intentHtml = `<span class="intent-badge intent-${extra.intent.toLowerCase()}">${intentLabel}</span>`;
+    }
+
+    // 🎯 액션 칩(스위치 버튼) 생성
+    if(extra.suggested_actions && extra.suggested_actions.length > 0) {
+      const chips = extra.suggested_actions.map(chip => {
+        return `<button class="action-chip" data-action="${escapeHtml(chip.label)}">${escapeHtml(chip.label)}</button>`;
+      }).join("");
+      chipsHtml = `<div class="action-chips">${chips}</div>`;
+    }
   }
 
   const contentClass = role === "assistant" ? "content markdown-body" : "content";
 
   div.innerHTML = `
     <div class="meta">
-      <span>${role.toUpperCase()}</span>
+      <div class="meta-left">
+        <span>${role.toUpperCase()}</span>
+        ${intentHtml} </div>
       <span>${escapeHtml(formatTimeForUI(metaText))}</span>
     </div>
     <div class="${contentClass}">${renderMessageContent(role, content)}</div>
     ${extraHtml}
-  `;
+    ${chipsHtml} `;
+
+  // 🎯 액션 칩 클릭 이벤트 리스너 달기
+  if(role === "assistant" && extra && extra.suggested_actions) {
+    div.querySelectorAll(".action-chip").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+       
+        const actionTag = btn.getAttribute("data-action");
+        console.log("버튼 클릭됨! 태그:", actionTag); // F12 콘솔 확인용
+
+        // 💡 [진단] 이전 질문 기억 변수가 없으면 알림 띄우기
+        if (typeof lastRealUserQuery === "undefined" || !lastRealUserQuery) {
+            alert("⚠️ 에러: 이전 질문을 기억하지 못하고 있습니다! 새로 질문을 입력해 주세요.");
+            return;
+        }
+
+        if (actionTag === "retry" || !actionTag) {
+          sendMessage();
+        } else {
+          sendMessage(actionTag);
+        }
+      });
+    });
+  }
 
   if(role === "assistant" && msgId){
     div.addEventListener("click", async (e)=>{
       const target = e.target;
-      if(target && (target.closest("a") || target.closest("button"))) return;
+      if(target && (target.closest("a") || target.closest("button") || target.closest("details"))) return;
 
       setSelectedAssistantMsg(msgId);
       await loadEvidenceByAssistantMsgId(msgId);
@@ -687,7 +745,7 @@ function appendMessage(role, content, metaText, msgId, extra = null){
   }
 
   chat.appendChild(div);
-  wireQueryInterpretCard(div);
+  if(role === "user" && extra) wireQueryInterpretCard(div);
   enhanceRenderedMessage(div);
   chat.scrollTop = chat.scrollHeight;
 }
@@ -1223,12 +1281,30 @@ function hideImgPreview(){
 }
 
 /* ---------- send message ---------- */
-async function sendMessage(){
-  const txt = el("userInput").value.trim();
-  if(!txt) return;
+async function sendMessage(overrideActionTag = null){
+  let rawSendText = "";     // 1. 서버로 실제로 날아갈 텍스트 (태그 포함)
+  let displayUserText = ""; // 2. 내 화면(말풍선)에 예쁘게 보여줄 텍스트
 
-  el("userInput").value = "";
-  appendMessage("user", txt, null, null);
+  if (overrideActionTag) {
+    // 🎯 버튼을 눌러서 호출한 경우
+    rawSendText = overrideActionTag + " " + lastRealUserQuery; // 예: "[RAG_KNOWLEDGE] 최근 불량 알려줘"
+   
+    // 외계어(태그) 대신 화면에는 예쁜 상태 메시지를 띄웁니다.
+    if (overrideActionTag === "[DB_ANALYSIS]") displayUserText = "📊 DB 통계 Agent 호출 중...";
+    else if (overrideActionTag === "[RAG_KNOWLEDGE]") displayUserText = "📖 문서 검색 Agent 호출 중...";
+    else displayUserText = "🔄 다시 검색 중...";
+  } else {
+    // 🎯 일반 텍스트 입력창에서 엔터/전송을 누른 경우
+    rawSendText = el("userInput").value.trim();
+    if(!rawSendText) return;
+   
+    lastRealUserQuery = rawSendText; // 다음 버튼 클릭을 대비해 진짜 질문을 저장!
+    displayUserText = rawSendText;
+    el("userInput").value = "";
+  }
+
+  // 화면에는 가공된 텍스트(displayUserText)를 띄웁니다.
+  appendMessage("user", displayUserText, null, null);
 
   const pendingId = "PENDING_" + Date.now();
   appendMessage("assistant", "⏳ 답변 생성 중...", null, pendingId);
@@ -1246,7 +1322,7 @@ async function sendMessage(){
 
   const payload = {
     session_id: currentSessionId,
-    user_text: txt,
+    user_text: rawSendText, // 서버에는 태그가 붙은 진짜 텍스트(rawSendText)를 보냅니다.
     index_names: indexNames,
     top_k: topK,
     filters: null
@@ -1276,7 +1352,14 @@ async function sendMessage(){
       }
     }
 
-    appendMessage("assistant", res.assistant_text, new Date().toISOString(), res.assistant_msg_id || null);
+    // 💡 [핵심 추가] 백엔드에서 받은 intent, suggested_actions, agent_steps를 묶어서 전달!
+    const extraData = {
+      intent: res.intent,
+      suggested_actions: res.suggested_actions,
+      agent_steps: res.agent_steps
+    };
+
+    appendMessage("assistant", res.assistant_text, new Date().toISOString(), res.assistant_msg_id || null, extraData);
     setSelectedAssistantMsg(res.assistant_msg_id || "");
 
     currentEvidenceAssistantMsgId = res.assistant_msg_id || null;
