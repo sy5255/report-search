@@ -97,13 +97,13 @@ def _get_specialist_prompt(intent: str, current_date: str) -> str:
        \n```sql\n(여기에 SQL 작성)\n```\n
        </details>
     """
-    
+
     # 📌 RAG 전문가 규칙
     rag_rules = """
     [RAG 전문가 엄격 규칙]
     1. 문서를 요약할 때는 **절대 마크다운 표(| 기호)를 사용하지 마세요.**
-    2. 대신 아래의 '카드형 포맷'을 엄격하게 사용하세요. 이때 인용구(>) 표시는 문장이 끝날때마다 남발하지 마세요.
-       ### 🔍 [주제] 분석 내용
+    2. 대신 아래의 '인용구(>) 기반 카드형 포맷'을 엄격하게 사용하세요. 인용구 (>)기호는 문장 하나하나가 끝날때마다 남발하지 말고, 문단 소제목이 끝날때만 사용하세요
+       ### 💡 [주제] 분석 내용
        > **📌 주요 내용**
        #### (상세 내용 작성)
     """
@@ -140,13 +140,18 @@ def _get_specialist_prompt(intent: str, current_date: str) -> str:
 # =====================================================================
 # 🧠 3. 문맥 맞춤형 액션 칩 (UI 버튼) 생성기
 # =====================================================================
-def _get_suggested_actions(intent: str) -> list:
+def _get_suggested_actions(intent: str, db_used: bool = False) -> list:
     if intent == "DB_ANALYSIS":
-        return [
-            # 💡 버튼 클릭 시 백엔드로 날려보낼 강제 인텐트 태그를 action에 담음
-            {"label": "📖 문서 검색 Agent 호출하기", "action": "[RAG_KNOWLEDGE]"},
-            {"label": "⚠️ 조건을 넓혀서 다시 검색", "action": "retry"}
+        actions = [
+            {"label": "📖 문서 검색 Agent 호출하기", "action": "[RAG_KNOWLEDGE]"}
         ]
+        # DB 쿼리가 실행되었을 때만 '재검색' 기능 활성화
+        if db_used:
+            actions.append({"label": "⚠️ 조건을 넓혀서 다시 검색", "action": "retry"})
+        else:
+            actions.append({"label": "⚠️ 조건을 넓혀서 다시 검색", "action": "none", "disabled": True})
+        return actions
+
     elif intent == "RAG_KNOWLEDGE":
         return [
             {"label": "📊 DB 통계 Agent 호출하기", "action": "[DB_ANALYSIS]"}
@@ -194,10 +199,10 @@ def _to_ui_doc_from_hit(h: dict) -> dict:
 def run_agent_loop(user_id: str, user_query: str, previous_messages: list, excluded_indexes: set, ui_top_k: int, forced_intent: str = None) -> dict:
     client = _make_client(user_id) # (기존에 정의된 클라이언트 생성 함수)
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
-    
+   
     # 💡 [1. 강제 인텐트 적용 및 로그 바구니 생성]
     if forced_intent:
-        intent = forced_intent
+        intent = forced_intent.replace("[", "").replace("]","").strip() #forced_intent
         print(f"[Agent] 유저 버튼 클릭으로 인한 강제 인텐트 적용: {intent}")
         execution_steps = [f"🎯 유저 요청으로 Agent 강제 전환: {intent}"]
     else:
@@ -207,7 +212,7 @@ def run_agent_loop(user_id: str, user_query: str, previous_messages: list, exclu
         execution_steps = [f"🔍 질문 의도 파악 완료: {intent}"]
 
     system_prompt = _get_specialist_prompt(intent, current_date)
-    
+   
     messages = [{"role": "system", "content": system_prompt}]
     if previous_messages:
         messages.extend(previous_messages[-4:])
@@ -220,12 +225,13 @@ def run_agent_loop(user_id: str, user_query: str, previous_messages: list, exclu
     elif intent == "RAG_KNOWLEDGE":
         available_tools = [t for t in TOOLS_SCHEMA if t["function"]["name"] == "search_documents"]
 
-    MAX_STEPS = 7
-    all_collected_hits = [] 
+    MAX_STEPS = 10
+    all_collected_hits = []
+    used_db = False # DB 도구 사용 여부를 추적하는 변수
 
     for step in range(MAX_STEPS):
         print(f"\n[Agent Step {step+1}] {intent} 추론 중... (사용 가능 도구: {[t['function']['name'] for t in available_tools]})")
-        
+       
         response = client.chat.completions.create(
             model="openai/gpt-oss-120b",
             messages=messages,
@@ -233,21 +239,25 @@ def run_agent_loop(user_id: str, user_query: str, previous_messages: list, exclu
             tool_choice="auto",
             temperature=0.0
         )
-        
+       
         ai_message = response.choices[0].message
         messages.append(ai_message)
-        
+       
         if getattr(ai_message, 'tool_calls', None):
             for tool_call in ai_message.tool_calls:
                 func_name = tool_call.function.name
-                
+
+                # DB 도구가 호출되었다면 플래그를 True로 변경
+                if func_name == "query_database":
+                    used_db = True
+               
                 # 💡 [3. 실행 중인 도구 로그 기록]
                 if func_name == "query_database":
                     execution_steps.append(f"📊 [Step {step+1}] DB 통계 데이터를 조회하고 있습니다...")
                 elif func_name == "search_documents":
                     execution_steps.append(f"📖 [Step {step+1}] 사내 기술 문서를 검색하고 있습니다...")
 
-                try: 
+                try:
                     args = json.loads(tool_call.function.arguments)
                 except json.JSONDecodeError as e:
                     messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": "Error: JSON 파싱 실패"})
@@ -255,22 +265,22 @@ def run_agent_loop(user_id: str, user_query: str, previous_messages: list, exclu
 
                 print(f"  👉 실행 도구: {func_name} | 파라미터: {args}")
                 tool_result_str, hits = execute_tool(func_name, args) # (기존에 정의된 툴 실행 함수)
-                
+               
                 if func_name == "query_database" and ("[]" in tool_result_str or "0건" in tool_result_str):
                     tool_result_str += "\n[시스템 알림]: 검색 결과가 0건입니다. 방금 넣은 모듈, 라인 등의 조건을 지우고 불량명 LIKE 검색 위주로 쿼리를 재작성하여 다시 도구를 호출해 보세요."
-                
-                if hits: 
+               
+                if hits:
                     all_collected_hits.extend(hits)
                 messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": tool_result_str})
             continue
-
+        
         else:
             print("  ✅ 최종 답변 생성 완료")
             final_answer = ai_message.content or ""
-            
+           
             # 💡 [4. 최종 완료 로그 기록]
             execution_steps.append("✅ 분석 및 최종 답변 생성 완료")
-            
+           
             citations_json = {"answer": [], "final": final_answer, "claims": []}
             top_docs_ui = []
             if all_collected_hits:
@@ -286,18 +296,18 @@ def run_agent_loop(user_id: str, user_query: str, previous_messages: list, exclu
                     citation_res = _call_json(client, citation_messages, CITATION_MAX_TOKENS, 0.0)
                     claims = citation_res.get("claims") or []
                     citations_json = {"answer": _normalize_claims_to_answer_list(claims), "final": final_answer, "claims": claims}
-                except Exception as e: 
+                except Exception as e:
                     print(f"  ❌ 인용구 생성 실패: {e}")
 
             return {
                 "intent": intent,
                 "final_answer": final_answer,
-                "suggested_actions": _get_suggested_actions(intent),
+                "suggested_actions": _get_suggested_actions(intent, db_used=used_db),
                 "citations": citations_json,
                 "top_docs": top_docs_ui,
                 "steps": execution_steps # 💡 실행 로그를 포함하여 리턴
             }
-            
+           
     # 에이전트 루프 초과 시
     execution_steps.append("❌ 에이전트 처리 단계를 초과하여 종료되었습니다.")
     return {

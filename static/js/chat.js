@@ -1,4 +1,3 @@
-chat.js여기도 문제가 있을 수 있어. 
 let currentSessionId = null;
 
 // 현재 선택된 “assistant msg_id” 기준 evidence
@@ -691,7 +690,16 @@ function appendMessage(role, content, metaText, msgId, extra = null){
     // 🎯 액션 칩(스위치 버튼) 생성
     if(extra.suggested_actions && extra.suggested_actions.length > 0) {
       const chips = extra.suggested_actions.map(chip => {
-        return `<button class="action-chip" data-action="${escapeHtml(chip.label)}">${escapeHtml(chip.label)}</button>`;
+        // disabled 속성이 있는 경우 회색의 비활성화된 버튼으로 렌더링
+        if (chip.disabled){
+          return `<button class="action-chip" disabled
+                    style="opacity: 0.5; cursor: not-allowed; background-color: #555; color: #ccc;"
+                    title="해당 질문에는 DB 데이터 조회가 사용되지 않아 비활성화되었습니다.">
+                    ${escapeHtml(chip.label)}
+                  </button>`;
+        }
+        
+        return `<button class="action-chip" data-action="${escapeHtml(chip.action)}">${escapeHtml(chip.label)}</button>`;
       }).join("");
       chipsHtml = `<div class="action-chips">${chips}</div>`;
     }
@@ -725,11 +733,7 @@ function appendMessage(role, content, metaText, msgId, extra = null){
             return;
         }
 
-        if (actionTag === "retry" || !actionTag) {
-          sendMessage();
-        } else {
-          sendMessage(actionTag);
-        }
+        sendMessage(actionTag);
       });
     });
   }
@@ -1287,12 +1291,17 @@ async function sendMessage(overrideActionTag = null){
 
   if (overrideActionTag) {
     // 🎯 버튼을 눌러서 호출한 경우
-    rawSendText = overrideActionTag + " " + lastRealUserQuery; // 예: "[RAG_KNOWLEDGE] 최근 불량 알려줘"
-   
-    // 외계어(태그) 대신 화면에는 예쁜 상태 메시지를 띄웁니다.
-    if (overrideActionTag === "[DB_ANALYSIS]") displayUserText = "📊 DB 통계 Agent 호출 중...";
-    else if (overrideActionTag === "[RAG_KNOWLEDGE]") displayUserText = "📖 문서 검색 Agent 호출 중...";
-    else displayUserText = "🔄 다시 검색 중...";
+    if (overrideActionTag === "retry") {
+      // 재검색일 경우: 강제로 DB 분석 태그를 붙여서 이전 질문 재전송 + '조건 완화'에 대한 명시적인 프롬프트를 덧붙여서 전송.
+      rawSendText = "[DB_ANALYSIS] 이전 검색 결과가 부족하거나 사용자가 더 넓은 범위를 원합니다. 기존에 적용했던 엄격한 일치 조건 (공정, 모듈, 라인 등)을 최소화하거나 제거하고, 가장 핵심이 되는 키워드만 사용하여 'LIKE' 검색 위주로 조건을 넓혀서 다음 질문에 대해 다시 쿼리를 작성해줘: " + lastRealUserQuery;
+      displayUserText = "🔄 조건을 넓혀서 다시 검색 중...";
+    } else {
+      rawSendText = overrideActionTag + " " + lastRealUserQuery;
+
+      if (overrideActionTag === "[DB_ANALYSIS]") displayUserText = "📊 DB 통계 Agent 호출 중...";
+      else if (overrideActionTag === "[RAG_KNOWLEDGE]") displayUserText = "📖 문서 검색 Agent 호출 중...";
+      else displayUserText = "🔄 다시 검색 중...";
+    }
   } else {
     // 🎯 일반 텍스트 입력창에서 엔터/전송을 누른 경우
     rawSendText = el("userInput").value.trim();
@@ -1383,7 +1392,7 @@ async function sendMessage(overrideActionTag = null){
     el("userInput").disabled = false;
     el("userInput").focus();
   }
-}
+} 
 
 /* ---------- topdocs show N ---------- */
 function applyTopDocsN(){
