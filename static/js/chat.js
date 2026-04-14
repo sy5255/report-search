@@ -15,6 +15,24 @@ let lastRealUserQuery = "";
 
 function el(id){ return document.getElementById(id); }
 
+// 문서 검색 결과 유무에 따라 우측 패널을 열고 닫는 함수
+function toggleEvidencePanel(hasDocs) {
+  const rightPanel = document.querySelector(".right");
+  const resizer2 = document.getElementById("resizer2");
+
+  if (!rightPanel) return;
+
+  if (hasDocs) {
+    // 문서가 있으면 패널 열기
+    rightPanel.classList.remove("collapsed");
+    if (resizer2) resizer2.classList.remove("collapsed");
+  } else {
+    // 문서가 없으면 패널 닫기 (채팅창 확장)
+    rightPanel.classList.add("collapsed");
+    if (resizer2) resizer2.classList.add("collapsed");
+  }
+}
+
 async function apiGet(url){
   const r = await fetch(url, {credentials:"include"});
   if(!r.ok) throw new Error(await r.text());
@@ -621,6 +639,16 @@ async function loadSession(sessionId){
         detected_terms: log.detected_terms || []
       };
     }
+    // 어시스턴트(LLM)의 과거 메시지일 경우 인텐트/액션 데이터 복구
+    else if (m.role === "assistant") {
+      if (m.intent || (m.suggested_actions && m.suggested_actions.length > 0)) {
+        extra = {
+          intent: m.intent,
+          suggested_actions: m.suggested_actions,
+          agent_steps: m.agent_steps
+        };
+      }
+    }
     appendMessage(m.role, m.content, m.created_at, m.msg_id, extra);
   });
 
@@ -647,6 +675,11 @@ function newSession(){
   currentSessionId = null;
   el("chatArea").innerHTML = "";
   clearEvidencePanels();
+
+  // 완전히 새로운 대화를 시작할 때만 패널 닫기.
+  if (typeof toggleEvidencePanel === "function") {
+    toggleEvidencePanel(false)
+  }
   el("userInput").focus();
 }
 
@@ -728,12 +761,31 @@ function appendMessage(role, content, metaText, msgId, extra = null){
         console.log("버튼 클릭됨! 태그:", actionTag); // F12 콘솔 확인용
 
         // 💡 [진단] 이전 질문 기억 변수가 없으면 알림 띄우기
-        if (typeof lastRealUserQuery === "undefined" || !lastRealUserQuery) {
-            alert("⚠️ 에러: 이전 질문을 기억하지 못하고 있습니다! 새로 질문을 입력해 주세요.");
-            return;
+        //if (typeof lastRealUserQuery === "undefined" || !lastRealUserQuery) {
+        //    alert("⚠️ 에러: 이전 질문을 기억하지 못하고 있습니다! 새로 질문을 입력해 주세요.");
+        //    return;
+        //}
+
+        // 화면을 위로 탐색하여 이 답변 "바로 전"의 유저 질문을 찾아냅니다. 
+        let targetQuery = lastRealUserQuery;
+        let prevNode = div.previousElementSibling;
+        while(prevNode) {
+          if(prevNode.classList.contains("user")) {
+            const contentEl = prevNode.querySelector(".content")
+            if (contentEl) {
+              // 화면에 있는 텍스트를 그대로 가져옴.
+              targetQuery = contentEl.innerText || contentEl.textContext;
+            }
+            break;
+          }
+          prevNode = prevNode.previousElementSibling;
         }
 
-        sendMessage(actionTag);
+        if (!targetQuery) {
+          alert("⚠️ 에러: 이전 질문을 기억하지 못하고 있습니다! 새로 질문을 입력해 주세요.");
+          return;
+        }
+        sendMessage(actionTag, targetQuery.trim());
       });
     });
   }
@@ -883,6 +935,9 @@ function renderTopDocsFiltered(){
   const n = Math.max(1, Math.min(topDocsShowN, lastTopDocs.length || 0));
   const docs = (lastTopDocs || []).slice(0, n);
 
+  // 렌더링할 문서가 1개라도 있는지 확인하고 패널 상태 변경
+  toggleEvidencePanel(docs.length > 0);
+
   docs.forEach((d, i) => {
     const title = stripEnriched(d.title || "(no title)");
     const score = (d.score == null) ? "" : Number(d.score).toFixed(5);
@@ -921,7 +976,6 @@ function renderTopDocsFiltered(){
     box.appendChild(card);
   });
 }
-
 /* ---------- citations ---------- */
 function renderCitations(citations){
   const box = el("citations");
@@ -1285,23 +1339,29 @@ function hideImgPreview(){
 }
 
 /* ---------- send message ---------- */
-async function sendMessage(overrideActionTag = null){
+async function sendMessage(overrideActionTag = null, specificQuery = null){
   let rawSendText = "";     // 1. 서버로 실제로 날아갈 텍스트 (태그 포함)
   let displayUserText = ""; // 2. 내 화면(말풍선)에 예쁘게 보여줄 텍스트
 
   if (overrideActionTag) {
+    // 전달받은 특정 질문이 있으면 그걸 쓰고, 없으면 글로벌 변수 사용
+    const queryToUse = specificQuery || lastRealUserQuery;
+
     // 🎯 버튼을 눌러서 호출한 경우
     if (overrideActionTag === "retry") {
       // 재검색일 경우: 강제로 DB 분석 태그를 붙여서 이전 질문 재전송 + '조건 완화'에 대한 명시적인 프롬프트를 덧붙여서 전송.
-      rawSendText = "[DB_ANALYSIS] 이전 검색 결과가 부족하거나 사용자가 더 넓은 범위를 원합니다. 기존에 적용했던 엄격한 일치 조건 (공정, 모듈, 라인 등)을 최소화하거나 제거하고, 가장 핵심이 되는 키워드만 사용하여 'LIKE' 검색 위주로 조건을 넓혀서 다음 질문에 대해 다시 쿼리를 작성해줘: " + lastRealUserQuery;
+      rawSendText = "[DB_ANALYSIS] 이전 검색 결과가 부족하거나 사용자가 더 넓은 범위를 원합니다. 기존에 적용했던 엄격한 일치 조건 (공, 모, 라 등)을 최소화하거나 제거하고, 가장 핵심이 되는 키워드만 사용하여 'LIKE' 검색 위주로 조건을 넓혀서 다음 질문에 대해 다시 쿼리를 작성해줘: " + lastRealUserQuery; 
       displayUserText = "🔄 조건을 넓혀서 다시 검색 중...";
     } else {
-      rawSendText = overrideActionTag + " " + lastRealUserQuery;
+      rawSendText = overrideActionTag + " " + queryToUse;
 
       if (overrideActionTag === "[DB_ANALYSIS]") displayUserText = "📊 DB 통계 Agent 호출 중...";
       else if (overrideActionTag === "[RAG_KNOWLEDGE]") displayUserText = "📖 문서 검색 Agent 호출 중...";
       else displayUserText = "🔄 다시 검색 중...";
     }
+
+    lastRealUserQuery = queryToUse;
+    
   } else {
     // 🎯 일반 텍스트 입력창에서 엔터/전송을 누른 경우
     rawSendText = el("userInput").value.trim();
@@ -1392,7 +1452,7 @@ async function sendMessage(overrideActionTag = null){
     el("userInput").disabled = false;
     el("userInput").focus();
   }
-} 
+}
 
 /* ---------- topdocs show N ---------- */
 function applyTopDocsN(){

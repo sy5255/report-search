@@ -880,3 +880,17 @@ body.dragging { user-select:none; }
 /* 내부 코드 블록 여백 조정 */
 .markdown-body details pre { margin-top: 0; margin-bottom: 0; }
 
+/* 메인 채팅창과 우측 패널에 부드러운 전환 효과 적용 */
+.main {
+  transition: flex 0.3s ease;
+}
+
+/* 패널이 접혔을 때 (아예 확면에서 제거) */
+.right.collapsed {
+  display: none !important;
+}
+
+/* 리사이저 바도 숨김 처리 */
+#resizer2.collapsed {
+  display: none !important;
+}

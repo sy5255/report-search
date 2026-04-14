@@ -119,20 +119,35 @@ async def api_create_session(request: Request):
     sid = repo.create_session(user, title)
     return {"session_id": sid}
 
-
 @app.get("/api/sessions/{session_id}")
 async def api_get_session_messages(session_id: str, request: Request):
     user = _require_user(request)
     msgs = repo.get_messages(session_id, user)
     search_logs = repo.list_search_logs_for_session(session_id, user)
+
+    artifacts_by_ast = {}
+    try:
+        artifacts_by_ast = repo.get_artifacts_for_session(session_id, user)
+    except Exception as e:
+        print(f"Artifacts 로드 실패: {e}")
+
     search_log_by_user_msg_id = {}
     for log in search_logs or []:
         user_msg_id = log.get("user_msg_id")
         if not user_msg_id:
             continue
         search_log_by_user_msg_id[user_msg_id] = log
-    return {"messages": msgs, "search_logs_by_user_msg_id": search_log_by_user_msg_id}
 
+    # 과거 assistant 메시지에 intent와 액션 버튼 정보를 채워넣음
+    for m in msgs:
+        if m["role"] == "assistant":
+            ast_id = m.get("msg_id")
+            rag_info = artifacts_by_ast.get(ast_id, {})
+            m["intent"] = rag_info.get("intent")
+            m["suggested_actions"] = rag_info.get("suggested_actions", [])
+            m["agent_steps"] = rag_info.get("agent_steps", [])
+
+    return {"messages": msgs, "search_logs_by_user_msg_id": search_log_by_user_msg_id}
 
 # =========================
 # API: chat (Agent Loop 적용)
@@ -257,7 +272,10 @@ async def api_chat(request: Request):
         "expanded_query": query_norm.get("expanded_query"),
         "detected_terms": query_norm.get("detected_terms") or [],
         "expansion_terms": query_norm.get("expansion_terms") or {},
-        "top_docs": top_docs_ui
+        "top_docs": top_docs_ui,
+        "intent" : intent,
+        "suggested_actions" : suggested_actions,
+        "agent_steps" : agent_steps
     }
     repo.insert_turn_artifact(
         session_id=session_id,

@@ -390,3 +390,30 @@ def list_search_logs_for_session(session_id: str, user_id: str):
     finally:
         cur.close()
         conn.close()
+
+def get_artifacts_for_session(session_id: str, user_id: str):
+    """세션 내 모든 어시스턴트 메시지의 rag_response(인텐트, 액션 포함)를 한번에 조회"""
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            "SELECT assistant_msg_id, rag_response_json "
+            "FROM chat_turn_artifacts "
+            "WHERE session_id=%s AND user_id=%s",
+            (session_id, user_id)
+        )
+        rows = cur.fetchall() or []
+        res = {}
+        for r in rows:
+            msg_id = r.get("assistant_msg_id")
+            rag = r.get("rag_response_json")
+            if isinstance(rag, str):
+                try:
+                    rag = json.loads(rag)
+                except:
+                    pass
+            res[msg_id] = rag or {}
+        return res
+    finally:
+        cur.close()
+        conn.close()
