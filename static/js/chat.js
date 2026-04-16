@@ -17,19 +17,16 @@ function el(id){ return document.getElementById(id); }
 
 // 문서 검색 결과 유무에 따라 우측 패널을 열고 닫는 함수
 function toggleEvidencePanel(hasDocs) {
-  const rightPanel = document.querySelector(".right");
-  const resizer2 = document.getElementById("resizer2");
-
+  const rightPanel = el("rightPanel");
+  const resizer2 = el("resizer2");
   if (!rightPanel) return;
 
   if (hasDocs) {
-    // 문서가 있으면 패널 열기
-    rightPanel.classList.remove("collapsed");
-    if (resizer2) resizer2.classList.remove("collapsed");
+    rightPanel.classList.remove("hidden");
+    if(resizer2) resizer2.classList.remove("hidden");
   } else {
-    // 문서가 없으면 패널 닫기 (채팅창 확장)
-    rightPanel.classList.add("collapsed");
-    if (resizer2) resizer2.classList.add("collapsed");
+    rightPanel.classList.add("hidden");
+    if(resizer2) resizer2.classList.add("hidden");
   }
 }
 
@@ -153,8 +150,29 @@ function renderMarkdownSafe(mdText){
     });
   }
 
+  // 인용구 변환: [1], [2]를 citation-pill로 교체
+  rendered = rendered.replace(/\[(\d+)\]/g, '<span class="citation-pill" onclick="openDocFromCitationIndex($1)">$1</span>');
+
   return rendered;
 }
+
+// document 모달 호출 시 인덱스로 찾기 위해 래핑 함수를 하나 만듦
+window.openDocFromCitationIndex = function(idxStr) {
+  // citations에서 idx 인덱스에 해당하는 것을 찾아서 열어줍니다.
+  const idx = parseInt(idxStr, 10) - 1;
+  const ans = (lastCitations && lastCitations.answer) ? lastCitations.answer : [];
+  if (ans[idx] && ans[idx].citations && ans[idx].citations.length > 0) {
+     const c = ans[idx].citations[0];
+     openDocFromCitation(c.doc_id, c.chunk_id, c.quote || "");
+  } else {
+    // topDocs에서 idx로 바로 찾기 (fallback)
+    if(lastTopDocs && lastTopDocs[idx]) {
+       openDocModal(lastTopDocs[idx], null);
+    } else {
+       console.log("No document found for index: " + idxStr);
+    }
+  }
+};
 
 function renderDocumentMarkdown(mdText){
   const raw = String(mdText || "");
@@ -477,17 +495,14 @@ function setupHorizontalResizer(resizerId, topPanelSelector, bottomPanelSelector
 
 /* ---------- panel maximize ---------- */
 function setupPanelMaxButtons(){
-  document.querySelectorAll(".panel-max").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
-      const target = btn.dataset.target;
-      document.querySelectorAll(".panel").forEach(p=>{
-        if(p.dataset.panel === target){
-          p.classList.toggle("maximized");
-        } else {
-          p.classList.remove("maximized");
-        }
-      });
-    });
+  document.querySelectorAll(".panel-max").forEach(btn => {
+    btn.onclick = () => {
+        const target = btn.dataset.target;
+        document.querySelectorAll(".panel").forEach(p => {
+            if(p.dataset.panel === target) p.classList.toggle("maximized");
+            else p.classList.remove("maximized");
+        });
+    };
   });
 }
 
@@ -591,32 +606,38 @@ function renderSessions(sessions){
   box.innerHTML = "";
   sessions.forEach(s => {
     const div = document.createElement("div");
-    div.className = "session-item";
+    // transition-all 제거
+    div.className = "session-card group flex flex-col gap-1 p-3 mx-2 mb-2 rounded-xl bg-surface-container-low hover:bg-surface-container border border-surface-container cursor-pointer";
     div.innerHTML = `
-      <div class="session-row">
-        <div class="title">${escapeHtml(s.title || "Untitled")}</div>
-        <button class="icon-btn danger" title="Archive">🗑</button>
+      <div class="flex items-center justify-between gap-2 overflow-hidden">
+        <div class="session-title text-xs font-bold text-on-surface truncate flex-1">${escapeHtml(s.title || "Untitled")}</div>
+        <button class="session-delete-btn icon-btn danger opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-error/10 text-error shrink-0" title="Delete">
+          <span class="material-symbols-outlined text-[14px]">delete</span>
+        </button>
       </div>
-      <div class="time">${escapeHtml(s.updated_at || "")}</div>
+      <div class="session-date text-[10px] text-secondary truncate">${escapeHtml(s.updated_at || "")}</div>
     `;
 
-    div.onclick = (ev) => {
-      if(ev.target && ev.target.classList.contains("icon-btn")) return;
+    div.addEventListener("click", (ev) => {
+      if(ev.target && ev.target.closest("button")) return;
       loadSession(s.session_id);
-    };
+    });
 
-    div.querySelector(".icon-btn").onclick = async (ev) => {
-      ev.stopPropagation();
-      if(!confirm("이 대화를 목록에서 제거할까요?")) return;
-      await apiPost(`/api/sessions/${encodeURIComponent(s.session_id)}/archive`, {});
-      if(currentSessionId === s.session_id){
-        currentSessionId = null;
-        el("chatArea").innerHTML = "";
-        clearEvidencePanels();
-      }
-      await refreshSessions();
-    };
-
+    const deleteBtn = div.querySelector("button");
+    if(deleteBtn) {
+      deleteBtn.addEventListener("click", async (ev) => {
+        ev.stopPropagation(); 
+        if(!confirm("이 대화를 목록에서 제거할까요?")) return;
+        await apiPost(`/api/sessions/${encodeURIComponent(s.session_id)}/archive`, {});
+        if(currentSessionId === s.session_id){
+          currentSessionId = null;
+          el("chatArea").innerHTML = "";
+          clearEvidencePanels();
+          if (typeof toggleEvidencePanel === "function") toggleEvidencePanel(false);
+        }
+        await refreshSessions();
+      });
+    }
     box.appendChild(div);
   });
 }
@@ -683,107 +704,106 @@ function newSession(){
   el("userInput").focus();
 }
 
+// 선택된 카드 스타일링 업데이트 함수도 수정
 function setSelectedAssistantMsg(msgId){
-  document.querySelectorAll(".msg.assistant.selected").forEach(x => x.classList.remove("selected"));
+  document.querySelectorAll(".assistant-card").forEach(x => {
+      x.classList.remove("ring-2", "ring-primary", "shadow-md", "bg-primary/5");
+  });
   if(!msgId) return;
 
-  const node = document.querySelector(`.msg.assistant[data-msg-id="${CSS.escape(msgId)}"]`);
-  if(node) node.classList.add("selected");
+  const node = document.querySelector(`.msg.assistant[data-msg-id="${CSS.escape(msgId)}"] .assistant-card`);
+  if(node) {
+      node.classList.add("ring-2", "ring-primary", "shadow-md", "bg-primary/5");
+  }
 }
 
 /* ---------- chat messages ---------- */
 function appendMessage(role, content, metaText, msgId, extra = null){
   const chat = el("chatArea");
   const div = document.createElement("div");
-  div.className = "msg " + role;
+  
+  div.className = role === "user" 
+    ? "msg user flex justify-end mb-6 w-full" 
+    : "msg assistant flex justify-start mb-8 w-full";
+  
   if(msgId) div.dataset.msgId = msgId;
 
   let extraHtml = "";
   let intentHtml = "";
   let chipsHtml = "";
 
-  // 1. 유저 메시지일 경우: 쿼리 해석기 카드 렌더링
   if(role === "user" && extra){
-    extraHtml = buildQueryInterpretationCard(extra);
+    extraHtml = buildQueryInterpretationCard(extra); 
   }
 
-  // 2. 어시스턴트 메시지일 경우: 인텐트 뱃지 & 액션 칩 렌더링
   if(role === "assistant" && extra) {
-    // 🎯 인텐트 뱃지 생성
-    if(extra.intent) {
-      let intentLabel = extra.intent;
-      if(intentLabel === "DB_ANALYSIS") intentLabel = "📊 DB 통계 Agent";
-      else if(intentLabel === "RAG_KNOWLEDGE") intentLabel = "📖 문서 검색 Agent";
-      else if(intentLabel === "HYBRID_DB_RAG") intentLabel = "🔄 통합 분석 Agent";
-      else if(intentLabel === "GENERAL_CHAT") intentLabel = "💬 일반 대화";
+    let agentName = "Intellectual Curator";
+    let agentIcon = "robot_2";
+    let agentColor = "text-secondary dark:text-[#94a3b8]";
 
-      intentHtml = `<span class="intent-badge intent-${extra.intent.toLowerCase()}">${intentLabel}</span>`;
+    if(extra.intent) {
+      if(extra.intent === "DB_ANALYSIS") { agentName = "DB Stats Agent"; agentIcon = "monitoring"; agentColor = "text-primary dark:text-[#60a5fa]"; }
+      else if(extra.intent === "RAG_KNOWLEDGE") { agentName = "Document Search Agent"; agentIcon = "description"; agentColor = "text-primary dark:text-[#60a5fa]"; }
+      else if(extra.intent === "HYBRID_DB_RAG") { agentName = "Hybrid Analysis Agent"; agentIcon = "sync"; agentColor = "text-[#b45309] dark:text-[#fbbf24]"; }
+      
+      intentHtml = `
+        <div class="flex items-center gap-3 mb-4">
+            <div class="w-8 h-8 rounded bg-surface-container-high dark:bg-[#1f2b4a] flex items-center justify-center">
+                <span class="material-symbols-outlined ${agentColor} text-sm">${agentIcon}</span>
+            </div>
+            <div>
+                <span class="text-xs font-bold font-headline ${agentColor}">${agentName}</span>
+                <span class="mx-2 text-[10px] text-outline-variant dark:text-[#475569]">•</span>
+                <span class="text-[10px] text-outline-variant dark:text-[#475569]">${escapeHtml(formatTimeForUI(metaText))}</span>
+            </div>
+        </div>`;
     }
 
-    // 🎯 액션 칩(스위치 버튼) 생성
     if(extra.suggested_actions && extra.suggested_actions.length > 0) {
       const chips = extra.suggested_actions.map(chip => {
-        // disabled 속성이 있는 경우 회색의 비활성화된 버튼으로 렌더링
-        if (chip.disabled){
-          return `<button class="action-chip" disabled
-                    style="opacity: 0.5; cursor: not-allowed; background-color: #555; color: #ccc;"
-                    title="해당 질문에는 DB 데이터 조회가 사용되지 않아 비활성화되었습니다.">
-                    ${escapeHtml(chip.label)}
-                  </button>`;
-        }
-        
-        return `<button class="action-chip" data-action="${escapeHtml(chip.action)}">${escapeHtml(chip.label)}</button>`;
+        if (chip.disabled) return `<button class="px-4 py-2 bg-surface-container dark:bg-[#1f2b4a] text-outline dark:text-[#94a3b8] rounded-full text-[11px] font-semibold flex items-center gap-2 cursor-not-allowed opacity-60" disabled><span class="material-symbols-outlined text-sm">block</span> ${escapeHtml(chip.label)}</button>`;
+        // transition-all 제거
+        return `<button class="action-chip px-4 py-2 border border-outline-variant dark:border-[#475569] hover:bg-surface-container dark:hover:bg-[#1f2b4a] dark:text-[#e7eefc] rounded-full text-[11px] font-semibold flex items-center gap-2 hover:-translate-y-0.5" data-action="${escapeHtml(chip.action)}"><span class="material-symbols-outlined text-sm">bolt</span> ${escapeHtml(chip.label)}</button>`;
       }).join("");
-      chipsHtml = `<div class="action-chips">${chips}</div>`;
+      chipsHtml = `<div class="pt-4 mt-4 border-t border-surface-container dark:border-[#1f2b4a] flex flex-wrap items-center gap-3">${chips}</div>`;
     }
   }
 
-  const contentClass = role === "assistant" ? "content markdown-body" : "content";
+  if (role === "user") {
+    // 💡 [핵심 복구] 지워졌던 ${extraHtml}을 다시 제자리에 넣었습니다! (이슈 3 해결)
+    div.innerHTML = `
+      <div class="max-w-[85%] flex flex-col items-end">
+        <div class="user-bubble-inner bg-primary text-on-primary p-4 rounded-2xl rounded-tr-none shadow-sm flex flex-col gap-3 w-full">
+          <div class="content text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(content)}</div>
+          ${extraHtml}
+        </div>
+        <div class="text-[10px] text-outline-variant dark:text-[#94a3b8] mt-1">${escapeHtml(formatTimeForUI(metaText))}</div>
+      </div>`;
+  } else {
+    div.innerHTML = `
+      <div class="assistant-card w-full max-w-[90%] bg-white dark:bg-[#0f1a33] border border-surface-container dark:border-[#1f2b4a] rounded-2xl p-6 hover:shadow-md cursor-pointer group/ai-card">
+        ${intentHtml}
+        <div class="content markdown-body text-sm leading-relaxed text-on-surface dark:text-[#e7eefc] pl-11">
+            ${renderMessageContent(role, content)}
+        </div>
+        <div class="pl-11">${chipsHtml}</div>
+      </div>`;
+  }
 
-  div.innerHTML = `
-    <div class="meta">
-      <div class="meta-left">
-        <span>${role.toUpperCase()}</span>
-        ${intentHtml} </div>
-      <span>${escapeHtml(formatTimeForUI(metaText))}</span>
-    </div>
-    <div class="${contentClass}">${renderMessageContent(role, content)}</div>
-    ${extraHtml}
-    ${chipsHtml} `;
-
-  // 🎯 액션 칩 클릭 이벤트 리스너 달기
   if(role === "assistant" && extra && extra.suggested_actions) {
     div.querySelectorAll(".action-chip").forEach(btn => {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
-       
         const actionTag = btn.getAttribute("data-action");
-        console.log("버튼 클릭됨! 태그:", actionTag); // F12 콘솔 확인용
-
-        // 💡 [진단] 이전 질문 기억 변수가 없으면 알림 띄우기
-        //if (typeof lastRealUserQuery === "undefined" || !lastRealUserQuery) {
-        //    alert("⚠️ 에러: 이전 질문을 기억하지 못하고 있습니다! 새로 질문을 입력해 주세요.");
-        //    return;
-        //}
-
-        // 화면을 위로 탐색하여 이 답변 "바로 전"의 유저 질문을 찾아냅니다. 
         let targetQuery = lastRealUserQuery;
         let prevNode = div.previousElementSibling;
         while(prevNode) {
           if(prevNode.classList.contains("user")) {
-            const contentEl = prevNode.querySelector(".content")
-            if (contentEl) {
-              // 화면에 있는 텍스트를 그대로 가져옴.
-              targetQuery = contentEl.innerText || contentEl.textContext;
-            }
+            const contentEl = prevNode.querySelector(".content");
+            if (contentEl) targetQuery = contentEl.innerText || contentEl.textContent;
             break;
           }
           prevNode = prevNode.previousElementSibling;
-        }
-
-        if (!targetQuery) {
-          alert("⚠️ 에러: 이전 질문을 기억하지 못하고 있습니다! 새로 질문을 입력해 주세요.");
-          return;
         }
         sendMessage(actionTag, targetQuery.trim());
       });
@@ -794,7 +814,6 @@ function appendMessage(role, content, metaText, msgId, extra = null){
     div.addEventListener("click", async (e)=>{
       const target = e.target;
       if(target && (target.closest("a") || target.closest("button") || target.closest("details"))) return;
-
       setSelectedAssistantMsg(msgId);
       await loadEvidenceByAssistantMsgId(msgId);
     });
@@ -805,6 +824,7 @@ function appendMessage(role, content, metaText, msgId, extra = null){
   enhanceRenderedMessage(div);
   chat.scrollTop = chat.scrollHeight;
 }
+
 
 /* ---------- evidence ---------- */
 async function loadEvidenceByAssistantMsgId(assistantMsgId){
@@ -931,59 +951,57 @@ function pickMailMeta(af){
 function renderTopDocsFiltered(){
   const box = el("topDocs");
   box.innerHTML = "";
-
   const n = Math.max(1, Math.min(topDocsShowN, lastTopDocs.length || 0));
   const docs = (lastTopDocs || []).slice(0, n);
 
-  // 렌더링할 문서가 1개라도 있는지 확인하고 패널 상태 변경
-  toggleEvidencePanel(docs.length > 0);
+  if (typeof toggleEvidencePanel === "function") toggleEvidencePanel(docs.length > 0);
 
   docs.forEach((d, i) => {
     const title = stripEnriched(d.title || "(no title)");
     const score = (d.score == null) ? "" : Number(d.score).toFixed(5);
-
     const meta = pickMailMeta(d.additionalField || {});
-    const tags = [];
-
-    if(meta.mailFrom) tags.push(`<span class="tag">#${escapeHtml(meta.mailFrom)}</span>`);
+    
+    let tagsHtml = "";
+    if(meta.mailFrom) tagsHtml += `<span class="px-2 py-0.5 bg-surface-container-high dark:bg-[#1f2b4a] text-secondary dark:text-[#94a3b8] text-[9px] rounded">#${escapeHtml(meta.mailFrom)}</span>`;
+    if(meta.mailDate) tagsHtml += `<span class="px-2 py-0.5 bg-surface-container-high dark:bg-[#1f2b4a] text-secondary dark:text-[#94a3b8] text-[9px] rounded">#${escapeHtml(meta.mailDate)}</span>`;
+    
+    // 💡 [복구 완료] 분석보고서 URL(edmLinks) 클릭 기능 복구 (이슈 4 해결)
     if(meta.edmLinks && meta.edmLinks.length){
-      meta.edmLinks.forEach(u=>{
-        tags.push(`<span class="tag">#<a href="${escapeHtml(u)}" target="_blank" rel="noopener noreferrer">${escapeHtml(u)}</a></span>`);
+      meta.edmLinks.forEach(u => {
+        // transition-colors 제거
+        tagsHtml += `<span class="px-2 py-0.5 bg-surface-container-high dark:bg-[#1f2b4a] text-secondary dark:text-[#94a3b8] text-[9px] rounded hover:text-primary dark:hover:text-[#60a5fa] cursor-pointer"><a href="${escapeHtml(u)}" target="_blank" rel="noopener noreferrer">#${escapeHtml(u)}</a></span>`;
       });
     }
-    if(meta.mailDate) tags.push(`<span class="tag">#${escapeHtml(meta.mailDate)}</span>`);
 
     const card = document.createElement("div");
-    const idxName = d._index || "";
-
-    card.className = "doc-card";
+    // 💡 [색상 수정] 다크 모드 배경색(dark:bg-[#0f1a33]) 직접 주입
+    card.className = "bg-white dark:bg-[#0f1a33] dark:text-[#e7eefc] rounded-lg p-3 shadow-sm border border-surface-container dark:border-[#1f2b4a] border-l-4 border-l-primary dark:border-l-[#60a5fa] cursor-pointer hover:-translate-y-0.5";
     card.innerHTML = `
-      <div class="doc-line1">
-        <div class="doc-title">${escapeHtml(title)}</div>
-        <div class="doc-badges">
-          <div class="badge top">🏅 Top-${escapeHtml(String(d.rank || (i+1)))}</div>
-          ${score ? `<div class="badge score">📌 Score:${escapeHtml(score)}</div>` : ``}
-          ${idxName ? `<div class="badge idx">🗂️ ${escapeHtml(idxName)}</div>` : ``}
-        </div>
+      <div class="flex justify-between items-start mb-2">
+        <span class="px-2 py-0.5 bg-surface-container-highest dark:bg-[#334155] text-[9px] font-bold rounded">TOP ${escapeHtml(String(d.rank || (i+1)))}</span>
+        ${score ? `<span class="text-[10px] font-bold text-primary dark:text-[#60a5fa]">Score: ${escapeHtml(score)}</span>` : ''}
       </div>
-      <div class="doc-line2">
-        ${tags.join("")}
-      </div>
+      <h3 class="text-[12px] font-bold mb-1 leading-tight line-clamp-2">${escapeHtml(title)}</h3>
+      ${d._index ? `<div class="text-[9px] text-secondary dark:text-[#94a3b8] mb-2">🗂️ ${escapeHtml(d._index)}</div>` : ''}
+      <div class="flex flex-wrap gap-1 mt-2">${tagsHtml}</div>
     `;
-
-    card.onclick = () => openDocModal(d, null);
-
+    card.onclick = (e) => {
+      // 링크 클릭 시 문서 뷰어 모달이 열리지 않도록 방어
+      if(e.target.tagName === 'A') return;
+      openDocModal(d, null);
+    };
     box.appendChild(card);
   });
 }
+
 /* ---------- citations ---------- */
 function renderCitations(citations){
   const box = el("citations");
   box.innerHTML = "";
-
   const ans = (citations && citations.answer) ? citations.answer : [];
+  
   if(!ans.length){
-    box.innerHTML = `<div class="cite-sentence"><div class="sentence">(근거 정보 없음)</div></div>`;
+    box.innerHTML = `<div class="text-xs text-secondary dark:text-[#94a3b8] p-3 bg-surface-container-low dark:bg-[#101f3f] rounded">(근거 정보 없음)</div>`;
     return;
   }
 
@@ -992,56 +1010,40 @@ function renderCitations(citations){
     const cites = a.citations || [];
 
     const div = document.createElement("div");
-    div.className = "cite-sentence";
+    // 💡 [색상 수정] 다크 모드 배경색 직접 주입
+    div.className = "bg-white dark:bg-[#0f1a33] dark:text-[#e7eefc] p-3 border border-surface-container dark:border-[#1f2b4a] rounded-lg mb-3 shadow-sm";
     div.innerHTML = `
-      <div class="sentence">${idx+1}. ${escapeHtml(sentence)}</div>
-      <button class="btn small cite-btn">근거 보기</button>
-      <div class="cite-list" style="display:none;"></div>
+      <div class="text-[12px] leading-relaxed mb-2"><span class="font-bold text-primary dark:text-[#60a5fa]">${idx+1}.</span> ${escapeHtml(sentence)}</div>
+      <button class="cite-btn px-2 py-1 bg-surface-container dark:bg-[#1f2b4a] hover:bg-surface-container-high dark:hover:bg-[#334155] rounded text-[10px] font-semibold">근거 문서 보기</button>
+      <div class="cite-list hidden mt-3 space-y-2 border-t border-surface-container dark:border-[#1f2b4a] pt-2"></div>
     `;
 
     const btn = div.querySelector(".cite-btn");
     const list = div.querySelector(".cite-list");
 
     btn.onclick = () => {
-      if(list.style.display === "none"){
-        list.style.display = "block";
+      if(list.classList.contains("hidden")){
+        list.classList.remove("hidden");
         list.innerHTML = "";
-
-        if(cites.length === 0){
-          const it = document.createElement("div");
-          it.className = "cite-item";
-          it.innerHTML = `<div class="q">(근거 없음)</div>`;
-          list.appendChild(it);
-          return;
-        }
-
         cites.forEach(c => {
           const quote = (c.quote || "").trim();
-          const meta = `${c.doc_id||""} | ${c.chunk_id||""}${c.score!=null ? (" | score=" + c.score) : ""}`;
-
           const item = document.createElement("div");
-          item.className = "cite-item";
-          item.innerHTML = quote
-            ? `
-              <div class="q">${escapeHtml(quote)}</div>
-              <div class="m">${escapeHtml(meta)}</div>
-            `
-            : `
-              <div class="q">(선택한 주장에 연결된 근거 문서)</div>
-              <div class="m">${escapeHtml(meta)}</div>
-            `;
-
+          item.className = "p-2 bg-surface-container-low dark:bg-[#101f3f] border border-surface-container dark:border-[#1f2b4a] border-dashed rounded cursor-pointer hover:bg-surface-container dark:hover:bg-[#1f2b4a]";
+          item.innerHTML = `
+            <div class="text-[11px] mb-1 font-mono break-words">${quote ? escapeHtml(quote) : '(원본 문서로 이동)'}</div>
+            <div class="text-[9px] text-secondary dark:text-[#94a3b8]">${escapeHtml(c.doc_id||"")}</div>
+          `;
           item.onclick = () => openDocFromCitation(c.doc_id, c.chunk_id, quote || "");
           list.appendChild(item);
         });
       } else {
-        list.style.display = "none";
+        list.classList.add("hidden");
       }
     };
-
     box.appendChild(div);
   });
 }
+
 
 function openDocFromCitation(docId, chunkId, quote){
   let d = (lastTopDocs || []).find(x => x.doc_id === docId && (x.chunk_id === chunkId));
@@ -1055,12 +1057,19 @@ function openDocFromCitation(docId, chunkId, quote){
 
 /* ---------- modal viewer ---------- */
 function activateModalTab(name){
-  document.querySelectorAll(".modal .tab").forEach(t=>{
+  document.querySelectorAll(".modal .tab").forEach(t => {
     const on = (t.dataset.tab === name);
     t.classList.toggle("active", on);
+    if(on) {
+        // 활성화된 탭 (Primary 색상)
+        t.className = "tab active px-4 py-2 rounded text-xs font-bold bg-primary text-on-primary";
+    } else {
+        // 비활성화된 탭 (다크모드에 맞춰 반전되는 Surface 색상)
+        t.className = "tab px-4 py-2 rounded text-xs font-bold bg-surface text-on-surface border border-surface-container hover:bg-surface-container-low transition-colors";
+    }
   });
-  el("docModalMd").classList.toggle("viewer-active", name==="md");
-  el("docModalImages").classList.toggle("viewer-active", name==="images");
+  el("docModalMd").classList.toggle("hidden", name !== "md");
+  el("docModalImages").classList.toggle("hidden", name !== "images");
 }
 
 function openModal(){
@@ -1340,60 +1349,52 @@ function hideImgPreview(){
 
 /* ---------- send message ---------- */
 async function sendMessage(overrideActionTag = null, specificQuery = null){
-  let rawSendText = "";     // 1. 서버로 실제로 날아갈 텍스트 (태그 포함)
-  let displayUserText = ""; // 2. 내 화면(말풍선)에 예쁘게 보여줄 텍스트
+  let rawSendText = "";     // 서버로 날아갈 진짜 텍스트 (태그 포함)
+  let displayUserText = ""; // 말풍선에 예쁘게 보여줄 텍스트
 
   if (overrideActionTag) {
-    // 전달받은 특정 질문이 있으면 그걸 쓰고, 없으면 글로벌 변수 사용
     const queryToUse = specificQuery || lastRealUserQuery;
 
-    // 🎯 버튼을 눌러서 호출한 경우
+    // 액션 칩 버튼을 눌렀을 때
     if (overrideActionTag === "retry") {
-      // 재검색일 경우: 강제로 DB 분석 태그를 붙여서 이전 질문 재전송 + '조건 완화'에 대한 명시적인 프롬프트를 덧붙여서 전송.
-      rawSendText = "[DB_ANALYSIS] 이전 검색 결과가 부족하거나 사용자가 더 넓은 범위를 원합니다. 기존에 적용했던 엄격한 일치 조건 (공, 모, 라 등)을 최소화하거나 제거하고, 가장 핵심이 되는 키워드만 사용하여 'LIKE' 검색 위주로 조건을 넓혀서 다음 질문에 대해 다시 쿼리를 작성해줘: " + lastRealUserQuery; 
+      rawSendText = "[DB_ANALYSIS] 이전 검색 결과가 부족하거나 사용자가 더 넓은 범위를 원합니다. 기존에 적용했던 엄격한 일치 조건 (공, 모, 라 등)을 최소화하거나 제거하고, 가장 핵심이 되는 키워드만 사용하여 'LIKE' 검색 위주로 조건을 넓혀서 다음 질문에 대해 다시 쿼리를 작성해줘: " + lastRealUserQuery;
       displayUserText = "🔄 조건을 넓혀서 다시 검색 중...";
     } else {
       rawSendText = overrideActionTag + " " + queryToUse;
-
       if (overrideActionTag === "[DB_ANALYSIS]") displayUserText = "📊 DB 통계 Agent 호출 중...";
       else if (overrideActionTag === "[RAG_KNOWLEDGE]") displayUserText = "📖 문서 검색 Agent 호출 중...";
       else displayUserText = "🔄 다시 검색 중...";
     }
-
     lastRealUserQuery = queryToUse;
-    
+   
   } else {
-    // 🎯 일반 텍스트 입력창에서 엔터/전송을 누른 경우
+    // 일반 엔터/전송을 눌렀을 때
     rawSendText = el("userInput").value.trim();
     if(!rawSendText) return;
    
-    lastRealUserQuery = rawSendText; // 다음 버튼 클릭을 대비해 진짜 질문을 저장!
+    lastRealUserQuery = rawSendText;
     displayUserText = rawSendText;
     el("userInput").value = "";
   }
 
-  // 화면에는 가공된 텍스트(displayUserText)를 띄웁니다.
+  // 1. 유저 질문 렌더링
   appendMessage("user", displayUserText, null, null);
 
+  // 2. 로딩 메시지 렌더링
   const pendingId = "PENDING_" + Date.now();
   appendMessage("assistant", "⏳ 답변 생성 중...", null, pendingId);
 
-  const indexNames = getSelectedIndexNames();
-  if(indexNames.length === 0){
-    alert("최소 1개 인덱스 선택 필수");
-    return;
-  }
-
+  // 버튼 비활성화
   el("sendBtn").disabled = true;
   el("userInput").disabled = true;
 
-  const topK = parseInt(el("topK").value || "5", 10);
-
+  // 💡 [수정됨] 화면에서 지워진 Index/TopK UI를 읽어오는 코드를 삭제하고,
+  // 백엔드로 보낼 payload 변수를 이곳에서 '단 한 번만' 선언합니다.
   const payload = {
     session_id: currentSessionId,
-    user_text: rawSendText, // 서버에는 태그가 붙은 진짜 텍스트(rawSendText)를 보냅니다.
-    index_names: indexNames,
-    top_k: topK,
+    user_text: rawSendText,
+    index_names: [window.__BOOT__.defaultIndex], // 기본값 하드코딩
+    top_k: 5,                                    // 5로 고정
     filters: null
   };
 
@@ -1401,14 +1402,18 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
     const res = await apiPost("/api/chat", payload);
     currentSessionId = res.session_id;
 
+    // 로딩 메시지 제거
     const pend = document.querySelector(`.msg.assistant[data-msg-id="${pendingId}"]`);
-    if(pend){
-      pend.remove();
-    }
+    if(pend) pend.remove();
 
+    // 검색 해석 적용 카드 부착
     const userMsgs = Array.from(document.querySelectorAll(".msg.user"));
     const lastUserMsg = userMsgs[userMsgs.length - 1];
-    if(lastUserMsg && !lastUserMsg.querySelector(".query-interpret-card")){
+
+    // 💡 [수정] 전체 말풍선 컨테이너가 아니라, 파란색 배경을 가진 내부 박스를 찾습니다.
+    const innerBubble = lastUserMsg.querySelector(".user-bubble-inner");
+
+    if(innerBubble && !innerBubble.querySelector(".query-interpret-card")){
       const html = buildQueryInterpretationCard({
         rewritten_query: res.rewritten_query,
         normalized_query: res.normalized_query,
@@ -1416,21 +1421,22 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
         detected_terms: res.detected_terms || []
       });
       if(html){
-        lastUserMsg.insertAdjacentHTML("beforeend", html);
-        wireQueryInterpretCard(lastUserMsg);
+        innerBubble.insertAdjacentHTML("beforeend", html);
+        wireQueryInterpretCard(innerBubble);
       }
     }
 
-    // 💡 [핵심 추가] 백엔드에서 받은 intent, suggested_actions, agent_steps를 묶어서 전달!
     const extraData = {
       intent: res.intent,
       suggested_actions: res.suggested_actions,
       agent_steps: res.agent_steps
     };
 
+    // AI 답변 렌더링
     appendMessage("assistant", res.assistant_text, new Date().toISOString(), res.assistant_msg_id || null, extraData);
     setSelectedAssistantMsg(res.assistant_msg_id || "");
 
+    // Evidence 패널 업데이트
     currentEvidenceAssistantMsgId = res.assistant_msg_id || null;
     lastTopDocs = res.top_docs || [];
     renderTopDocsFiltered();
@@ -1439,6 +1445,7 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
     renderCitations(lastCitations);
 
     await refreshSessions();
+   
   } catch(e){
     const pend = document.querySelector(`.msg.assistant[data-msg-id="${pendingId}"]`);
     if(pend){
@@ -1464,88 +1471,54 @@ function applyTopDocsN(){
 
 /* ---------- init ---------- */
 document.addEventListener("DOMContentLoaded", async () => {
-  configureMarked();
+  if (typeof configureMarked === "function") configureMarked();
 
-  const saved = localStorage.getItem("theme") || "dark";
-  applyTheme(saved);
-  const themeBtn = el("themeToggle");
+  // 테마 초기화
+  const saved = localStorage.getItem("theme") || "light";
+  if (saved === "dark") document.documentElement.classList.add("dark");
+
+  // 테마 토글
+  const themeBtn = el("themeToggleGlobal");
   if(themeBtn){
-    themeBtn.onclick = toggleTheme;
+      themeBtn.onclick = () => {
+          // html 태그에 dark 클래스 토글
+          const isDark = document.documentElement.classList.toggle("dark");
+          // 아이콘 변경 (해 <-> 달)
+          themeBtn.querySelector('span').textContent = isDark ? "dark_mode" : "light_mode";
+          localStorage.setItem("theme", isDark ? "dark" : "light");
+      };
   }
 
-  const showInput = el("topDocsShowN");
-  showInput.addEventListener("input", ()=>{
-    const v = parseInt(showInput.value || "5", 10);
-    if(Number.isFinite(v) && v >= 1){
-      topDocsShowN = v;
-      renderTopDocsFiltered();
-    }
-  });
+  // 사이드바 토글
+  const sidebarBtn = el("toggleSidebar");
+  if(sidebarBtn) {
+      sidebarBtn.onclick = () => {
+          const sidebar = el("sidebar");
+          sidebar.classList.toggle("collapsed");
+          // 접혔을 때는 '펼치기(side_navigation)' 아이콘, 펴졌을 때는 '접기(menu_open)' 아이콘
+          sidebarBtn.querySelector('span').textContent = sidebar.classList.contains("collapsed") ? "side_navigation" : "menu_open";
+      };
+  }
 
+  // 로그아웃
+  const logoutBtn = el("logoutGlobal");
+  if(logoutBtn){
+    logoutBtn.onclick = async () => {
+      await fetch("/logout", {method:"POST", credentials:"include"});
+      window.location.href = "/";
+    };
+  }
+
+  // 모달 제어
   el("docModalClose").onclick = closeModal;
   el("docModalBackdrop").onclick = closeModal;
   document.querySelectorAll(".modal .tab").forEach(t => {
     t.onclick = () => activateModalTab(t.dataset.tab);
   });
 
-  el("logout").onclick = async () => {
-    await fetch("/logout", {method:"POST", credentials:"include"});
-    window.location.href = "/";
-  };
-
+  // 세션 및 전송
   el("newSession").onclick = newSession;
-  el("sendBtn").onclick = sendMessage;
-
-  const pickerBtn = el("indexPickerBtn");
-  const pickerMenu = el("indexPickerMenu");
-  const pickerLabel = el("indexPickerLabel");
-
-  function refreshIndexPickerLabel(){
-    const picked = getSelectedIndexNames();
-    if(picked.length === 0){
-      pickerLabel.textContent = "Select indexes";
-    } else if(picked.length <= 2){
-      pickerLabel.textContent = picked.join(", ");
-    } else {
-      pickerLabel.textContent = `${picked[0]}, ${picked[1]} +${picked.length - 2}`;
-    }
-  }
-
-  const pickerRoot = el("indexPicker");
-
-  function closePicker(){
-    pickerRoot.classList.remove("open");
-  }
-
-  pickerBtn.addEventListener("click", (e)=>{
-    e.stopPropagation();
-    pickerRoot.classList.toggle("open");
-  });
-
-  document.addEventListener("click", closePicker);
-
-  pickerMenu.addEventListener("click", (e)=>{
-    e.stopPropagation();
-  });
-
-  document.querySelectorAll('input[name="indexNames"]').forEach(chk=>{
-    chk.addEventListener("change", refreshIndexPickerLabel);
-  });
-
-  const allBtn = el("idxAll");
-  const noneBtn = el("idxNone");
-
-  allBtn.onclick = () => {
-    document.querySelectorAll('input[name="indexNames"]').forEach(x => x.checked = true);
-    refreshIndexPickerLabel();
-  };
-
-  noneBtn.onclick = () => {
-    document.querySelectorAll('input[name="indexNames"]').forEach(x => x.checked = false);
-    refreshIndexPickerLabel();
-  };
-
-  refreshIndexPickerLabel();
+  el("sendBtn").onclick = () => sendMessage();
 
   el("userInput").addEventListener("keydown", (e)=>{
     if(e.key === "Enter" && !e.shiftKey){
@@ -1554,11 +1527,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  setupSidebarToggle();
-  setupPanelMaxButtons();
-  setupVerticalResizer("resizer1", "#sidebar", ".main");
-  setupVerticalResizer("resizer2", ".main", ".right");
-  setupHorizontalResizer("hresizer1", '.panel[data-panel="topdocs"]', '.panel[data-panel="citations"]');
+  // 패널 조절기 초기화 (오류 방지를 위해 존재 여부 체크)
+  if (typeof setupSidebarToggle === "function") setupSidebarToggle();
+  if (typeof setupPanelMaxButtons === "function") setupPanelMaxButtons();
+  
+  if(el("resizer1")) setupVerticalResizer("resizer1", "#sidebar", ".main");
+  // 우측 패널 선택자를 기존 ".right"에서 Tailwind가 적용된 "#rightPanel"로 수정!
+  if(el("resizer2")) setupVerticalResizer("resizer2", ".main", "#rightPanel"); 
+  if(el("hresizer1")) setupHorizontalResizer("hresizer1", '.panel[data-panel="topdocs"]', '.panel[data-panel="citations"]');
 
   await refreshSessions();
   newSession();

@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Intellectual Curator - Digital Archive</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Manrope:wght@700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-tertiary": "#f9f8ff",
+                        "surface-container": "#e8eff3",
+                        "background": "#f7f9fb",
+                        "error-dim": "#4e0309",
+                        "primary-dim": "#485367",
+                        "primary-fixed-dim": "#cad5ed",
+                        "surface-container-lowest": "#ffffff",
+                        "on-primary-fixed": "#354053",
+                        "secondary": "#516077",
+                        "on-secondary-fixed": "#314056",
+                        "surface-variant": "#d9e4ea",
+                        "on-primary-fixed-variant": "#515c70",
+                        "inverse-surface": "#0b0f10",
+                        "tertiary-fixed": "#dbe2fd",
+                        "on-tertiary-fixed-variant": "#545b71",
+                        "surface-dim": "#cfdce3",
+                        "secondary-container": "#d4e3ff",
+                        "error-container": "#fe8983",
+                        "surface": "#f7f9fb",
+                        "secondary-fixed-dim": "#c6d5f0",
+                        "surface-tint": "#545f73",
+                        "on-error-container": "#752121",
+                        "tertiary-dim": "#4c5369",
+                        "secondary-fixed": "#d4e3ff",
+                        "on-primary-container": "#475266",
+                        "on-primary": "#f6f7ff",
+                        "primary-fixed": "#d8e3fb",
+                        "on-surface-variant": "#566166",
+                        "error": "#9f403d",
+                        "on-tertiary-container": "#4a5157",
+                        "on-tertiary-fixed": "#383f54",
+                        "surface-bright": "#f7f9fb",
+                        "on-secondary-fixed-variant": "#4d5c73",
+                        "tertiary-fixed-dim": "#cdd4ee",
+                        "surface-container-highest": "#d9e4ea",
+                        "outline-variant": "#a9b4b9",
+                        "on-surface": "#2a3439",
+                        "tertiary-container": "#dbe2fd",
+                        "surface-container-high": "#e1e9ee",
+                        "surface-container-low": "#f0f4f7",
+                        "inverse-primary": "#dae6fe",
+                        "outline": "#717c82",
+                        "inverse-on-surface": "#9a9d9f",
+                        "primary-container": "#d8e3fb",
+                        "on-secondary": "#f8f8ff",
+                        "primary": "#545f73",
+                        "on-background": "#2a3439",
+                        "secondary-dim": "#45546a",
+                        "tertiary": "#585e75",
+                        "on-error": "#fff7f6",
+                        "on-secondary-container": "#445369"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Manrope"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .scrolled-content::-webkit-scrollbar {
+            width: 4px;
+        }
+        .scrolled-content::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .scrolled-content::-webkit-scrollbar-thumb {
+            background: #d9e4ea;
+            border-radius: 10px;
+        }
+        .agent-card-active {
+            border-color: #545f73 !important;
+            box-shadow: 0 0 0 1px #545f73, 0 10px 15px -3px rgb(0 0 0 / 0.1) !important;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body h-screen flex flex-col overflow-hidden">
+<!-- TopAppBar -->
+<header class="bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between px-6 h-16 w-full shrink-0 z-50">
+<div class="flex items-center gap-8">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary" data-icon="database">database</span>
+<h1 class="text-xl font-bold tracking-tight text-slate-900 dark:text-white font-headline">Intellectual Curator</h1>
+</div>
+<nav class="hidden md:flex items-center gap-6">
+<a class="font-manrope text-sm font-medium transition-colors text-slate-900 dark:text-white border-b-2 border-slate-900 dark:border-slate-100 pb-1" href="#">Knowledge Base</a>
+<a class="font-manrope text-sm font-medium transition-colors text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white" href="#">Digital Archive</a>
+<a class="font-manrope text-sm font-medium transition-colors text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white" href="#">Visual Analytics</a>
+<a class="font-manrope text-sm font-medium transition-colors text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white" href="#">Cognitive Trace</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="p-2 rounded-full hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-on-surface-variant" data-icon="notifications">notifications</span>
+</button>
+<button class="p-2 rounded-full hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-on-surface-variant" data-icon="help">help</span>
+</button>
+<div class="w-8 h-8 rounded-full overflow-hidden ml-2 bg-primary-container">
+<img alt="User Profile" data-alt="professional portrait of an elderly academic man with gray hair and glasses in a library setting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCoGgV0xbWHtsHYezK_oOyynR9fKEcturYbhgDK92-TBv4-UXD3nMv9ZLpJTyYoGvnsBMaW7jjBMlaAKyX8kuEPpH6KAv_ksv_rqwk85vW4qNRGq0wSwv0v0b1X0nK952hhm6Udgr0XU6nu84_0ddMEvvw4aEl1JJaI42h_WnBxdHZ8RgSQRa7HZ5j2QucwDJE3hhhj0YKZ8exhSQOPhvjHLIr0jXYZUos7jO_fwuFcdZsH3vLMfckH7NxjLW-QGuHQG3QjEvROXg8"/>
+</div>
+</div>
+</header>
+<div class="flex flex-1 overflow-hidden">
+<!-- SideNavBar (Left Panel) -->
+<aside class="w-64 bg-slate-50 dark:bg-slate-950 border-r border-slate-100 dark:border-slate-800 flex flex-col h-full shrink-0">
+<div class="p-4">
+<button class="w-full py-3 px-4 bg-primary text-on-primary rounded-lg font-headline text-sm font-semibold flex items-center justify-center gap-2 hover:bg-primary-dim transition-all active:scale-95">
+<span class="material-symbols-outlined text-sm" data-icon="add">add</span>
+                New Inquiry
+            </button>
+</div>
+<div class="flex-1 overflow-y-auto scrolled-content px-2 space-y-1">
+<div class="px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-outline">Recent History</div>
+<!-- History Items -->
+<div class="group relative px-3 py-3 bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg flex items-center justify-between cursor-pointer">
+<div class="flex flex-col gap-1 overflow-hidden">
+<span class="text-xs font-semibold truncate pr-2">Analysis of Neoplatonic Logic</span>
+<span class="text-[10px] text-slate-500">Oct 24, 14:20</span>
+</div>
+<button class="flex-shrink-0 p-1 hover:bg-slate-300 dark:hover:bg-slate-700 rounded transition-colors text-slate-500 hover:text-error">
+<span class="material-symbols-outlined text-lg" data-icon="delete">delete</span>
+</button>
+</div>
+<div class="group relative px-3 py-3 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg flex items-center justify-between cursor-pointer transition-all">
+<div class="flex flex-col gap-1 overflow-hidden">
+<span class="text-xs font-semibold truncate pr-2">Archival Database Trends</span>
+<span class="text-[10px]">Oct 23, 09:15</span>
+</div>
+<button class="flex-shrink-0 p-1 hover:bg-slate-300 dark:hover:bg-slate-700 rounded transition-colors text-slate-400 hover:text-error">
+<span class="material-symbols-outlined text-lg" data-icon="delete">delete</span>
+</button>
+</div>
+<div class="group relative px-3 py-3 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg flex items-center justify-between cursor-pointer transition-all">
+<div class="flex flex-col gap-1 overflow-hidden">
+<span class="text-xs font-semibold truncate pr-2">Cognitive Mapping Review</span>
+<span class="text-[10px]">Oct 22, 18:45</span>
+</div>
+<button class="flex-shrink-0 p-1 hover:bg-slate-300 dark:hover:bg-slate-700 rounded transition-colors text-slate-400 hover:text-error">
+<span class="material-symbols-outlined text-lg" data-icon="delete">delete</span>
+</button>
+</div>
+</div>
+<!-- Footer Profile -->
+<div class="p-4 border-t border-slate-100 dark:border-slate-800">
+<div class="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer transition-all">
+<div class="w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center overflow-hidden">
+<span class="material-symbols-outlined text-secondary" data-icon="person">person</span>
+</div>
+<div class="flex flex-col">
+<span class="text-xs font-bold text-slate-900 dark:text-white">Prof. Aris Thorne</span>
+<span class="text-[10px] text-slate-500">Academic Curator</span>
+</div>
+<span class="material-symbols-outlined text-xs ml-auto text-slate-400" data-icon="more_vert">more_vert</span>
+</div>
+</div>
+</aside>
+<!-- Main Chat Canvas -->
+<main class="flex-1 flex flex-col bg-surface overflow-hidden relative">
+<!-- Scrollable Message Area -->
+<div class="flex-1 overflow-y-auto scrolled-content p-6 md:p-12 space-y-10">
+<!-- User Message -->
+<div class="flex justify-end ml-16">
+<div class="max-w-2xl bg-primary text-on-primary p-4 rounded-xl rounded-br-none shadow-sm">
+<p class="text-sm leading-relaxed">Could you analyze the correlation between 17th-century manuscript density and regional education levels based on the current archive?</p>
+<div class="mt-2 text-[10px] opacity-70 text-right">Oct 24, 14:18</div>
+</div>
+</div>
+<!-- Document Search Agent Response -->
+<div class="flex justify-start mr-16">
+<div class="max-w-4xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 transition-all hover:shadow-md cursor-pointer group/ai-card" onclick="this.classList.toggle('agent-card-active')">
+<div class="flex items-center gap-3 mb-4">
+<div class="w-8 h-8 rounded bg-surface-container-high flex items-center justify-center group-hover/ai-card:scale-110 transition-transform">
+<span class="material-symbols-outlined text-primary text-sm" data-icon="description">description</span>
+</div>
+<div>
+<span class="text-xs font-bold font-headline text-primary">Document Search Agent</span>
+<span class="mx-2 text-[10px] text-outline">•</span>
+<span class="text-[10px] text-outline uppercase tracking-tighter">Oct 24, 14:19:02</span>
+</div>
+</div>
+<div class="space-y-4 text-on-background pl-11">
+<div class="h-0.5 w-full bg-surface-container rounded-full overflow-hidden">
+<div class="h-full w-4/5 bg-surface-tint"></div>
+</div>
+<p class="text-sm leading-relaxed">I have retrieved <span class="font-bold text-tertiary">14 relevant manuscripts</span> from the Digital Archive. The data indicates a significant cluster in the Northern Rhine-Westphalia region between 1640 and 1680.</p>
+<div class="flex flex-wrap gap-2">
+<span class="px-3 py-1 bg-secondary-container text-on-secondary-container text-[10px] rounded-full font-medium hover:bg-primary-container transition-colors cursor-pointer">Ref: Manuscript_A42</span>
+<span class="px-3 py-1 bg-secondary-container text-on-secondary-container text-[10px] rounded-full font-medium hover:bg-primary-container transition-colors cursor-pointer">Ref: Census_1672_B</span>
+</div>
+<div class="pt-2 flex items-center gap-3">
+<button class="px-4 py-2 border border-outline-variant hover:bg-surface-container rounded-full text-[11px] font-semibold flex items-center gap-2 transition-all">
+<span class="material-symbols-outlined text-sm" data-icon="database">database</span>
+                                Call DB Stats Agent
+                            </button>
+</div>
+</div>
+</div>
+</div>
+<!-- DB Stats Agent Response -->
+<div class="flex justify-start mr-16">
+<div class="max-w-4xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 transition-all hover:shadow-md cursor-pointer group/ai-card" onclick="this.classList.toggle('agent-card-active')">
+<div class="flex items-center gap-3 mb-4">
+<div class="w-8 h-8 rounded bg-surface-container-high flex items-center justify-center group-hover/ai-card:scale-110 transition-transform">
+<span class="material-symbols-outlined text-primary text-sm" data-icon="monitoring">monitoring</span>
+</div>
+<div>
+<span class="text-xs font-bold font-headline text-primary">DB Stats Agent</span>
+<span class="mx-2 text-[10px] text-outline">•</span>
+<span class="text-[10px] text-outline uppercase tracking-tighter">Oct 24, 14:20:15</span>
+</div>
+</div>
+<div class="space-y-4 text-on-background pl-11">
+<p class="text-sm leading-relaxed italic text-secondary">"Querying historical demographics database for statistical correlation..."</p>
+<!-- SQL Result Table -->
+<div class="bg-surface-container-lowest rounded-lg border border-slate-100 overflow-hidden shadow-sm">
+<table class="w-full text-left text-[11px]">
+<thead class="bg-surface-container-low text-on-surface-variant font-semibold">
+<tr>
+<th class="px-4 py-2">Region ID</th>
+<th class="px-4 py-2">Manuscript Count</th>
+<th class="px-4 py-2">Literacy Rate (%)</th>
+<th class="px-4 py-2">Correlation Index</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-slate-50">
+<tr>
+<td class="px-4 py-2 font-mono">NRW-412</td>
+<td class="px-4 py-2">124</td>
+<td class="px-4 py-2">12.4</td>
+<td class="px-4 py-2 text-primary font-bold">0.82</td>
+</tr>
+<tr>
+<td class="px-4 py-2 font-mono">BAV-009</td>
+<td class="px-4 py-2">89</td>
+<td class="px-4 py-2">9.2</td>
+<td class="px-4 py-2 text-primary font-bold">0.78</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="pt-2 flex flex-wrap items-center gap-3">
+<button class="px-4 py-2 bg-primary text-on-primary rounded-full text-[11px] font-semibold flex items-center gap-2 hover:opacity-90 transition-all">
+<span class="material-symbols-outlined text-sm" data-icon="search">search</span>
+                                Re-search with broader conditions
+                            </button>
+<button class="px-4 py-2 border border-outline-variant hover:bg-surface-container rounded-full text-[11px] font-semibold flex items-center gap-2 transition-all">
+<span class="material-symbols-outlined text-sm" data-icon="history">history</span>
+                                Call Document Search Agent
+                            </button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Chat Input Area -->
+<div class="p-6 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800">
+<div class="max-w-4xl mx-auto relative">
+<textarea class="w-full bg-surface-container-highest border-none rounded-lg p-4 pr-16 text-sm focus:ring-1 focus:ring-primary-container min-h-[56px] resize-none" placeholder="Inquire further into the archive..."></textarea>
+<button class="absolute right-3 bottom-3 w-10 h-10 bg-primary text-on-primary rounded-full flex items-center justify-center hover:bg-primary-dim transition-all">
+<span class="material-symbols-outlined" data-icon="send">send</span>
+</button>
+</div>
+</div>
+</main>
+<!-- Archive References Panel (Right Panel) -->
+<aside class="w-80 bg-surface-container-low border-l border-slate-100 dark:border-slate-800 flex flex-col h-full shrink-0">
+<div class="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+<h2 class="text-xs font-bold font-headline text-slate-900 dark:text-white flex items-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="bookmarks">bookmarks</span>
+                Archive References
+            </h2>
+<button class="p-1 hover:bg-surface-container rounded transition-colors">
+<span class="material-symbols-outlined text-sm" data-icon="close">close</span>
+</button>
+</div>
+<div class="flex-1 overflow-y-auto scrolled-content p-4 space-y-4">
+<!-- Reference Card 1 -->
+<div class="bg-surface-container-lowest rounded-lg p-4 shadow-sm border-l-4 border-primary transition-transform hover:translate-x-1 cursor-pointer">
+<div class="flex justify-between items-start mb-2">
+<span class="px-2 py-0.5 bg-primary-container text-on-primary-container text-[9px] font-bold rounded">TOP 1</span>
+<span class="text-[10px] font-bold text-primary">98.2% Match</span>
+</div>
+<h3 class="text-xs font-bold mb-2 leading-tight">De Eruditione Filiorum Nobilium</h3>
+<div class="text-[10px] text-slate-500 mb-3">Knowledge Index: ARCH-MED-142</div>
+<div class="flex flex-wrap gap-1">
+<span class="px-2 py-0.5 bg-surface-variant text-on-surface-variant text-[8px] rounded">#Manager</span>
+<span class="px-2 py-0.5 bg-surface-variant text-on-surface-variant text-[8px] rounded">#ReportURL</span>
+<span class="px-2 py-0.5 bg-surface-variant text-on-surface-variant text-[8px] rounded">#MailDate</span>
+</div>
+</div>
+<!-- Reference Card 2 -->
+<div class="bg-surface-container-lowest rounded-lg p-4 shadow-sm border-l-4 border-slate-300 transition-transform hover:translate-x-1 cursor-pointer">
+<div class="flex justify-between items-start mb-2">
+<span class="px-2 py-0.5 bg-surface-container text-on-surface-variant text-[9px] font-bold rounded">TOP 2</span>
+<span class="text-[10px] font-bold text-primary">84.7% Match</span>
+</div>
+<h3 class="text-xs font-bold mb-2 leading-tight">Historical Literacy in Westphalia</h3>
+<div class="text-[10px] text-slate-500 mb-3">Knowledge Index: STAT-EDU-089</div>
+<div class="flex flex-wrap gap-1">
+<span class="px-2 py-0.5 bg-surface-variant text-on-surface-variant text-[8px] rounded">#ReportURL</span>
+<span class="px-2 py-0.5 bg-surface-variant text-on-surface-variant text-[8px] rounded">#CensusData</span>
+</div>
+</div>
+<!-- Reference Card 3 -->
+<div class="bg-surface-container-lowest rounded-lg p-4 shadow-sm border-l-4 border-slate-300 transition-transform hover:translate-x-1 cursor-pointer opacity-80">
+<div class="flex justify-between items-start mb-2">
+<span class="px-2 py-0.5 bg-surface-container text-on-surface-variant text-[9px] font-bold rounded">TOP 3</span>
+<span class="text-[10px] font-bold text-primary">76.1% Match</span>
+</div>
+<h3 class="text-xs font-bold mb-2 leading-tight">Gutenberg's Shadow: Press Density</h3>
+<div class="text-[10px] text-slate-500 mb-3">Knowledge Index: TECH-HIST-221</div>
+<div class="flex flex-wrap gap-1">
+<span class="px-2 py-0.5 bg-surface-variant text-on-surface-variant text-[8px] rounded">#Press</span>
+<span class="px-2 py-0.5 bg-surface-variant text-on-surface-variant text-[8px] rounded">#Mapping</span>
+</div>
+</div>
+<!-- Reference Card 4 -->
+<div class="bg-surface-container-lowest rounded-lg p-4 shadow-sm border-l-4 border-slate-300 transition-transform hover:translate-x-1 cursor-pointer opacity-80">
+<div class="flex justify-between items-start mb-2">
+<span class="px-2 py-0.5 bg-surface-container text-on-surface-variant text-[9px] font-bold rounded">TOP 4</span>
+<span class="text-[10px] font-bold text-primary">68.4% Match</span>
+</div>
+<h3 class="text-xs font-bold mb-2 leading-tight">Social Stratification in 17th Century Europe</h3>
+<div class="text-[10px] text-slate-500 mb-3">Knowledge Index: SOC-HIST-512</div>
+<div class="flex flex-wrap gap-1">
+<span class="px-2 py-0.5 bg-surface-variant text-on-surface-variant text-[8px] rounded">#Sociology</span>
+<span class="px-2 py-0.5 bg-surface-variant text-on-surface-variant text-[8px] rounded">#Demographics</span>
+</div>
+</div>
+<!-- Reference Card 5 -->
+<div class="bg-surface-container-lowest rounded-lg p-4 shadow-sm border-l-4 border-slate-300 transition-transform hover:translate-x-1 cursor-pointer opacity-80">
+<div class="flex justify-between items-start mb-2">
+<span class="px-2 py-0.5 bg-surface-container text-on-surface-variant text-[9px] font-bold rounded">TOP 5</span>
+<span class="text-[10px] font-bold text-primary">62.1% Match</span>
+</div>
+<h3 class="text-xs font-bold mb-2 leading-tight">Education and the Printing Press</h3>
+<div class="text-[10px] text-slate-500 mb-3">Knowledge Index: TECH-EDU-091</div>
+<div class="flex flex-wrap gap-1">
+<span class="px-2 py-0.5 bg-surface-variant text-on-surface-variant text-[8px] rounded">#분석담당자</span>
+<span class="px-2 py-0.5 bg-surface-variant text-on-surface-variant text-[8px] rounded">#MediaHistory</span>
+</div>
+</div>
+</div>
+<div class="p-4 bg-primary-container/30 border-t border-slate-200">
+<p class="text-[10px] text-on-primary-container leading-tight">
+<span class="font-bold">Pro-tip:</span> Clicking a message card in the chat highlights the related archival sources.
+            </p>
+</div>
+</aside>
+</div>
+</body></html>

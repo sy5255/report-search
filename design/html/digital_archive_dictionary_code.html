@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Digital Archive - Intellectual Curator</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Manrope:wght@700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary-fixed": "#dbe2fd",
+                        "inverse-surface": "#0b0f10",
+                        "tertiary-container": "#dbe2fd",
+                        "secondary": "#516077",
+                        "on-tertiary": "#f9f8ff",
+                        "surface-container-lowest": "#ffffff",
+                        "outline-variant": "#a9b4b9",
+                        "primary": "#545f73",
+                        "outline": "#717c82",
+                        "on-primary-container": "#475266",
+                        "error-container": "#fe8983",
+                        "on-secondary-container": "#445369",
+                        "secondary-dim": "#45546a",
+                        "on-error": "#fff7f6",
+                        "surface-container-high": "#e1e9ee",
+                        "on-tertiary-container": "#4a5167",
+                        "secondary-fixed": "#d4e3ff",
+                        "on-primary": "#f6f7ff",
+                        "surface-container": "#e8eff3",
+                        "secondary-container": "#d4e3ff",
+                        "tertiary-dim": "#4c5369",
+                        "on-surface-variant": "#566166",
+                        "on-primary-fixed-variant": "#515c70",
+                        "error": "#9f403d",
+                        "secondary-fixed-dim": "#c6d5f0",
+                        "on-secondary": "#f8f8ff",
+                        "on-background": "#2a3439",
+                        "tertiary": "#585e75",
+                        "primary-fixed-dim": "#cad5ed",
+                        "surface-bright": "#f7f9fb",
+                        "on-surface": "#2a3439",
+                        "primary-container": "#d8e3fb",
+                        "on-secondary-fixed-variant": "#4d5c73",
+                        "on-primary-fixed": "#354053",
+                        "surface": "#f7f9fb",
+                        "surface-tint": "#545f73",
+                        "surface-container-highest": "#d9e4ea",
+                        "inverse-on-surface": "#9a9d9f",
+                        "surface-container-low": "#f0f4f7",
+                        "background": "#f7f9fb",
+                        "surface-variant": "#d9e4ea",
+                        "on-tertiary-fixed": "#383f54",
+                        "surface-dim": "#cfdce3",
+                        "on-tertiary-fixed-variant": "#545b71",
+                        "primary-fixed": "#d8e3fb",
+                        "on-secondary-fixed": "#314056",
+                        "error-dim": "#4e0309",
+                        "tertiary-fixed-dim": "#cdd4ee",
+                        "inverse-primary": "#dae6fe",
+                        "primary-dim": "#485367",
+                        "on-error-container": "#752121"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Manrope"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+        .font-manrope { font-family: 'Manrope', sans-serif; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #d9e4ea; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #c4c6cd; }
+    </style>
+</head>
+<body class="bg-background text-on-background min-h-screen">
+<!-- TopAppBar (Matched to Reports/Chat View) -->
+<header class="bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between px-6 h-16 w-full shrink-0 z-50">
+<div class="flex items-center gap-8">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary" data-icon="database">database</span>
+<h1 class="text-xl font-bold tracking-tight text-slate-900 dark:text-white font-headline">Intellectual Curator</h1>
+</div>
+<nav class="hidden md:flex items-center gap-6">
+<a class="font-manrope text-sm font-medium transition-colors text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white" href="#">Knowledge Base</a>
+<a class="font-manrope text-sm font-medium transition-colors text-slate-900 dark:text-white border-b-2 border-slate-900 dark:border-slate-100 pb-1" href="#">Digital Archive</a>
+<a class="font-manrope text-sm font-medium transition-colors text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white" href="#">Visual Analytics</a>
+<a class="font-manrope text-sm font-medium transition-colors text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white" href="#">Cognitive Trace</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="p-2 rounded-full hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-on-surface-variant" data-icon="notifications">notifications</span>
+</button>
+<button class="p-2 rounded-full hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-on-surface-variant" data-icon="help">help</span>
+</button>
+<div class="w-8 h-8 rounded-full overflow-hidden ml-2 bg-primary-container">
+<img alt="User Profile" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCoGgV0xbWHtsHYezK_oOyynR9fKEcturYbhgDK92-TBv4-UXD3nMv9ZLpJTyYoGvnsBMaW7jjBMlaAKyX8kuEPpH6KAv_ksv_rqwk85vW4qNRGq0wSwv0v0b1X0nK952hhm6Udgr0XU6nu84_0ddMEvvw4aEl1JJaI42h_WnBxdHZ8RgSQRa7HZ5j2QucwDJE3hhhj0YKZ8exhSQOPhvjHLIr0jXYZUos7jO_fwuFcdZsH3vLMfckH7NxjLW-QGuHQG3QjEvROXg8"/>
+</div>
+</div>
+</header>
+<!-- Main Content Area -->
+<main class="max-w-7xl mx-auto px-8 pt-12 pb-24">
+<!-- Header & Search -->
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-8 mb-12">
+<div class="max-w-2xl">
+<h2 class="text-4xl font-extrabold tracking-tight font-headline text-on-surface mb-2">Digital Archive</h2>
+<p class="text-secondary font-body leading-relaxed">Systematic retrieval and curation of institutional knowledge. Access historical definitions and analytical reports.</p>
+</div>
+<div class="relative w-full md:w-96">
+<span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-outline">search</span>
+<input class="w-full bg-surface-container-highest border-none rounded-lg pl-12 py-3 text-sm focus:ring-2 focus:ring-primary/20 placeholder:text-outline" placeholder="Search the archive..." type="text"/>
+</div>
+</div>
+<!-- Navigation Tabs & Actions -->
+<div class="flex flex-col md:flex-row justify-between items-center gap-6 mb-8">
+<div class="flex gap-8 border-b border-surface-container w-full md:w-auto">
+<button class="px-1 pb-3 text-sm font-medium text-secondary hover:text-on-surface transition-colors">Reports</button>
+<button class="px-1 pb-3 text-sm font-bold text-on-surface border-b-2 border-primary -mb-px transition-all">Dictionary</button>
+</div>
+<button class="flex items-center gap-2 px-6 py-2.5 bg-primary text-on-primary rounded-full font-bold text-sm transition-all hover:bg-primary-dim active:scale-95 shadow-lg shadow-primary/10">
+<span class="material-symbols-outlined text-sm">add</span>
+            Add Term
+        </button>
+</div>
+<!-- Dictionary Table Container -->
+<div class="bg-surface-container-lowest rounded-xl overflow-hidden border border-surface-container">
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead class="bg-surface-container-low border-b border-surface-container-high">
+<tr>
+<th class="px-8 py-5 text-xs font-bold uppercase tracking-wider text-secondary font-headline">Term</th>
+<th class="px-8 py-5 text-xs font-bold uppercase tracking-wider text-secondary font-headline">Category</th>
+<th class="px-8 py-5 text-xs font-bold uppercase tracking-wider text-secondary font-headline w-1/2">Technical Definition</th>
+<th class="px-8 py-5 text-xs font-bold uppercase tracking-wider text-secondary font-headline text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-surface-container">
+<!-- Table Row 1 -->
+<tr class="hover:bg-surface-container-low/50 transition-colors group">
+<td class="px-8 py-6">
+<div class="font-bold text-on-surface font-headline">Cognitive Resonance</div>
+<div class="text-[11px] text-outline uppercase tracking-tighter mt-1">ID: CR-992</div>
+</td>
+<td class="px-8 py-6">
+<span class="px-3 py-1 bg-secondary-container text-on-secondary-container text-[11px] font-bold rounded-full uppercase tracking-tight">Neuro-Linguistics</span>
+</td>
+<td class="px-8 py-6 text-sm text-on-surface-variant leading-relaxed font-body">
+                            The alignment of external informational structures with internal mental schemata, resulting in optimized processing speed and reduced metabolic load during high-complexity task execution.
+                        </td>
+<td class="px-8 py-6 text-right">
+<button class="p-2 text-outline-variant hover:text-error hover:bg-error/5 rounded-lg transition-all">
+<span class="material-symbols-outlined">delete</span>
+</button>
+</td>
+</tr>
+<!-- Table Row 2 -->
+<tr class="hover:bg-surface-container-low/50 transition-colors group">
+<td class="px-8 py-6">
+<div class="font-bold text-on-surface font-headline">Data Entropy</div>
+<div class="text-[11px] text-outline uppercase tracking-tighter mt-1">ID: DE-114</div>
+</td>
+<td class="px-8 py-6">
+<span class="px-3 py-1 bg-tertiary-container text-on-tertiary-container text-[11px] font-bold rounded-full uppercase tracking-tight">Entropy Systems</span>
+</td>
+<td class="px-8 py-6 text-sm text-on-surface-variant leading-relaxed font-body">
+                            The measure of uncertainty or randomness within a structured knowledge base. High entropy indicates fragmentation and loss of semantic coherence over time without curator intervention.
+                        </td>
+<td class="px-8 py-6 text-right">
+<button class="p-2 text-outline-variant hover:text-error hover:bg-error/5 rounded-lg transition-all">
+<span class="material-symbols-outlined">delete</span>
+</button>
+</td>
+</tr>
+<!-- Table Row 3 -->
+<tr class="hover:bg-surface-container-low/50 transition-colors group">
+<td class="px-8 py-6">
+<div class="font-bold text-on-surface font-headline">Semantic Gutter</div>
+<div class="text-[11px] text-outline uppercase tracking-tighter mt-1">ID: SG-405</div>
+</td>
+<td class="px-8 py-6">
+<span class="px-3 py-1 bg-secondary-container text-on-secondary-container text-[11px] font-bold rounded-full uppercase tracking-tight">Editorial Logic</span>
+</td>
+<td class="px-8 py-6 text-sm text-on-surface-variant leading-relaxed font-body">
+                            The intentional whitespace between data clusters used to provide cognitive relief and facilitate the transition between distinct conceptual frameworks in archival research.
+                        </td>
+<td class="px-8 py-6 text-right">
+<button class="p-2 text-outline-variant hover:text-error hover:bg-error/5 rounded-lg transition-all">
+<span class="material-symbols-outlined">delete</span>
+</button>
+</td>
+</tr>
+<!-- Table Row 4 -->
+<tr class="hover:bg-surface-container-low/50 transition-colors group">
+<td class="px-8 py-6">
+<div class="font-bold text-on-surface font-headline">Heuristic Anchor</div>
+<div class="text-[11px] text-outline uppercase tracking-tighter mt-1">ID: HA-221</div>
+</td>
+<td class="px-8 py-6">
+<span class="px-3 py-1 bg-tertiary-container text-on-tertiary-container text-[11px] font-bold rounded-full uppercase tracking-tight">Decision Theory</span>
+</td>
+<td class="px-8 py-6 text-sm text-on-surface-variant leading-relaxed font-body">
+                            A primary piece of evidence that serves as the baseline for all subsequent analytical derivations within a RAG (Retrieval-Augmented Generation) session.
+                        </td>
+<td class="px-8 py-6 text-right">
+<button class="p-2 text-outline-variant hover:text-error hover:bg-error/5 rounded-lg transition-all">
+<span class="material-symbols-outlined">delete</span>
+</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Table Footer/Pagination -->
+<div class="px-8 py-4 bg-surface-container-low flex justify-between items-center border-t border-surface-container">
+<span class="text-xs text-secondary font-medium font-body">Showing 4 of 128 curated terms</span>
+<div class="flex gap-2">
+<button class="p-2 rounded hover:bg-surface-container text-secondary transition-all">
+<span class="material-symbols-outlined text-sm">chevron_left</span>
+</button>
+<button class="px-3 py-1 rounded bg-primary text-on-primary text-xs font-bold">1</button>
+<button class="px-3 py-1 rounded hover:bg-surface-container text-secondary text-xs font-medium transition-all">2</button>
+<button class="px-3 py-1 rounded hover:bg-surface-container text-secondary text-xs font-medium transition-all">3</button>
+<button class="p-2 rounded hover:bg-surface-container text-secondary transition-all">
+<span class="material-symbols-outlined text-sm">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+<!-- System Status Footer Section -->
+</main>
+</body></html>

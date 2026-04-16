@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Visual Analytics - Intellectual Curator</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-error": "#fff7f6",
+                        "primary": "#1e293b",
+                        "secondary-dim": "#45546a",
+                        "on-tertiary-fixed": "#383f54",
+                        "on-secondary": "#f8f8ff",
+                        "primary-dim": "#485367",
+                        "tertiary-fixed": "#dbe2fd",
+                        "background": "#f7f9fb",
+                        "tertiary-container": "#dbe2fd",
+                        "surface-variant": "#d9e4ea",
+                        "secondary": "#516077",
+                        "on-surface-variant": "#566166",
+                        "on-secondary-fixed": "#314056",
+                        "primary-fixed": "#d8e3fb",
+                        "inverse-surface": "#0b0f10",
+                        "error": "#9f403d",
+                        "tertiary-fixed-dim": "#cdd4ee",
+                        "surface-container-low": "#f0f4f7",
+                        "primary-container": "#d8e3fb",
+                        "on-primary-fixed": "#354053",
+                        "on-surface": "#2a3439",
+                        "surface-dim": "#cfdce3",
+                        "error-container": "#fe8983",
+                        "secondary-fixed-dim": "#c6d5f0",
+                        "surface": "#f7f9fb",
+                        "on-secondary-container": "#445369",
+                        "on-tertiary-fixed-variant": "#545b71",
+                        "secondary-fixed": "#d4e3ff",
+                        "on-tertiary": "#f9f8ff",
+                        "surface-container-lowest": "#ffffff",
+                        "primary-fixed-dim": "#cad5ed",
+                        "on-primary-container": "#475266",
+                        "surface-container": "#e8eff3",
+                        "tertiary-dim": "#4c5369",
+                        "surface-container-highest": "#d9e4ea",
+                        "on-tertiary-container": "#4a5167",
+                        "error-dim": "#4e0309",
+                        "surface-tint": "#545f73",
+                        "outline": "#717c82",
+                        "on-primary-fixed-variant": "#515c70",
+                        "secondary-container": "#d4e3ff",
+                        "surface-bright": "#f7f9fb",
+                        "inverse-on-surface": "#9a9d9f",
+                        "inverse-primary": "#dae6fe",
+                        "on-error-container": "#752121",
+                        "on-background": "#2a3439",
+                        "surface-container-high": "#e1e9ee",
+                        "tertiary": "#585e75",
+                        "outline-variant": "#a9b4b9",
+                        "on-secondary-fixed-variant": "#4d5c73",
+                        "on-primary": "#f6f7ff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.5rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Manrope"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+        h1, h2, h3, .font-headline { font-family: 'Manrope', sans-serif; }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background min-h-screen">
+<!-- TopNavBar -->
+<header class="bg-white dark:bg-slate-900 sticky top-0 z-50">
+<div class="flex justify-between items-center w-full px-8 h-16 max-w-screen-2xl mx-auto">
+<div class="flex items-center gap-12">
+<span class="text-xl font-bold text-slate-900 dark:text-slate-50 font-headline tracking-tight">Intellectual Curator</span>
+<nav class="hidden md:flex gap-8 items-center font-manrope font-bold text-sm tracking-tight">
+<a class="text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors duration-200" href="#">Knowledge Base</a>
+<a class="text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors duration-200" href="#">Digital Archive</a>
+<a class="text-slate-900 dark:text-white border-b-2 border-slate-900 dark:border-white pb-1" href="#">Visual Analytics</a>
+<a class="text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors duration-200" href="#">Cognitive Trace</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="p-2 text-slate-500 hover:bg-slate-50 rounded-full transition-all">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<button class="p-2 text-slate-500 hover:bg-slate-50 rounded-full transition-all">
+<span class="material-symbols-outlined" data-icon="help">help</span>
+</button>
+<div class="h-8 w-8 rounded-full overflow-hidden border border-surface-container ml-2">
+<img alt="professional portrait" class="h-full w-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCWvKum6bQjtmkMkZpcaYFDIC40PAm0ABKw6nGtfkl953SGH5BDELO3_7HM5NfSMlgI5PQZFiId_1LmCpTpzghXuDtx2B9oZeJNlw-eU92jI8RSczgBTpcEXSOsuIxf8QKq-FGB7JE_bSSsJ6nnUUkZD1V_8U_q4X2mcfmg-CK1aiDaYOt502vpvPhhD_xl1-L4MzkSC0Pd4XOhmWd0rOa62S6uA4Kw61UdWGZfaUuK1RrjsArVJU5Hdx5XESvvQyQAzHFDJjf0BRo"/>
+</div>
+</div>
+</div>
+<div class="bg-slate-100 dark:bg-slate-800 h-[1px] w-full"></div>
+</header>
+<main class="max-w-screen-2xl mx-auto px-8 py-8 flex flex-col gap-8">
+<!-- AI Analysis Input Section -->
+<section class="w-full">
+<div class="flex flex-col gap-4">
+<div class="relative group">
+<div class="absolute inset-y-0 left-5 flex items-center pointer-events-none text-outline">
+<span class="material-symbols-outlined" data-icon="auto_awesome">auto_awesome</span>
+</div>
+<input class="w-full h-14 pl-14 pr-32 bg-surface-container-highest border-none rounded-xl focus:ring-2 focus:ring-primary/20 text-on-surface font-body placeholder:text-outline-variant shadow-sm" placeholder="Ask for a chart... (e.g., 'Show me the distribution of research topics over the last 6 months')" type="text"/>
+<div class="absolute inset-y-2 right-2 flex items-center">
+<button class="h-10 px-6 bg-gradient-to-br from-primary to-slate-700 text-white rounded-full font-bold text-sm flex items-center gap-2 hover:opacity-90 transition-all active:scale-95 shadow-lg shadow-primary/10">
+<span>Analyze</span>
+<span class="material-symbols-outlined text-sm" data-icon="query_stats">query_stats</span>
+</button>
+</div>
+</div>
+</div>
+</section>
+<!-- SQL Engine Logic (Transparency Layer) -->
+<section class="bg-inverse-surface rounded-lg overflow-hidden group">
+<div class="flex items-center justify-between px-6 py-3 bg-white/5 border-b border-white/5">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-tertiary-fixed text-lg" data-icon="terminal">terminal</span>
+<span class="text-xs font-mono text-tertiary-fixed-dim uppercase tracking-widest font-bold">SQL Synthesis Engine</span>
+</div>
+<div class="flex gap-2">
+<div class="w-2.5 h-2.5 rounded-full bg-error-container/40"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-secondary-container/40"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-primary-container/40"></div>
+</div>
+</div>
+<div class="p-6 font-mono text-sm leading-relaxed overflow-x-auto whitespace-pre text-tertiary-fixed">
+<span class="text-tertiary-fixed-dim">SELECT</span>
+  topic_category,
+  <span class="text-tertiary-fixed-dim">COUNT</span>(*) <span class="text-tertiary-fixed-dim">AS</span> record_volume,
+  <span class="text-tertiary-fixed-dim">DATE_TRUNC</span>(<span class="text-tertiary-fixed-dim">'month'</span>, created_at) <span class="text-tertiary-fixed-dim">AS</span> timeline
+<span class="text-tertiary-fixed-dim">FROM</span> archive_records
+<span class="text-tertiary-fixed-dim">WHERE</span> created_at &gt; <span class="text-tertiary-fixed-dim">CURRENT_DATE</span> - <span class="text-tertiary-fixed-dim">INTERVAL '6 months'</span>
+<span class="text-tertiary-fixed-dim">GROUP BY</span> 1, 3
+<span class="text-tertiary-fixed-dim">ORDER BY</span> 3 <span class="text-tertiary-fixed-dim">DESC</span>;</div>
+</section>
+<!-- Visualization Grid -->
+<section class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+<!-- Chronological Cognitive Flux (Large Chart) -->
+<div class="lg:col-span-2 bg-surface-container-lowest rounded-lg p-8 border border-outline-variant/10 group transition-all hover:bg-white shadow-sm">
+<div class="flex justify-between items-start mb-8">
+<div>
+<h3 class="text-xl font-bold font-headline text-on-surface">Chronological Cognitive Flux</h3>
+<p class="text-sm text-secondary font-body mt-1">Temporal analysis of information integration</p>
+</div>
+<div class="flex gap-2">
+<span class="px-3 py-1 bg-primary-fixed text-on-primary-fixed text-[10px] font-bold uppercase rounded-full">Archive Stream</span>
+<span class="material-symbols-outlined text-outline cursor-pointer hover:text-primary transition-colors" data-icon="fullscreen">fullscreen</span>
+</div>
+</div>
+<!-- Simulated Line Chart -->
+<div class="h-64 flex items-end justify-between gap-2 px-2 relative">
+<!-- Grid Lines -->
+<div class="absolute inset-0 flex flex-col justify-between pointer-events-none opacity-20">
+<div class="border-b border-outline w-full"></div>
+<div class="border-b border-outline w-full"></div>
+<div class="border-b border-outline w-full"></div>
+<div class="border-b border-outline w-full"></div>
+</div>
+<!-- Chart Path Simulation -->
+<div class="w-full absolute bottom-12 left-0 h-48 pointer-events-none">
+<svg class="w-full h-full overflow-visible" preserveaspectratio="none" viewbox="0 0 1000 200">
+<path d="M0,180 Q100,160 200,100 T400,120 T600,40 T800,80 T1000,20" fill="none" stroke="url(#gradient)" stroke-linecap="round" stroke-width="4"></path>
+<defs>
+<lineargradient id="gradient" x1="0%" x2="100%" y1="0%" y2="0%">
+<stop offset="0%" style="stop-color:#1e293b"></stop>
+<stop offset="100%" style="stop-color:#d4e3ff"></stop>
+</lineargradient>
+</defs>
+</svg>
+</div>
+<!-- Monthly Markers -->
+<div class="flex flex-col items-center gap-2 flex-1">
+<span class="text-[10px] font-bold text-outline uppercase font-label">Jan</span>
+</div>
+<div class="flex flex-col items-center gap-2 flex-1">
+<span class="text-[10px] font-bold text-outline uppercase font-label">Feb</span>
+</div>
+<div class="flex flex-col items-center gap-2 flex-1">
+<span class="text-[10px] font-bold text-outline uppercase font-label">Mar</span>
+</div>
+<div class="flex flex-col items-center gap-2 flex-1">
+<span class="text-[10px] font-bold text-outline uppercase font-label">Apr</span>
+</div>
+<div class="flex flex-col items-center gap-2 flex-1">
+<span class="text-[10px] font-bold text-outline uppercase font-label">May</span>
+</div>
+<div class="flex flex-col items-center gap-2 flex-1">
+<span class="text-[10px] font-bold text-primary uppercase font-label">Jun</span>
+</div>
+</div>
+</div>
+<!-- Thematic Allocation (Donut Chart) -->
+<div class="bg-surface-container-low rounded-lg p-8 border border-outline-variant/10 transition-all hover:bg-surface-container shadow-sm">
+<div class="mb-8">
+<h3 class="text-xl font-bold font-headline text-on-surface">Thematic Allocation</h3>
+<p class="text-sm text-secondary font-body mt-1">Resource distribution across domains</p>
+</div>
+<div class="relative flex items-center justify-center h-48">
+<!-- Radial Chart Mockup -->
+<div class="w-40 h-40 rounded-full border-[16px] border-secondary-container relative flex items-center justify-center">
+<div class="absolute inset-0 rounded-full border-[16px] border-primary border-r-transparent border-b-transparent transform rotate-12"></div>
+<div class="flex flex-col items-center">
+<span class="text-2xl font-extrabold text-on-surface">75%</span>
+<span class="text-[10px] font-bold text-outline uppercase tracking-tight">Main Vector</span>
+</div>
+</div>
+</div>
+<div class="mt-8 space-y-3">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-primary"></div>
+<span class="text-sm font-medium text-on-surface">Philosophy</span>
+</div>
+<span class="text-sm font-bold text-primary">75%</span>
+</div>
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-secondary"></div>
+<span class="text-sm font-medium text-on-surface">Technical</span>
+</div>
+<span class="text-sm font-bold text-secondary">15%</span>
+</div>
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-outline-variant"></div>
+<span class="text-sm font-medium text-on-surface">Ethics</span>
+</div>
+<span class="text-sm font-bold text-outline">10%</span>
+</div>
+</div>
+</div>
+</section>
+<!-- KPI Metrics Row -->
+<section class="grid grid-cols-1 md:grid-cols-3 gap-6">
+<!-- KPI 1 -->
+<div class="bg-white p-6 rounded-lg border border-outline-variant/5 shadow-sm flex items-center gap-4 transition-transform hover:scale-[1.02]">
+<div class="w-12 h-12 rounded-lg bg-primary-container flex items-center justify-center text-primary">
+<span class="material-symbols-outlined" data-icon="input">input</span>
+</div>
+<div>
+<span class="text-xs font-bold text-outline uppercase tracking-widest font-label">Information Ingress</span>
+<div class="flex items-baseline gap-2 mt-1">
+<span class="text-2xl font-extrabold font-headline text-on-surface">1,402</span>
+<span class="text-xs text-secondary font-medium">/ day</span>
+</div>
+</div>
+</div>
+<!-- KPI 2 -->
+<div class="bg-white p-6 rounded-lg border border-outline-variant/5 shadow-sm flex items-center gap-4 transition-transform hover:scale-[1.02]">
+<div class="w-12 h-12 rounded-lg bg-secondary-container flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined" data-icon="hub">hub</span>
+</div>
+<div>
+<span class="text-xs font-bold text-outline uppercase tracking-widest font-label">Neural Mapping</span>
+<div class="flex items-baseline gap-2 mt-1">
+<span class="text-2xl font-extrabold font-headline text-on-surface">89.2%</span>
+<span class="text-xs text-primary font-bold">Efficiency</span>
+</div>
+</div>
+</div>
+<!-- KPI 3 -->
+<div class="bg-white p-6 rounded-lg border border-outline-variant/5 shadow-sm flex items-center gap-4 transition-transform hover:scale-[1.02]">
+<div class="w-12 h-12 rounded-lg bg-tertiary-container flex items-center justify-center text-tertiary">
+<span class="material-symbols-outlined" data-icon="psychology">psychology</span>
+</div>
+<div>
+<span class="text-xs font-bold text-outline uppercase tracking-widest font-label">Cognitive Synthesis</span>
+<div class="flex items-baseline gap-2 mt-1">
+<span class="text-2xl font-extrabold font-headline text-on-surface">412</span>
+<span class="text-xs text-secondary font-medium">New Insights</span>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Contextual Footer Message -->
+<footer class="max-w-screen-2xl mx-auto px-8 pb-12 mt-4">
+<div class="bg-surface-container-low rounded-lg p-4 flex items-center justify-between border-l-4 border-primary">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary" data-icon="verified">verified</span>
+<span class="text-sm font-medium text-secondary">System integrity verified. Archive synchronization complete as of 14:00 UTC.</span>
+</div>
+<span class="text-[10px] font-bold text-outline uppercase tracking-tighter">Engine v1.4.2</span>
+</div>
+</footer>
+</body></html>

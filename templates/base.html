@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html class="light" lang="ko">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>{% block title %}Intellectual Curator{% endblock %}</title>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@700;800&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    
+    <style>
+        /* 💡 테마 색상 변수 정의 (다크 모드 완벽 대응) */
+        :root {
+            --color-primary: #1e293b;
+            --color-primary-container: #343f52;
+            --color-on-primary: #f6f7ff;
+            --color-background: #f7f9fb;
+            --color-surface: #ffffff;
+            --color-surface-container-lowest: #ffffff;
+            --color-surface-container-low: #f2f4f6;
+            --color-surface-container: #eceef0;
+            --color-surface-container-high: #e6e8ea;
+            --color-surface-container-highest: #e0e3e5;
+            --color-on-surface: #191c1e;
+            --color-secondary: #505f76;
+            --color-outline-variant: #c4c6cd;
+            --color-error: #b52b2b;
+        }
+        .dark {
+            --color-primary: #60a5fa; /* 다크 모드 포인트 블루 */
+            --color-primary-container: #1e3a8a;
+            --color-on-primary: #ffffff;
+            --color-background: #0b1220; /* 다크 모드 배경 */
+            --color-surface: #0f172a;
+            --color-surface-container-lowest: #0b1220;
+            --color-surface-container-low: #1e293b;
+            --color-surface-container: #334155;
+            --color-surface-container-high: #475569;
+            --color-surface-container-highest: #64748b;
+            --color-on-surface: #f8fafc; /* 다크 모드 밝은 텍스트 */
+            --color-secondary: #94a3b8;
+            --color-outline-variant: #475569;
+            --color-error: #ef4444;
+        }
+    </style>
+
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "var(--color-primary)",
+                        "primary-container": "var(--color-primary-container)",
+                        "on-primary": "var(--color-on-primary)",
+                        "background": "var(--color-background)",
+                        "surface": "var(--color-surface)",
+                        "surface-container": "var(--color-surface-container)",
+                        "surface-container-low": "var(--color-surface-container-low)",
+                        "surface-container-lowest": "var(--color-surface-container-lowest)",
+                        "surface-container-high": "var(--color-surface-container-high)",
+                        "surface-container-highest": "var(--color-surface-container-highest)",
+                        "on-surface": "var(--color-on-surface)",
+                        "secondary": "var(--color-secondary)",
+                        "outline-variant": "var(--color-outline-variant)",
+                        "error": "var(--color-error)"
+                    },
+                    fontFamily: { "headline": ["Manrope", "sans-serif"], "body": ["Inter", "sans-serif"] }
+                }
+            }
+        }
+    </script>
+
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/chat.css') }}">
+    <style>
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .scrolled-content::-webkit-scrollbar { width: 4px; }
+        .scrolled-content::-webkit-scrollbar-thumb { background: var(--color-outline-variant); border-radius: 10px; }
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="bg-background text-on-surface font-body h-screen flex flex-col overflow-hidden">
+
+    <header class="bg-surface border-b border-surface-container flex items-center justify-between px-6 h-16 w-full shrink-0 z-50">
+        <div class="flex items-center gap-8">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary">database</span>
+                <h1 class="text-xl font-bold tracking-tight font-headline">Intellectual Curator</h1>
+            </div>
+            <nav class="hidden md:flex items-center gap-6">
+                <a class="text-sm font-medium transition-colors border-b-2 border-primary text-on-surface pb-1" href="/chat">Knowledge Base</a>
+                <a class="text-sm font-medium transition-colors text-secondary hover:text-primary" href="/archive">Digital Archive</a>
+                <a class="text-sm font-medium transition-colors text-secondary hover:text-primary" href="/analytics">Visual Analytics</a>
+                <a class="text-sm font-medium transition-colors text-secondary hover:text-primary" href="/trace">Cognitive Trace</a>
+            </nav>
+        </div>
+        
+        <div class="flex items-center gap-4">
+            <button id="themeToggleGlobal" class="p-2 rounded-full hover:bg-surface-container transition-colors">
+                <span class="material-symbols-outlined text-secondary">light_mode</span>
+            </button>
+            <button id="logoutGlobal" class="px-3 py-1.5 rounded-full bg-error/10 text-error text-xs font-bold hover:bg-error/20 transition-colors">Logout</button>
+            <div class="w-8 h-8 rounded-full bg-primary-container flex items-center justify-center text-on-primary text-xs font-bold uppercase" title="{{ user_id }}">
+                {{ (user_id|string)[:2] if user_id else 'SY' }}
+            </div>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        {% block content %}{% endblock %}
+    </div>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

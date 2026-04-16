@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Digital Archive | Intellectual Curator</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary-fixed": "#dbe2fd",
+                        "inverse-surface": "#0b0f10",
+                        "tertiary-container": "#dbe2fd",
+                        "secondary": "#516077",
+                        "on-tertiary": "#f9f8ff",
+                        "surface-container-lowest": "#ffffff",
+                        "outline-variant": "#a9b4b9",
+                        "primary": "#545f73",
+                        "outline": "#717c82",
+                        "on-primary-container": "#475266",
+                        "error-container": "#fe8983",
+                        "on-secondary-container": "#445369",
+                        "secondary-dim": "#45546a",
+                        "on-error": "#fff7f6",
+                        "surface-container-high": "#e1e9ee",
+                        "on-tertiary-container": "#4a5167",
+                        "secondary-fixed": "#d4e3ff",
+                        "on-primary": "#f6f7ff",
+                        "surface-container": "#e8eff3",
+                        "secondary-container": "#d4e3ff",
+                        "tertiary-dim": "#4c5369",
+                        "on-surface-variant": "#566166",
+                        "on-primary-fixed-variant": "#515c70",
+                        "error": "#9f403d",
+                        "secondary-fixed-dim": "#c6d5f0",
+                        "on-secondary": "#f8f8ff",
+                        "on-background": "#2a3439",
+                        "tertiary": "#585e75",
+                        "primary-fixed-dim": "#cad5ed",
+                        "surface-bright": "#f7f9fb",
+                        "on-surface": "#2a3439",
+                        "primary-container": "#d8e3fb",
+                        "on-secondary-fixed-variant": "#4d5c73",
+                        "on-primary-fixed": "#354053",
+                        "surface": "#f7f9fb",
+                        "surface-tint": "#545f73",
+                        "surface-container-highest": "#d9e4ea",
+                        "inverse-on-surface": "#9a9d9f",
+                        "surface-container-low": "#f0f4f7",
+                        "background": "#f7f9fb",
+                        "surface-variant": "#d9e4ea",
+                        "on-tertiary-fixed": "#383f54",
+                        "surface-dim": "#cfdce3",
+                        "on-tertiary-fixed-variant": "#545b71",
+                        "primary-fixed": "#d8e3fb",
+                        "on-secondary-fixed": "#314056",
+                        "error-dim": "#4e0309",
+                        "tertiary-fixed-dim": "#cdd4ee",
+                        "inverse-primary": "#dae6fe",
+                        "primary-dim": "#485367",
+                        "on-error-container": "#752121"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Manrope"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body { font-family: 'Inter', sans-serif; }
+        h1, h2, h3, .font-headline { font-family: 'Manrope', sans-serif; }
+        .markdown-content h1 { font-size: 2.25rem; font-weight: 800; color: #1e293b; margin-bottom: 1rem; }
+        .markdown-content h2 { font-size: 1.5rem; font-weight: 700; color: #334155; margin-top: 2rem; margin-bottom: 0.75rem; }
+        .markdown-content p { line-height: 1.75; color: #475569; margin-bottom: 1rem; }
+        .markdown-content blockquote { border-left: 4px solid #94a3b8; padding-left: 1rem; font-style: italic; color: #64748b; }
+    </style>
+</head>
+<body class="bg-background text-on-background min-h-screen">
+<!-- TopNavBar -->
+<nav class="flex justify-between items-center w-full px-6 py-4 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 fixed top-0 z-50 h-16">
+<div class="flex items-center gap-8">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">database</span>
+<span class="text-xl font-bold tracking-tight text-slate-900 dark:text-white font-headline">Intellectual Curator</span>
+</div>
+<div class="hidden md:flex items-center gap-6">
+<a class="font-manrope text-sm font-medium transition-colors text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white" href="#">Knowledge Base</a>
+<a class="font-manrope text-sm font-medium transition-colors text-slate-900 dark:text-white border-b-2 border-slate-900 dark:border-slate-100 pb-1" href="#">Digital Archive</a>
+<a class="font-manrope text-sm font-medium transition-colors text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white" href="#">Visual Analytics</a>
+<a class="font-manrope text-sm font-medium transition-colors text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white" href="#">Cognitive Trace</a>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="p-2 rounded-full hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-on-surface-variant">notifications</span>
+</button>
+<button class="p-2 rounded-full hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-on-surface-variant">help</span>
+</button>
+<div class="w-8 h-8 rounded-full overflow-hidden ml-2 bg-primary-container">
+<img alt="User Profile" data-alt="professional portrait of an elderly academic man with gray hair and glasses in a library setting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCoGgV0xbWHtsHYezK_oOyynR9fKEcturYbhgDK92-TBv4-UXD3nMv9ZLpJTyYoGvnsBMaW7jjBMlaAKyX8kuEPpH6KAv_ksv_rqwk85vW4qNRGq0wSwv0v0b1X0nK952hhm6Udgr0XU6nu84_0ddMEvvw4aEl1JJaI42h_WnBxdHZ8RgSQRa7HZ5j2QucwDJE3hhhj0YKZ8exhSQOPhvjHLIr0jXYZUos7jO_fwuFcdZsH3vLMfckH7NxjLW-QGuHQG3QjEvROXg8"/>
+</div>
+</div>
+</nav>
+<!-- Main Content Shell -->
+<main class="pt-24 flex flex-col min-h-screen">
+<!-- Header Section -->
+<header class="px-8 pb-8">
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
+<div>
+<h1 class="text-4xl font-extrabold tracking-tight text-on-surface mb-2">Digital Archive</h1>
+<p class="text-secondary text-sm font-body">Access and curate institutional knowledge from the primary repository.</p>
+</div>
+<div class="relative w-full md:w-96">
+<span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-outline">search</span>
+<input class="w-full pl-12 pr-4 py-3 bg-surface-container-highest rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-sm placeholder:text-outline" placeholder="Search archive by keywords, dates, or tags..." type="text"/>
+</div><button class="px-6 py-2 rounded-full border border-outline-variant text-sm font-medium text-secondary hover:bg-surface-container transition-all whitespace-nowrap">
+    + Add Term
+</button>
+</div>
+<!-- Tabs -->
+<div class="flex items-center gap-8 mt-8 border-b border-slate-200">
+<button class="pb-3 text-sm font-semibold text-slate-900 border-b-2 border-slate-900">Reports</button>
+<button class="pb-3 text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors">Dictionary</button>
+</div>
+</header>
+<!-- Split View -->
+<div class="flex-1 flex px-8 pb-8 gap-8">
+<!-- Left: Document List (60%) -->
+<section class="w-3/5 flex flex-col gap-4">
+<!-- Bento Grid Layout for Cards -->
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+<!-- Card 1 -->
+<div class="group bg-surface-container-lowest p-6 rounded-xl border border-transparent hover:border-outline-variant/30 transition-all cursor-pointer shadow-sm">
+<div class="flex justify-between items-start mb-4">
+<span class="px-2 py-1 bg-primary-container text-on-primary-container text-[10px] font-bold rounded uppercase tracking-wider">Strategy</span>
+<span class="text-xs text-outline font-label">Oct 12, 2023</span>
+</div>
+<h3 class="text-lg font-bold text-on-surface mb-3 group-hover:text-primary transition-colors">Project Alpha - Q3 Strategy Review</h3>
+<div class="flex flex-wrap gap-2 mb-4">
+<span class="text-xs font-medium text-secondary bg-surface-container px-2 py-1 rounded">#담당자</span>
+<span class="text-xs font-medium text-secondary bg-surface-container px-2 py-1 rounded">#리포트URL</span>
+</div>
+<div class="flex items-center gap-2 text-xs text-outline">
+<span class="material-symbols-outlined text-sm">visibility</span>
+<span>1.2k views</span>
+<span class="mx-1">•</span>
+<span class="material-symbols-outlined text-sm">attachment</span>
+<span>3 files</span>
+</div>
+</div>
+<!-- Card 2 (Active/Selected) -->
+<div class="group bg-surface-container-high p-6 rounded-xl border-2 border-primary shadow-sm relative overflow-hidden">
+<div class="flex justify-between items-start mb-4">
+<span class="px-2 py-1 bg-tertiary-container text-on-tertiary-container text-[10px] font-bold rounded uppercase tracking-wider">Analysis</span>
+<span class="text-xs text-on-surface-variant font-label">Oct 10, 2023</span>
+</div>
+<h3 class="text-lg font-bold text-on-surface mb-3">Cognitive Bias in Data Visualization</h3>
+<div class="flex flex-wrap gap-2 mb-4">
+<span class="text-xs font-medium text-secondary bg-white/50 px-2 py-1 rounded">#담당자</span>
+<span class="text-xs font-medium text-secondary bg-white/50 px-2 py-1 rounded">#리포트URL</span>
+</div>
+<div class="flex items-center gap-2 text-xs text-primary font-bold">
+<span class="material-symbols-outlined text-sm" style="font-variation-settings: 'FILL' 1;">description</span>
+<span>Currently Previewing</span>
+</div>
+</div>
+<!-- Card 3 -->
+<div class="group bg-surface-container-lowest p-6 rounded-xl border border-transparent hover:border-outline-variant/30 transition-all cursor-pointer shadow-sm">
+<div class="flex justify-between items-start mb-4">
+<span class="px-2 py-1 bg-primary-container text-on-primary-container text-[10px] font-bold rounded uppercase tracking-wider">Archive</span>
+<span class="text-xs text-outline font-label">Sep 28, 2023</span>
+</div>
+<h3 class="text-lg font-bold text-on-surface mb-3 group-hover:text-primary transition-colors">Visual Analytics Infrastructure v2</h3>
+<div class="flex flex-wrap gap-2 mb-4">
+<span class="text-xs font-medium text-secondary bg-surface-container px-2 py-1 rounded">#담당자</span>
+<span class="text-xs font-medium text-secondary bg-surface-container px-2 py-1 rounded">#리포트URL</span>
+</div>
+<div class="flex items-center gap-2 text-xs text-outline">
+<span class="material-symbols-outlined text-sm">visibility</span>
+<span>842 views</span>
+<span class="mx-1">•</span>
+<span class="material-symbols-outlined text-sm">attachment</span>
+<span>1 file</span>
+</div>
+</div>
+<!-- Card 4 -->
+<div class="group bg-surface-container-lowest p-6 rounded-xl border border-transparent hover:border-outline-variant/30 transition-all cursor-pointer shadow-sm">
+<div class="flex justify-between items-start mb-4">
+<span class="px-2 py-1 bg-primary-container text-on-primary-container text-[10px] font-bold rounded uppercase tracking-wider">Reports</span>
+<span class="text-xs text-outline font-label">Sep 15, 2023</span>
+</div>
+<h3 class="text-lg font-bold text-on-surface mb-3 group-hover:text-primary transition-colors">Annual Knowledge Audit Summary</h3>
+<div class="flex flex-wrap gap-2 mb-4">
+<span class="text-xs font-medium text-secondary bg-surface-container px-2 py-1 rounded">#담당자</span>
+<span class="text-xs font-medium text-secondary bg-surface-container px-2 py-1 rounded">#리포트URL</span>
+</div>
+<div class="flex items-center gap-2 text-xs text-outline">
+<span class="material-symbols-outlined text-sm">visibility</span>
+<span>2.4k views</span>
+<span class="mx-1">•</span>
+<span class="material-symbols-outlined text-sm">attachment</span>
+<span>5 files</span>
+</div>
+</div>
+</div>
+<!-- Load More / Empty State Spacer -->
+<div class="flex justify-center mt-4">
+<button class="px-6 py-2 rounded-full border border-outline-variant text-sm font-medium text-secondary hover:bg-surface-container transition-all">
+                    Load Older Archives
+                </button>
+</div>
+</section>
+<!-- Right: Document Preview (40%) -->
+<aside class="w-2/5 sticky top-24 self-start h-[calc(100vh-10rem)] bg-surface-container-lowest rounded-xl shadow-lg overflow-hidden flex flex-col">
+<!-- Preview Header -->
+<div class="p-4 bg-surface-container border-b border-surface-container-highest flex items-center justify-between">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary">description</span>
+<span class="text-xs font-bold uppercase tracking-widest text-secondary">Document Preview</span>
+</div>
+<div class="flex items-center gap-2">
+<button class="p-1.5 hover:bg-surface-variant rounded transition-colors" title="Download">
+<span class="material-symbols-outlined text-lg">download</span>
+</button>
+<button class="p-1.5 hover:bg-surface-variant rounded transition-colors" title="Fullscreen">
+<span class="material-symbols-outlined text-lg">fullscreen</span>
+</button>
+</div>
+</div>
+<!-- Markdown Content Canvas -->
+<div class="flex-1 overflow-y-auto p-10 markdown-content">
+<h1 class="font-headline">Cognitive Bias in Data Visualization</h1>
+<div class="flex items-center gap-4 mb-8">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded-full bg-slate-200">
+<img alt="Author" class="rounded-full overflow-hidden" data-alt="Close up portrait of a male researcher wearing glasses" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCzL-siCL0V9Jea65A-JkNV6Xis9EynrfKnk6GRKkxJYgFPiePcSZF9Ap2ccPmW53WyxnsgDNcugfg82O8axCyohWzx1GvwsBqpgvkA4WUOWJBt0m_xtwUh6jB_N6Cmidaa_UDajGIxpMo-7ClRY2CKAwMv43pZRyi4mCG7l3kk1YUrCizzDyAaSoTqskzfShkdqxFWL4B7nF0B5SkK34Afqo65WoQ4lCvGvf87kVM5dGmGANJLDwOATKmseLZQ_t9u1CyjIgj_H7Y"/>
+</div>
+<span class="text-sm font-medium text-slate-700">Dr. Helena Vance</span>
+</div>
+<span class="text-slate-300">|</span>
+<span class="text-sm text-slate-500">October 10, 2023</span>
+</div>
+<p>Understanding how human cognition processes visual information is critical for effective archival communication. In this report, we explore how specific visualization techniques can inadvertently trigger confirmation bias or the anchoring effect.</p>
+<h2>The Primacy of Visual Hierarchy</h2>
+<p>When users interact with complex datasets, the brain seeks shortcuts. If the visual weight is concentrated in a specific quadrant without context, the <strong>"Archival Trap"</strong> occurs—where the user assumes the most prominent data point is the only relevant one.</p>
+<blockquote>
+                    "The goal of visual analytics isn't just to show data, but to guard the viewer against their own cognitive predispositions."
+                </blockquote>
+<h2>Methodology</h2>
+<p>Our research involved over 500 session logs from the <em>Cognitive Trace</em> module, analyzing heatmaps of user interaction with varied archival layouts. We found that asymmetric layouts, similar to this archive's design, actually <strong>reduced fatigue</strong> and improved information retention by 22% compared to standard grid views.</p>
+<div class="mt-8 rounded-lg overflow-hidden">
+<img alt="Data Visualization Example" class="w-full h-48 object-cover" data-alt="Abstract data visualization with flowing blue and grey curves on a clean white background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBJl-Nw-3apQyggioDv0r6CgdN9FQFaD_oqpgxn015QHt4MTQKd5tWGsndKA5CCCaJegwprLucApYp_wE-ZQH0jyWmPWBP5ntpQ-JgsZYg8hgKYFvQkVcT9f0FSmRis1sAv0Pe2wa1SUdnLa6r4GklpZwbcC1QtU76WV3L7Qmo_p5PysApzsM2bp3f_IjC-NpghKXDAJIBNAozWDoSOGmn4peuiJNEGydTdBzEOhZUmmiPm5jJ3_uWrt_d1H3BBlDz6qX3ffT0t7gI"/>
+</div>
+<p class="text-xs text-slate-400 italic mt-2 text-center">Fig 1.1: Tonal shifts versus grid lines in cognitive load analysis.</p>
+<h2>Key Takeaways</h2>
+<ul class="list-disc pl-5 text-slate-600 space-y-2 mb-6">
+<li>Eliminate unnecessary 1px borders to reduce visual noise.</li>
+<li>Utilize tonal shifts to denote primary versus secondary information.</li>
+<li>Implement clear citations to establish immediate credibility.</li>
+</ul>
+</div>
+<!-- Confidence Meter (RAG Specific) -->
+</aside>
+</div>
+</main>
+</body></html>

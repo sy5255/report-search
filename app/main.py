@@ -100,6 +100,24 @@ async def chat_page(request: Request):
         "index_options": INDEX_OPTIONS,
         "default_top_k": DEFAULT_TOP_K,
     })
+    
+@app.get("/archive", response_class=HTMLResponse)
+async def archive_page(request: Request):
+    user = _require_user(request)
+    # Phase 4에서 구현할 리포트/사전 페이지의 진입점
+    return templates.TemplateResponse("base.html", {"request": request})
+
+@app.get("/analytics", response_class=HTMLResponse)
+async def analytics_page(request: Request):
+    user = _require_user(request)
+    # Phase 5에서 구현할 시각화 페이지
+    return templates.TemplateResponse("base.html", {"request": request})
+
+@app.get("/trace", response_class=HTMLResponse)
+async def trace_page(request: Request):
+    user = _require_user(request)
+    # Phase 5에서 구현할 인지 추적 페이지
+    return templates.TemplateResponse("base.html", {"request": request})
 
 
 # =========================
