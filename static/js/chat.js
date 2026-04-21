@@ -731,8 +731,9 @@ function appendMessage(role, content, metaText, msgId, extra = null){
   let extraHtml = "";
   let intentHtml = "";
   let chipsHtml = "";
+  let stepsHtml = "";
 
-  if(role === "user" && extra){
+  if(role === "user" && extra) {
     extraHtml = buildQueryInterpretationCard(extra); 
   }
 
@@ -759,10 +760,66 @@ function appendMessage(role, content, metaText, msgId, extra = null){
         </div>`;
     }
 
+    // 💡 [개편] 계층형 개별 토글 UI 적용 (숫자 뱃지 + 양끝 정렬)
+    if (extra.agent_steps && extra.agent_steps.length > 0) {
+      const stepsList = extra.agent_steps.map((step, index) => {
+        const stepNum = index + 1;
+        
+        // 1. 하위 호환성 (문자열만 있을 경우)
+        if (typeof step === 'string') {
+           return `
+           <div class="py-2.5 px-3 border-b border-surface-container/50 dark:border-[#1f2b4a]/50 last:border-0 flex items-start gap-3">
+               <span class="flex-shrink-0 w-5 h-5 rounded-full bg-surface-container-high dark:bg-[#1f2b4a] text-secondary dark:text-[#94a3b8] flex items-center justify-center text-[10px] font-bold mt-0.5">${stepNum}</span>
+               <span class="text-on-surface dark:text-[#e7eefc] leading-relaxed">${escapeHtml(step)}</span>
+           </div>`;
+        } 
+        
+        // 2. 객체 형태인데 기술 로그(SQL)가 없는 경우
+        if (!step.technical_detail) {
+           return `
+           <div class="py-2.5 px-3 border-b border-surface-container/50 dark:border-[#1f2b4a]/50 last:border-0 flex items-start gap-3">
+               <span class="flex-shrink-0 w-5 h-5 rounded-full bg-surface-container-high dark:bg-[#1f2b4a] text-secondary dark:text-[#94a3b8] flex items-center justify-center text-[10px] font-bold mt-0.5">${stepNum}</span>
+               <span class="text-on-surface dark:text-[#e7eefc] leading-relaxed">${escapeHtml(step.thought)}</span>
+           </div>`;
+        }
+
+        // 3. 객체 형태이고 기술 로그(SQL)가 있는 경우 (개별 details 토글 생성)
+        // [주의] summary 태그 안에서 list-none과 [&::-webkit-details-marker]:hidden 을 사용하여 기본 화살표를 숨깁니다.
+        return `
+        <details class="group/step border-b border-surface-container/50 dark:border-[#1f2b4a]/50 last:border-0">
+            <summary class="py-2.5 px-3 flex justify-between items-start gap-4 cursor-pointer hover:bg-surface-container dark:hover:bg-[#1f2b4a] transition-colors list-none [&::-webkit-details-marker]:hidden outline-none">
+                <div class="flex items-start gap-3">
+                    <span class="flex-shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary dark:bg-[#60a5fa]/20 dark:text-[#60a5fa] flex items-center justify-center text-[10px] font-bold mt-0.5">${stepNum}</span>
+                    <span class="text-on-surface dark:text-[#e7eefc] font-medium leading-relaxed">${escapeHtml(step.thought)}</span>
+                </div>
+                <div class="flex-shrink-0 flex items-center gap-1 text-[10px] font-bold text-outline-variant dark:text-[#475569] group-hover/step:text-primary dark:group-hover/step:text-[#60a5fa] transition-colors mt-0.5 px-2 py-1 rounded border border-surface-container dark:border-[#1f2b4a]">
+                    <span>로그 보기</span>
+                    <span class="material-symbols-outlined text-[12px] transition-transform group-open/step:rotate-180">keyboard_arrow_down</span>
+                </div>
+            </summary>
+            <div class="px-3 pb-3 pl-11">
+                <pre class="p-3 bg-surface-container-highest dark:bg-[#0b1220] rounded text-[11px] text-secondary dark:text-[#94a3b8] overflow-x-auto border border-surface-container/30 dark:border-[#1f2b4a]/30"><code>${escapeHtml(step.technical_detail)}</code></pre>
+            </div>
+        </details>`;
+      }).join("");
+
+      stepsHtml = `
+        <details class="mb-5 bg-surface-container-lowest dark:bg-[#0f1a33] border border-surface-container dark:border-[#1f2b4a] rounded-lg overflow-hidden group shadow-sm">
+            <summary class="text-xs font-bold text-secondary dark:text-[#94a3b8] cursor-pointer p-3 outline-none hover:bg-surface-container-low dark:hover:bg-[#101f3f] transition-colors flex items-center gap-2 select-none">
+                <span class="material-symbols-outlined text-sm transition-transform group-open:rotate-90">chevron_right</span>
+                <span class="material-symbols-outlined text-sm">memory</span> 
+                Agent 추론 과정 및 도구 실행 로그 보기
+            </summary>
+            <div class="pt-1 text-[12px] bg-surface-container-low dark:bg-[#101f3f] border-t border-surface-container dark:border-[#1f2b4a]">
+                ${stepsList}
+            </div>
+        </details>
+      `;
+    }
+
     if(extra.suggested_actions && extra.suggested_actions.length > 0) {
       const chips = extra.suggested_actions.map(chip => {
         if (chip.disabled) return `<button class="px-4 py-2 bg-surface-container dark:bg-[#1f2b4a] text-outline dark:text-[#94a3b8] rounded-full text-[11px] font-semibold flex items-center gap-2 cursor-not-allowed opacity-60" disabled><span class="material-symbols-outlined text-sm">block</span> ${escapeHtml(chip.label)}</button>`;
-        // transition-all 제거
         return `<button class="action-chip px-4 py-2 border border-outline-variant dark:border-[#475569] hover:bg-surface-container dark:hover:bg-[#1f2b4a] dark:text-[#e7eefc] rounded-full text-[11px] font-semibold flex items-center gap-2 hover:-translate-y-0.5" data-action="${escapeHtml(chip.action)}"><span class="material-symbols-outlined text-sm">bolt</span> ${escapeHtml(chip.label)}</button>`;
       }).join("");
       chipsHtml = `<div class="pt-4 mt-4 border-t border-surface-container dark:border-[#1f2b4a] flex flex-wrap items-center gap-3">${chips}</div>`;
@@ -770,7 +827,6 @@ function appendMessage(role, content, metaText, msgId, extra = null){
   }
 
   if (role === "user") {
-    // 💡 [핵심 복구] 지워졌던 ${extraHtml}을 다시 제자리에 넣었습니다! (이슈 3 해결)
     div.innerHTML = `
       <div class="max-w-[85%] flex flex-col items-end">
         <div class="user-bubble-inner bg-primary text-on-primary p-4 rounded-2xl rounded-tr-none shadow-sm flex flex-col gap-3 w-full">
@@ -783,10 +839,13 @@ function appendMessage(role, content, metaText, msgId, extra = null){
     div.innerHTML = `
       <div class="assistant-card w-full max-w-[90%] bg-white dark:bg-[#0f1a33] border border-surface-container dark:border-[#1f2b4a] rounded-2xl p-6 hover:shadow-md cursor-pointer group/ai-card">
         ${intentHtml}
-        <div class="content markdown-body text-sm leading-relaxed text-on-surface dark:text-[#e7eefc] pl-11">
-            ${renderMessageContent(role, content)}
+        <div class="pl-11">
+            ${stepsHtml}
+            <div class="content markdown-body text-sm leading-relaxed text-on-surface dark:text-[#e7eefc]">
+                ${renderMessageContent(role, content)}
+            </div>
+            ${chipsHtml}
         </div>
-        <div class="pl-11">${chipsHtml}</div>
       </div>`;
   }
 
@@ -808,12 +867,13 @@ function appendMessage(role, content, metaText, msgId, extra = null){
         sendMessage(actionTag, targetQuery.trim());
       });
     });
-  }
+  } 
 
   if(role === "assistant" && msgId){
     div.addEventListener("click", async (e)=>{
       const target = e.target;
-      if(target && (target.closest("a") || target.closest("button") || target.closest("details"))) return;
+      // 💡 details 태그 내부를 클릭할 때는 상위 카드의 클릭 이벤트(증거 보기)가 트리거되지 않도록 방어
+      if(target && (target.closest("a") || target.closest("button") || target.closest("details") || target.closest("summary") || target.closest("pre") || target.closest("code"))) return;
       setSelectedAssistantMsg(msgId);
       await loadEvidenceByAssistantMsgId(msgId);
     });
@@ -824,7 +884,6 @@ function appendMessage(role, content, metaText, msgId, extra = null){
   enhanceRenderedMessage(div);
   chat.scrollTop = chat.scrollHeight;
 }
-
 
 /* ---------- evidence ---------- */
 async function loadEvidenceByAssistantMsgId(assistantMsgId){
@@ -1347,15 +1406,13 @@ function hideImgPreview(){
   pv.innerHTML = "";
 }
 
-/* ---------- send message ---------- */
+/* ---------- send message (sendMessage) ---------- */
 async function sendMessage(overrideActionTag = null, specificQuery = null){
-  let rawSendText = "";     // 서버로 날아갈 진짜 텍스트 (태그 포함)
-  let displayUserText = ""; // 말풍선에 예쁘게 보여줄 텍스트
+  let rawSendText = "";     
+  let displayUserText = ""; 
 
   if (overrideActionTag) {
     const queryToUse = specificQuery || lastRealUserQuery;
-
-    // 액션 칩 버튼을 눌렀을 때
     if (overrideActionTag === "retry") {
       rawSendText = "[DB_ANALYSIS] 이전 검색 결과가 부족하거나 사용자가 더 넓은 범위를 원합니다. 기존에 적용했던 엄격한 일치 조건 (공, 모, 라 등)을 최소화하거나 제거하고, 가장 핵심이 되는 키워드만 사용하여 'LIKE' 검색 위주로 조건을 넓혀서 다음 질문에 대해 다시 쿼리를 작성해줘: " + lastRealUserQuery;
       displayUserText = "🔄 조건을 넓혀서 다시 검색 중...";
@@ -1366,91 +1423,129 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
       else displayUserText = "🔄 다시 검색 중...";
     }
     lastRealUserQuery = queryToUse;
-   
   } else {
-    // 일반 엔터/전송을 눌렀을 때
     rawSendText = el("userInput").value.trim();
     if(!rawSendText) return;
-   
     lastRealUserQuery = rawSendText;
     displayUserText = rawSendText;
     el("userInput").value = "";
   }
 
-  // 1. 유저 질문 렌더링
   appendMessage("user", displayUserText, null, null);
 
-  // 2. 로딩 메시지 렌더링
   const pendingId = "PENDING_" + Date.now();
-  appendMessage("assistant", "⏳ 답변 생성 중...", null, pendingId);
+  const loadingHtml = `
+    <div class="agent-status-wrapper flex items-center gap-2 text-sm text-secondary dark:text-[#94a3b8] font-medium px-2 py-2 mt-2">
+       <span class="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>
+       <span class="agent-status-text transition-opacity duration-300 opacity-100 tracking-wide">시스템 에이전트 연결 중...</span>
+    </div>
+  `;
+  appendMessage("assistant", loadingHtml, null, pendingId);
 
-  // 버튼 비활성화
   el("sendBtn").disabled = true;
   el("userInput").disabled = true;
 
-  // 💡 [수정됨] 화면에서 지워진 Index/TopK UI를 읽어오는 코드를 삭제하고,
-  // 백엔드로 보낼 payload 변수를 이곳에서 '단 한 번만' 선언합니다.
   const payload = {
     session_id: currentSessionId,
     user_text: rawSendText,
-    index_names: [window.__BOOT__.defaultIndex], // 기본값 하드코딩
-    top_k: 5,                                    // 5로 고정
+    index_names: [window.__BOOT__.defaultIndex],
+    top_k: 5,
     filters: null
   };
 
   try{
-    const res = await apiPost("/api/chat", payload);
-    currentSessionId = res.session_id;
+    const response = await fetch("/api/chat_stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
 
-    // 로딩 메시지 제거
-    const pend = document.querySelector(`.msg.assistant[data-msg-id="${pendingId}"]`);
-    if(pend) pend.remove();
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let done = false;
 
-    // 검색 해석 적용 카드 부착
-    const userMsgs = Array.from(document.querySelectorAll(".msg.user"));
-    const lastUserMsg = userMsgs[userMsgs.length - 1];
+    const pendNode = document.querySelector(`.msg.assistant[data-msg-id="${pendingId}"]`);
+    const statusTextNode = pendNode ? pendNode.querySelector(".agent-status-text") : null;
+    let finalRes = null;
 
-    // 💡 [수정] 전체 말풍선 컨테이너가 아니라, 파란색 배경을 가진 내부 박스를 찾습니다.
-    const innerBubble = lastUserMsg.querySelector(".user-bubble-inner");
-
-    if(innerBubble && !innerBubble.querySelector(".query-interpret-card")){
-      const html = buildQueryInterpretationCard({
-        rewritten_query: res.rewritten_query,
-        normalized_query: res.normalized_query,
-        expanded_query: res.expanded_query,
-        detected_terms: res.detected_terms || []
-      });
-      if(html){
-        innerBubble.insertAdjacentHTML("beforeend", html);
-        wireQueryInterpretCard(innerBubble);
+    while (!done) {
+      const { value, done: readerDone } = await reader.read();
+      done = readerDone;
+      if (value) {
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n").filter(line => line.trim() !== "");
+        
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line);
+            
+            if (parsed.type === "step") {
+              // 💡 객체로 변경된 데이터에서 'thought'만 추출하여 라이브 로딩 텍스트로 사용
+              const displayThought = parsed.data.thought || parsed.message || "로딩 중...";
+              
+              if (statusTextNode && statusTextNode.textContent !== displayThought) {
+                statusTextNode.style.opacity = '0';
+                setTimeout(() => {
+                  statusTextNode.textContent = displayThought;
+                  statusTextNode.style.opacity = '1';
+                }, 150);
+              }
+            } else if (parsed.type === "final") {
+              finalRes = parsed.data;
+            }
+          } catch (e) {
+             console.error("Chunk parse error:", e);
+          }
+        }
       }
     }
 
-    const extraData = {
-      intent: res.intent,
-      suggested_actions: res.suggested_actions,
-      agent_steps: res.agent_steps
-    };
+    if (pendNode) pendNode.remove(); 
+    
+    if (finalRes) {
+        currentSessionId = finalRes.session_id;
 
-    // AI 답변 렌더링
-    appendMessage("assistant", res.assistant_text, new Date().toISOString(), res.assistant_msg_id || null, extraData);
-    setSelectedAssistantMsg(res.assistant_msg_id || "");
+        const userMsgs = Array.from(document.querySelectorAll(".msg.user"));
+        const lastUserMsg = userMsgs[userMsgs.length - 1];
+        const innerBubble = lastUserMsg ? lastUserMsg.querySelector(".user-bubble-inner") : null;
 
-    // Evidence 패널 업데이트
-    currentEvidenceAssistantMsgId = res.assistant_msg_id || null;
-    lastTopDocs = res.top_docs || [];
-    renderTopDocsFiltered();
+        if(innerBubble && !innerBubble.querySelector(".query-interpret-card")){
+          const html = buildQueryInterpretationCard({
+            rewritten_query: finalRes.rewritten_query,
+            normalized_query: finalRes.normalized_query,
+            expanded_query: finalRes.expanded_query,
+            detected_terms: finalRes.detected_terms || []
+          });
+          if(html){
+            innerBubble.insertAdjacentHTML("beforeend", html);
+            wireQueryInterpretCard(innerBubble);
+          }
+        }
 
-    lastCitations = res.citations || {answer:[], final:res.assistant_text};
-    renderCitations(lastCitations);
+        const extraData = {
+          intent: finalRes.intent,
+          suggested_actions: finalRes.suggested_actions,
+          agent_steps: finalRes.agent_steps
+        };
 
-    await refreshSessions();
-   
+        appendMessage("assistant", finalRes.assistant_text, new Date().toISOString(), finalRes.assistant_msg_id || null, extraData);
+        setSelectedAssistantMsg(finalRes.assistant_msg_id || "");
+
+        currentEvidenceAssistantMsgId = finalRes.assistant_msg_id || null;
+        lastTopDocs = finalRes.top_docs || [];
+        renderTopDocsFiltered();
+
+        lastCitations = finalRes.citations || {answer:[], final:finalRes.assistant_text};
+        renderCitations(lastCitations);
+
+        await refreshSessions();
+    }
+
   } catch(e){
     const pend = document.querySelector(`.msg.assistant[data-msg-id="${pendingId}"]`);
     if(pend){
-      const contentDiv = pend.querySelector(".content");
-      if(contentDiv) contentDiv.textContent = "ERROR: " + String(e);
+      const contentDiv = pend.querySelector(".content") || pend;
+      contentDiv.innerHTML = `<div class="text-error p-4">ERROR: ${escapeHtml(String(e))}</div>`;
     } else {
       appendMessage("assistant", "ERROR: " + String(e), new Date().toISOString(), null);
     }
