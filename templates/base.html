@@ -89,10 +89,10 @@
                 <h1 class="text-xl font-bold tracking-tight font-headline">Intellectual Curator</h1>
             </div>
             <nav class="hidden md:flex items-center gap-6">
-                <a class="text-sm font-medium transition-colors border-b-2 border-primary text-on-surface pb-1" href="/chat">Knowledge Base</a>
-                <a class="text-sm font-medium transition-colors text-secondary hover:text-primary" href="/archive">Digital Archive</a>
-                <a class="text-sm font-medium transition-colors text-secondary hover:text-primary" href="/analytics">Visual Analytics</a>
-                <a class="text-sm font-medium transition-colors text-secondary hover:text-primary" href="/trace">Cognitive Trace</a>
+                <a href="/chat" class="text-sm font-medium transition-colors {% if active_tab == 'knowledge_base' %} border-b-2 border-primary text-on-surface pb-1 {% else %} text-secondary hover:text-on-surface {% endif %}">Knowledge Base</a>
+                <a href="/archive" class="text-sm font-medium transition-colors {% if active_tab == 'archive' %} border-b-2 border-primary text-on-surface pb-1 {% else %} text-secondary hover:text-on-surface {% endif %}">Digital Archive</a>
+                <a href="/analytics" class="text-sm font-medium transition-colors text-secondary hover:text-on-surface">Visual Analytics</a>
+                <a href="/trace" class="text-sm font-medium transition-colors text-secondary hover:text-on-surface">Cognitive Trace</a>
             </nav>
         </div>
         

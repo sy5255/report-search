@@ -1,5 +1,9 @@
+import os 
+import re  
 import json
 from pathlib import Path
+from datetime import datetime 
+from email.utils import parsedate_to_datetime
 from fastapi import FastAPI, Request, Response, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -90,7 +94,6 @@ async def logout(request: Request):
     resp.delete_cookie(key="token")
     return resp
 
-
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request):
     user = _require_user(request)
@@ -100,13 +103,16 @@ async def chat_page(request: Request):
         "default_index": DEFAULT_INDEX_NAME,
         "index_options": INDEX_OPTIONS,
         "default_top_k": DEFAULT_TOP_K,
+        "active_tab": "knowledge_base" # 💡 기존 chat 라우터에도 추가
     })
     
 @app.get("/archive", response_class=HTMLResponse)
 async def archive_page(request: Request):
     user = _require_user(request)
-    # Phase 4에서 구현할 리포트/사전 페이지의 진입점
-    return templates.TemplateResponse("base.html", {"request": request})
+    return templates.TemplateResponse("archive.html", {
+        "request": request, 
+        "active_tab": "archive" # 프론트엔드에서 밑줄을 그리기 위한 변수
+    })
 
 @app.get("/analytics", response_class=HTMLResponse)
 async def analytics_page(request: Request):
@@ -524,6 +530,167 @@ async def api_chat(request: Request):
         "agent_steps": agent_steps,
     }
 
+# =========================
+# API: Digital Archive (Local Exact Match) - 💡 신규 추가
+# =========================
+# 속도 최적화를 위해 파일을 한 번만 읽어 메모리에 저장하는 전역 캐시
+_ARCHIVE_CACHE = []
+_CACHE_LOADED = False
+
+# 💡 1. 날짜 문자열을 진짜 시간(Timestamp) 숫자로 변환하는 강력한 함수
+def _parse_date_to_timestamp(date_str):
+    if not date_str:
+        return 0.0 # 날짜가 아예 없으면 맨 뒤로 보냄
+    
+    # 1) 이메일 표준 형식 시도 (예: Fri, 01 Aug 2025 12:34:56 +0900)
+    try:
+        dt = parsedate_to_datetime(date_str)
+        if dt is not None:
+            return dt.timestamp()
+    except Exception:
+        pass
+        
+    # 2) 정규식을 이용해 강제로 연/월/일 추출 (예: 2026-04-10, 2026. 4. 10, 2026년 4월 등)
+    match = re.search(r'(\d{4})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})', date_str)
+    if match:
+        try:
+            y, m, d = map(int, match.groups())
+            return datetime(y, m, d).timestamp()
+        except Exception:
+            pass
+            
+    return 0.0 # 파싱에 완전히 실패하면 맨 뒤로
+
+# 💡 2. 로컬 문서 검색 로직
+def get_local_archive_docs():
+    global _ARCHIVE_CACHE, _CACHE_LOADED
+    if _CACHE_LOADED:
+        return _ARCHIVE_CACHE
+        
+    docs = []
+    
+    for filepath in PARSE_ROOT.rglob("*.md"):
+        try:
+            content = filepath.read_text(encoding="utf-8", errors="ignore")
+            
+            # 중간 산출물 무시 로직
+            if "[MAIL_META]" not in content:
+                continue
+            
+            title = filepath.stem
+            mail_from = ""
+            mail_date = ""
+            report_links = []
+            
+            # 💡 3. 메타데이터 파싱 로직 강화 (띄어쓰기, 대소문자 문제 완벽 방어)
+            in_meta = False
+            for line in content.splitlines():
+                line_s = line.strip()
+                if line_s == "[MAIL_META]":
+                    in_meta = True
+                    continue
+                
+                if in_meta:
+                    # 메타데이터 구역 종료 조건
+                    if line_s.startswith("---") or line_s.startswith("#"):
+                        break
+                    if not line_s: # 빈 줄 무시
+                        continue
+                        
+                    # ":" 기호를 기준으로 Key와 Value를 분리하여 띄어쓰기 오류 방지
+                    if ":" in line_s:
+                        key, val = line_s.split(":", 1)
+                        key_lower = key.strip().lower()
+                        val = val.strip()
+                        
+                        if key_lower == "subject":
+                            title = val
+                        elif key_lower == "from":
+                            mail_from = val
+                        elif key_lower == "date":
+                            mail_date = val
+                        elif key_lower == "edm 링크":
+                            report_links.append(val)
+                            
+            # 프론트엔드 경로
+            rel_md_path = str(filepath.relative_to(PARSE_ROOT)).replace("\\", "/")
+            
+            # 이미지 경로
+            rel_dir = filepath.parent.relative_to(PARSE_ROOT)
+            attachments_dir = MAIL_ROOT / rel_dir / "attachments"
+            
+            assets = []
+            if attachments_dir.exists() and attachments_dir.is_dir():
+                for ext in ["*.png", "*.jpg", "*.jpeg", "*.webp", "*.PNG", "*.JPG"]:
+                    for img_path in attachments_dir.glob(ext):
+                        rel_img_path = str(img_path.relative_to(MAIL_ROOT)).replace("\\", "/")
+                        assets.append({"path": rel_img_path, "file_name": img_path.name})
+                        
+            # 카드 객체 추가
+            docs.append({
+                "doc_id": filepath.name,
+                "title": title,
+                "mail_from": mail_from,
+                "mail_date": mail_date,
+                "report_links": report_links,
+                "storage": {"parsed_md_rel_path": rel_md_path},
+                "assets": assets,
+                "raw_content": content 
+            })
+        except Exception as e:
+            print(f"[Archive Error] Failed to load {filepath}: {e}")
+            
+    # 💡 4. 가장 중요한 정렬 로직! (알파벳 정렬이 아닌 실제 시간 기준 내림차순 정렬)
+    docs.sort(key=lambda x: _parse_date_to_timestamp(x["mail_date"]), reverse=True)
+    
+    _ARCHIVE_CACHE = docs
+    _CACHE_LOADED = True
+    return _ARCHIVE_CACHE
+
+
+@app.get("/api/archive/documents")
+async def api_get_archive_documents(
+    request: Request,
+    q: str = Query("", description="검색 키워드"),
+    skip: int = Query(0, description="건너뛸 문서 수"),
+    limit: int = Query(20, description="가져올 문서 수"),
+    sort: str = Query("desc", description="정렬 순서 (desc/asc)")
+):
+    user = _require_user(request)
+    all_docs = get_local_archive_docs()
+    
+    filtered = []
+    q_lower = q.lower().strip()
+    
+    # 1. Exact Match 키워드 검색
+    for doc in all_docs:
+        if not q_lower:
+            filtered.append(doc) 
+        else:
+            if q_lower in doc["title"].lower() or q_lower in doc["raw_content"].lower():
+                filtered.append(doc)
+                
+    # 💡 2. 여기가 문제였습니다! (알파벳 정렬 -> 타임스탬프 정렬로 완벽 교체)
+    filtered.sort(
+        key=lambda x: _parse_date_to_timestamp(x.get("mail_date", "")),
+        reverse=(sort == "desc")
+    )
+    
+    # 3. 페이지네이션
+    paginated = filtered[skip : skip + limit]
+    
+    # 4. 프론트엔드 전송 (무거운 raw_content는 제외)
+    res_docs = []
+    for d in paginated:
+        r = dict(d)
+        r.pop("raw_content", None)
+        res_docs.append(r)
+        
+    return {
+        "total_fetched": len(filtered),
+        "documents": res_docs,
+        "has_more": len(filtered) > (skip + limit)
+    }
 
 # =========================
 # Viewers: md / eml / asset
