@@ -2,6 +2,7 @@ import json
 from typing import Any, Tuple
 from app.db import get_conn
 from app.rag_client import rag_retrieve_rrf
+from app.config import DEFAULT_INDEX_NAME
 
 # LLM에게 제공할 도구 명세서
 TOOLS_SCHEMA = [
@@ -75,7 +76,7 @@ def execute_tool(func_name: str, args: dict) -> Tuple[str, list]:
            
             # 검색 실행
             rag_result = rag_retrieve_rrf(
-                index_name="rp-ifa1-ver1-full", # 필요 시 기본 인덱스명 조정
+                index_name=DEFAULT_INDEX_NAME, # 필요 시 기본 인덱스명 조정
                 query_text=search_query,
                 top_k=8
             )

@@ -189,17 +189,24 @@ async function openViewer(doc, displayTitle) {
         
         const mdText = await res.text();
         
-        // 💡 chat.js의 검증된 로직 100% 동일하게 사용!
         const mdNoMeta = stripLeadingMailMetaBlock(mdText);
         const mdWithImgs = injectImagesIntoMarkdown(mdNoMeta, assets);
         
         contentEl.innerHTML = renderDocumentMarkdown(mdWithImgs);
 
+        // 💡 [수정] 박스 감싸기 코드를 완전히 삭제하고, 이미지 자체 속성만 남깁니다.
+        contentEl.querySelectorAll("img").forEach(img => {
+            if(img.classList.contains("max-w-full")) return; 
+            
+            // 테두리 없이 상하 여백(my-4)과 클릭 시 효과만 부여
+            img.className = "max-w-full h-auto rounded cursor-pointer hover:opacity-90 transition-opacity my-4";
+            img.onclick = () => showImgPreview(img.src);
+        });
+
     } catch (e) {
         contentEl.innerHTML = `<div class="text-error text-center mt-10">${escapeHtml(String(e))}</div>`;
     }
-} 
-
+}
 
 // ==========================================
 // 💡 아래부터는 chat.js에서 그대로 가져온 완벽한 유틸리티 함수들입니다.
@@ -288,24 +295,22 @@ function renderDocumentMarkdown(mdText){
 
 function injectImagesIntoMarkdown(mdText, assets){
     if(!mdText) return mdText || "";
-    if(!assets || !assets.length) return mdText.replace(/\[placeholder\]/gi, "");
+    // 💡 백틱(`)으로 감싸진 경우까지 모두 찾아서 제거 (/`?\[Image_position\]`?/gi)
+    if(!assets || !assets.length) return mdText.replace(/`?\[Image_position\]`?/gi, "");
   
     const imgs = assets.map(a => (a && a.path) ? a : null).filter(Boolean);
-    if(!imgs.length) return mdText.replace(/\[placeholder\]/gi, "");
+    if(!imgs.length) return mdText.replace(/`?\[Image_position\]`?/gi, "");
   
     let i = 0;
-    return mdText.replace(/\[placeholder\]/gi, () => {
+    return mdText.replace(/`?\[Image_position\]`?/gi, () => {
         if(i >= imgs.length) return ""; 
   
         const a = imgs[i++];
         const url = `/api/view/asset?rel=${encodeURIComponent(a.path)}`;
         const alt = (a.file_name || a.path || "image").replace(/[\r\n]+/g, " ");
   
-        return `
-            <div class="my-4 md-embed-img-wrap rounded-lg overflow-hidden border border-surface-container bg-surface-container-lowest">
-                <img src="${url}" alt="${escapeHtml(alt)}" loading="lazy" class="max-w-full h-auto mx-auto cursor-pointer hover:opacity-90 transition-opacity" onclick="showImgPreview('${url}')">
-            </div>
-        `;
+        // 💡 HTML 태그 대신 마크다운 표준 이미지 문법 사용 (코드블록 오류 원천 차단)
+        return `\n\n![${escapeHtml(alt)}](${url})\n\n`;
     });
 }
 

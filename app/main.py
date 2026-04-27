@@ -615,9 +615,18 @@ def get_local_archive_docs():
             # 프론트엔드 경로
             rel_md_path = str(filepath.relative_to(PARSE_ROOT)).replace("\\", "/")
             
-            # 이미지 경로
+            # 1. PARSE_ROOT 기준 상대 경로 추출
             rel_dir = filepath.parent.relative_to(PARSE_ROOT)
-            attachments_dir = MAIL_ROOT / rel_dir / "attachments"
+
+            # 2. 'export_' 로 시작하는 폴더를 찾으면 그 앞까지만 경로로 사용 (재귀 탐색 X)
+            target_parts = []
+            for part in rel_dir.parts:
+                if part.startswith("export_"):
+                    break
+                target_parts.append(part)
+
+            # 3. MAIL_ROOT와 잘라낸 경로를 결합하여 정확한 이미지 폴더 경로 생성
+            attachments_dir = MAIL_ROOT.joinpath(*target_parts) / "attachments"
             
             assets = []
             if attachments_dir.exists() and attachments_dir.is_dir():

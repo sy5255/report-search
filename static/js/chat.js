@@ -571,9 +571,9 @@ function injectImagesIntoMarkdown(mdText, assets){
   if(!mdText) return mdText || "";
   
   // 1. 첨부된 에셋(이미지)이 아예 없는 경우: 
-  // 원본을 그대로 반환하지 않고 모든 [placeholder]를 빈 문자열로 지워줍니다.
+  // 원본을 그대로 반환하지 않고 모든 [Image_position]를 빈 문자열로 지워줍니다.
   if(!assets || !assets.length) {
-    return mdText.replace(/\[placeholder\]/gi, "");
+    return mdText.replace(/\[Image_position\]/gi, "");
   }
 
   const imgs = assets
@@ -582,14 +582,14 @@ function injectImagesIntoMarkdown(mdText, assets){
 
   // 유효한 이미지 경로가 없는 경우에도 모두 지워줍니다.
   if(!imgs.length) {
-    return mdText.replace(/\[placeholder\]/gi, "");
+    return mdText.replace(/\[Image_position\]/gi, "");
   }
 
   let i = 0;
 
-  return mdText.replace(/\[placeholder\]/gi, () => {
+  return mdText.replace(/\[Image_position\]/gi, () => {
     // 2. 이미지를 순차적으로 매핑하다가, 준비된 이미지를 모두 소진한 경우:
-    // 기존의 return "[placeholder]"; 대신 return ""; 를 사용하여 남은 문구를 화면에서 지웁니다.
+    // 기존의 return "[Image_position]"; 대신 return ""; 를 사용하여 남은 문구를 화면에서 지웁니다.
     if(i >= imgs.length) return "";
 
     const a = imgs[i++];
