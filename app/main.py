@@ -582,41 +582,37 @@ def get_local_archive_docs():
             mail_date = ""
             report_links = []
             
-            # 💡 3. 메타데이터 파싱 로직 강화 (띄어쓰기, 대소문자 문제 완벽 방어)
-            in_meta = False
-            for line in content.splitlines():
-                line_s = line.strip()
-                if line_s == "[MAIL_META]":
-                    in_meta = True
-                    continue
+            # 💡 3. 메타데이터 파싱 로직 강화 (정규식 기반: 한 줄 / 여러 줄 완벽 방어)
+            # From: 뒤부터 다음 예약어(Date, Subject 등)나 대괄호([), 줄바꿈이 오기 전까지 추출
+            from_match = re.search(r'From\s*:\s*(.*?)(?=\s*(?:Date|To|Cc|Bcc|Subject|\[)|\n|$)', content, re.IGNORECASE)
+            if from_match:
+                mail_from = from_match.group(1).strip()
                 
-                if in_meta:
-                    # 메타데이터 구역 종료 조건
-                    if line_s.startswith("---") or line_s.startswith("#"):
-                        break
-                    if not line_s: # 빈 줄 무시
-                        continue
-                        
-                    # ":" 기호를 기준으로 Key와 Value를 분리하여 띄어쓰기 오류 방지
-                    if ":" in line_s:
-                        key, val = line_s.split(":", 1)
-                        key_lower = key.strip().lower()
-                        val = val.strip()
-                        
-                        if key_lower == "subject":
-                            title = val
-                        elif key_lower == "from":
-                            mail_from = val
-                        elif key_lower == "date":
-                            mail_date = val
-                        elif key_lower == "edm 링크":
-                            report_links.append(val)
+            # Date: 뒤부터 다음 예약어나 대괄호([), 줄바꿈이 오기 전까지 추출
+            date_match = re.search(r'Date\s*:\s*(.*?)(?=\s*(?:From|To|Cc|Bcc|Subject|\[)|\n|$)', content, re.IGNORECASE)
+            if date_match:
+                mail_date = date_match.group(1).strip()
+                
+            # Subject: 가 있을 경우 타이틀 덮어쓰기
+            subject_match = re.search(r'Subject\s*:\s*(.*?)(?=\s*(?:From|Date|To|Cc|Bcc|\[)|\n|$)', content, re.IGNORECASE)
+            if subject_match:
+                title = subject_match.group(1).strip()
+                
+            # EDM 링크: 뒤의 http 주소 추출
+            edm_match = re.search(r'EDM\s*링크\s*:\s*(http[^\s\n]+)', content, re.IGNORECASE)
+            if edm_match:
+                report_links.append(edm_match.group(1).strip())
                             
             # 프론트엔드 경로
             rel_md_path = str(filepath.relative_to(PARSE_ROOT)).replace("\\", "/")
             
             # 1. PARSE_ROOT 기준 상대 경로 추출
             rel_dir = filepath.parent.relative_to(PARSE_ROOT)
+            # attachments_dir = MAIL_ROOT / rel_dir / "attachments"
+
+            # print(f"debug 마크다운 파일: {filepath}")
+            # print(f"debug 예상 이미지 폴더: {attachments_dir}")
+            # print(f"debug 폴더 존재 여부: {attachments_dir.exists()}")
 
             # 2. 'export_' 로 시작하는 폴더를 찾으면 그 앞까지만 경로로 사용 (재귀 탐색 X)
             target_parts = []
@@ -655,7 +651,6 @@ def get_local_archive_docs():
     _ARCHIVE_CACHE = docs
     _CACHE_LOADED = True
     return _ARCHIVE_CACHE
-
 
 @app.get("/api/archive/documents")
 async def api_get_archive_documents(

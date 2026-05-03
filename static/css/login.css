@@ -3,7 +3,7 @@
 /* BASIC */
 
 html {
-  background-color: #56baed;
+  background-color: #f7f9fb;
 }
 
 body {
@@ -58,7 +58,7 @@ h2 {
 
 #formFooter {
   background-color: #f6f6f6;
-  border-top: 1px solid #dce8f1;
+  border-top: 1px solid #343f52;
   padding: 25px;
   text-align: center;
   -webkit-border-radius: 0 0 10px 10px;
@@ -75,7 +75,7 @@ h2.inactive {
 
 h2.active {
   color: #0d0d0d;
-  border-bottom: 2px solid #5fbae9;
+  border-bottom: 2px solid #343f52;
 }
 
 
@@ -83,7 +83,7 @@ h2.active {
 /* FORM TYPOGRAPHY*/
 
 input[type=button], input[type=submit], input[type=reset]  {
-  background-color: #56baed;
+  background-color: #505f76;
   border: none;
   color: white;
   padding: 15px 80px;
@@ -105,7 +105,7 @@ input[type=button], input[type=submit], input[type=reset]  {
 }
 
 input[type=button]:hover, input[type=submit]:hover, input[type=reset]:hover  {
-  background-color: #39ace7;
+  background-color: #1e293b;
 }
 
 input[type=button]:active, input[type=submit]:active, input[type=reset]:active  {
@@ -119,7 +119,7 @@ input[type=button]:active, input[type=submit]:active, input[type=reset]:active  
 input[type=text], input[type=password] {
   background-color: #f6f6f6;
   border: none;
-  color: #0d0d0d;
+  color: #191c1e;
   padding: 15px 32px;
   text-align: center;
   text-decoration: none;
@@ -139,7 +139,7 @@ input[type=text], input[type=password] {
 
 input[type=text]:focus, input[type=password]:focus {
   background-color: #fff;
-  border-bottom: 2px solid #5fbae9;
+  border-bottom: 2px solid #545f73;
 }
 
 input[type=text]:placeholder, input[type=password]:placeholder {
@@ -191,6 +191,7 @@ input[type=text]:placeholder, input[type=password]:placeholder {
 @-moz-keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
 @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
 
+
 .fadeIn {
   opacity:0;
   -webkit-animation:fadeIn ease-in 1;
@@ -237,7 +238,7 @@ input[type=text]:placeholder, input[type=password]:placeholder {
   bottom: -10px;
   width: 0;
   height: 2px;
-  background-color: #56baed;
+  background-color: #1e293b;
   content: "";
   transition: width 0.2s;
 }

@@ -506,6 +506,7 @@ function setupPanelMaxButtons(){
   });
 }
 
+// ✨ [수정] 한 줄로 들어오든 여러 줄이든 [MAIL_META] 블록을 정규식으로 유연하고 완벽하게 제거
 function stripLeadingMailMetaBlock(mdText){
   let t = String(mdText || "").replace(/\r\n/g, "\n");
 
@@ -513,58 +514,15 @@ function stripLeadingMailMetaBlock(mdText){
   t = t.replace(
     /^\s*```[^\n]*\n([\s\S]*?)\n```[\t ]*\n*/i,
     (full, inner) => {
-      const body = String(inner || "");
-      if(/\[MAIL_META\]/i.test(body)){
-        return "";
-      }
+      if(/\[MAIL_META\]/i.test(String(inner || ""))) return "";
       return full;
     }
   );
 
-  // 2) fenced block이 아니더라도, 맨 앞 MAIL_META 라인 블록 제거
-  const lines = t.split("\n");
-  let i = 0;
+  // 2) [MAIL_META] 부터 시작해서, 다음 빈 줄(\n\n)이 나오거나 문서가 끝날때까지 통째로 날림
+  t = t.replace(/\[MAIL_META\][\s\S]*?(?=\n\s*\n|$)/i, "");
 
-  while(i < lines.length && !lines[i].trim()){
-    i++;
-  }
-
-  if(i < lines.length && lines[i].trim().toUpperCase() === "[MAIL_META]"){
-    i++;
-
-    while(i < lines.length){
-      const s = lines[i].trim();
-
-      if(!s){
-        i++;
-        continue;
-      }
-
-      if(
-        s.toUpperCase() === "[EDM_LINKS]" ||
-        /^From\s*:/i.test(s) ||
-        /^Date\s*:/i.test(s) ||
-        /^To\s*:/i.test(s) ||
-        /^Cc\s*:/i.test(s) ||
-        /^Bcc\s*:/i.test(s) ||
-        /^Subject\s*:/i.test(s) ||
-        /^EDM\s*링크\s*:/i.test(s)
-      ){
-        i++;
-        continue;
-      }
-
-      break;
-    }
-
-    while(i < lines.length && !lines[i].trim()){
-      i++;
-    }
-
-    t = lines.slice(i).join("\n");
-  }
-
-  return t.trimStart();
+  return t.trimStart(); 
 }
 
 function injectImagesIntoMarkdown(mdText, assets){
@@ -1352,6 +1310,24 @@ function highlightInViewer(quote){
   }
 }
 
+// ✨ [업그레이드] 마크다운 전처리 함수 (다중 절단 조건 지원)
+function preProcessMarkdown(mdText) {
+    let t = String(mdText || "");
+  
+    // 1) '[placeholder]' 완벽 제거 (대소문자, 공백 무시)
+    t = t.replace(/\[\s*placeholder\s*\]/gi, "");
+  
+    // 2) 특정 문자열 이후 텍스트 모두 날리기 (조건 통합 방어)
+    const truncRegex = /\.\/images\/\[(?:i|l)nline\s*FA\s*Report\]|attachments\/inline/i;
+    const match = t.match(truncRegex);
+    
+    if (match) {
+        t = t.substring(0, match.index); // 가장 먼저 매칭된 문자열 시작점 앞까지만 남기고 싹둑
+    }
+  
+    return t;
+  }
+
 async function openDocModal(d, highlightQuote){
   const title = stripEnriched(d.title || "(no title)");
   el("docModalTitle").textContent = title;
@@ -1363,9 +1339,11 @@ async function openDocModal(d, highlightQuote){
   const mdRel = storage.parsed_md_rel_path;
   if(mdRel){
     try{
-      const mdText = await fetch(`/api/view/md?rel=${encodeURIComponent(mdRel)}`, {credentials:"include"}).then(r=>r.text());
+      const rawMdText = await fetch(`/api/view/md?rel=${encodeURIComponent(mdRel)}`, {credentials:"include"}).then(r=>r.text());
 
-      const mdNoMeta = stripLeadingMailMetaBlock(mdText);
+      // ✨ 전처리 파이프라인 통과
+      const processedText = preProcessMarkdown(rawMdText);
+      const mdNoMeta = stripLeadingMailMetaBlock(processedText);
       const mdWithImgs = injectImagesIntoMarkdown(mdNoMeta, assets);
 
       el("docModalMd").innerHTML = renderDocumentMarkdown(mdWithImgs);
