@@ -1312,21 +1312,21 @@ function highlightInViewer(quote){
 
 // ✨ [업그레이드] 마크다운 전처리 함수 (다중 절단 조건 지원)
 function preProcessMarkdown(mdText) {
-    let t = String(mdText || "");
+  let t = String(mdText || "");
+
+  // 1) '[placeholder]' 완벽 제거 (대소문자, 공백 무시)
+  t = t.replace(/\[\s*placeholder\s*\]/gi, "");
+
+  // 2) 특정 문자열 이후 텍스트 모두 날리기 (조건 통합 방어)
+  const truncRegex = /\.\/images\/\|attachments\/inline|<img\s+src=/i;
+  const match = t.match(truncRegex);
   
-    // 1) '[placeholder]' 완벽 제거 (대소문자, 공백 무시)
-    t = t.replace(/\[\s*placeholder\s*\]/gi, "");
-  
-    // 2) 특정 문자열 이후 텍스트 모두 날리기 (조건 통합 방어)
-    const truncRegex = /\.\/images\/\[(?:i|l)nline\s*FA\s*Report\]|attachments\/inline/i;
-    const match = t.match(truncRegex);
-    
-    if (match) {
-        t = t.substring(0, match.index); // 가장 먼저 매칭된 문자열 시작점 앞까지만 남기고 싹둑
-    }
-  
-    return t;
+  if (match) {
+      t = t.substring(0, match.index); // 가장 먼저 매칭된 문자열 시작점 앞까지만 남기고 싹둑
   }
+
+  return t;
+}
 
 async function openDocModal(d, highlightQuote){
   const title = stripEnriched(d.title || "(no title)");

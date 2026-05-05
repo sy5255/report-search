@@ -313,7 +313,6 @@ function setupArchiveResizer(){
     });
 } 
 
-// ✨ [업그레이드] 마크다운 전처리 함수 (다중 절단 조건 지원)
 function preProcessMarkdown(mdText) {
     let t = String(mdText || "");
 
@@ -323,7 +322,7 @@ function preProcessMarkdown(mdText) {
     // 2) 특정 문자열 이후 텍스트 모두 날리기 (조건 통합)
     // - 조건 A: ./images/[Inline FA Report] (대소문자 및 l, i 오타 방어)
     // - 조건 B: attachments/inline
-    const truncRegex = /\.\/images\/\[(?:i|l)nline\s*FA\s*Report\]|attachments\/inline/i;
+    const truncRegex = /\.\/images\/\|attachments\/inline|<img\s+src=/i;
     const match = t.match(truncRegex);
     
     if (match) {
