@@ -370,25 +370,30 @@ def build_expansion_terms(detected_terms: List[Dict[str, Any]], term_entries: Li
 
     return out
 
-
 def build_expanded_query(
     original_query: str,
     normalized_query: str,
     expansion_terms: Dict[str, List[str]]
 ) -> str:
     """
-    RAG API가 structured boolean query를 받지 않으니,
-    일단 평평한 텍스트 확장으로 보냄.
+    RAG API가 ElasticSearch Query String 문법을 지원하므로,
+    단순 나열 대신 구문 검색(Phrase Match)과 논리 블록(OR) 형태로 쿼리를 조립합니다.
+    예: 정규화문장 ("표준어1" OR "동의어1") ("표준어2" OR "동의어2" OR "동의어3")
     """
-    pieces = []
-    if normalized_query:
-        pieces.append(normalized_query)
-
+    # 1. 기본 쿼리 설정
+    base_query = normalized_query.strip() if normalized_query else original_query.strip()
+    
     seen_norm_phrases = set()
-    if normalized_query:
-        seen_norm_phrases.add(normalize_alias_text(normalized_query))
+    if base_query:
+        seen_norm_phrases.add(normalize_alias_text(base_query))
 
+    # 2. 카테고리별 OR 블록 생성
+    or_blocks = []
+    
     for _term_type, terms in expansion_terms.items():
+        valid_terms = []
+        seen_in_block = set()
+        
         for t in terms:
             st = str(t).strip()
             if not st:
@@ -398,26 +403,32 @@ def build_expanded_query(
             if not norm:
                 continue
 
-            # normalized query 전체 문자열과 완전히 같으면 skip
+            # 정규화된 전체 쿼리 문장 자체와 완벽히 일치하면 스킵 (예외 방어)
             if norm in seen_norm_phrases:
                 continue
-
-            # 이미 pieces 안에 같은 phrase가 있으면 skip
-            duplicated = False
-            for p in pieces:
-                if normalize_alias_text(p) == norm:
-                    duplicated = True
-                    break
-            if duplicated:
+                
+            # 해당 블록(카테고리) 내에서 중복 방지
+            if norm in seen_in_block:
                 continue
 
-            pieces.append(st)
-            seen_norm_phrases.add(norm)
+            seen_in_block.add(norm)
+            
+            # ⭐️ 핵심: "희석 불산"처럼 띄어쓰기가 있는 동의어가 쪼개지지 않도록 큰따옴표로 감쌈
+            valid_terms.append(f'"{st}"')
 
-    merged = " ".join(pieces)
-    merged = re.sub(r"\s+", " ", merged).strip()
-    return merged or original_query
+        # 해당 카테고리에 유효한 용어가 있다면 OR 연산자로 묶어서 괄호 블록 생성
+        if valid_terms:
+            block_str = f"({' OR '.join(valid_terms)})"
+            or_blocks.append(block_str)
 
+    # 3. 최종 조립: 베이스 쿼리 뒤에 OR 블록들을 이어붙임
+    if or_blocks:
+        merged = f"{base_query} {' '.join(or_blocks)}"
+        # 다중 공백을 하나의 공백으로 깔끔하게 정리
+        merged = re.sub(r"\s+", " ", merged).strip()
+        return merged
+
+    return base_query or original_query
 
 def normalize_and_expand_query(
     query_text: str,
