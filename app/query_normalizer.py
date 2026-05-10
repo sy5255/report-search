@@ -37,17 +37,33 @@ def normalize_alias_text(s: str) -> str:
 
 
 def _token_boundary_pattern(alias_text: str) -> re.Pattern:
-    """
-    alias_text가 짧은 영문 약어여도 최대한 안전하게 찾기 위한 패턴.
-    예:
-      DHF -> 경계 기반
-      foreign material -> foreign\\s+material
-      김지혜 -> escape 기반
-    """
     alias_text = str(alias_text or "").strip()
     escaped = re.escape(alias_text)
     escaped = escaped.replace(r"\ ", r"\s+")
-    return re.compile(rf"(?i)(?<![A-Za-z0-9가-힣]){escaped}(?![A-Za-z0-9가-힣])")
+
+    # 1. 단어의 첫 글자와 마지막 글자가 영어/숫자인지 확인
+    is_start_alnum = re.match(r"^[A-Za-z0-9]", alias_text)
+    is_end_alnum = re.search(r"[A-Za-z0-9]$", alias_text)
+
+    # 2. 왼쪽 경계 (Left Boundary)
+    if is_start_alnum:
+        # 영어/숫자로 시작하면 앞에 한글이 붙어도 됨 (예: 고DHF)
+        left_bound = r"(?<![A-Za-z0-9])"
+    else:
+        # 한글로 시작하면 독립되어야 함
+        left_bound = r"(?<![A-Za-z0-9가-힣])"
+
+    # 3. 오른쪽 경계 (Right Boundary)
+    if is_end_alnum:
+        # 영어/숫자로 끝나면 뒤에 한글이 붙어도 됨 (예: DHF불량)
+        right_bound = r"(?![A-Za-z0-9])"
+    else:
+        # 한글로 끝나면 뒤에 한국어 조사 20여종만 예외적으로 허용
+        josa_list = r"은|는|이|가|을|를|의|과|와|에|에서|로|으로|에게|한테|부터|까지|도|만|랑|이랑|이나|나"
+        right_bound = rf"(?=(?:{josa_list})?(?![A-Za-z0-9가-힣]))"
+
+    # 4. 최종 정규식 조립 및 반환
+    return re.compile(rf"(?i){left_bound}{escaped}{right_bound}")
 
 def load_term_dictionary(scope_candidates: List[str] | None = None) -> List[Dict[str, Any]]:
     """
