@@ -2,59 +2,205 @@
 {% block title %}Digital Archive - Intellectual Curator{% endblock %}
 
 {% block content %}
-<div id="archiveContainer" class="flex w-full h-full overflow-hidden bg-background transition-all duration-300">
+<div class="flex flex-col w-full h-full bg-background overflow-hidden">
     
-    <div id="archiveLeftPanel" class="w-[350px] md:w-[400px] border-r border-surface-container flex flex-col bg-surface-container-lowest shrink-0">
-        <div class="p-4 border-b border-surface-container bg-surface-container-low">
-            <div class="relative mb-3">
-                <span class="material-symbols-outlined absolute left-3 top-2.5 text-secondary text-sm">search</span>
-                <input type="text" id="archiveSearchInput" placeholder="정확한 키워드로 문서 검색..." 
-                       class="w-full bg-surface-container-highest border border-surface-container rounded-lg py-2 pl-9 pr-4 text-sm text-on-surface outline-none focus:ring-1 focus:ring-primary transition-shadow">
-            </div>
-            <div class="flex justify-between items-center px-1">
-                <span class="text-xs font-bold text-secondary" id="totalDocsCount">문서 불러오는 중...</span>
-                <button id="sortToggleBtn" class="flex items-center gap-1 text-xs font-bold text-on-surface hover:text-primary transition-colors">
-                    <span class="material-symbols-outlined text-sm">sort</span>
-                    <span id="sortToggleText">최신순</span>
-                </button>
+    <div class="px-8 py-6 border-b border-surface-container bg-surface-container-lowest shrink-0">
+        <div class="flex justify-between items-end">
+            <div>
+                <h1 class="text-3xl font-extrabold font-manrope text-on-surface tracking-tight">Digital Archive</h1>
             </div>
         </div>
-
-        <div id="archiveList" class="flex-1 overflow-y-auto scrolled-content p-4 space-y-3 relative">
-            </div>
-
-        <div class="p-3 border-t border-surface-container bg-surface-container-low text-center">
-            <button id="loadMoreBtn" class="hidden w-full px-4 py-2 bg-surface-container-highest hover:bg-surface-container text-xs font-bold text-on-surface rounded-lg transition-colors">
-                더보기 (Load More)
+        
+        <div class="flex gap-6 mt-8 border-b border-surface-container">
+            <button onclick="switchArchiveTab('reports')" id="tabReportsBtn" class="pb-3 text-sm font-bold text-primary border-b-2 border-primary transition-colors">
+                Reports
+            </button>
+            <button onclick="switchArchiveTab('dictionary')" id="tabDictionaryBtn" class="pb-3 text-sm font-bold text-secondary hover:text-primary transition-colors border-b-2 border-transparent">
+                Term Dictionary
             </button>
         </div>
     </div>
 
-    <div id="archiveResizer" class="w-1 cursor-col-resize hover:bg-primary/20 z-10 transition-colors"></div>
+    <div id="reportsTab" class="flex-1 flex w-full h-full overflow-hidden transition-all duration-300">
+        <div id="archiveLeftPanel" class="w-[700px] border-r border-surface-container flex flex-col bg-surface-container-lowest shrink-0">
+            <div class="p-6 border-b border-surface-container bg-surface-container-low">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-bold text-on-surface font-manrope">Document List</h2>
+                    <div class="flex items-center gap-4">
+                        <span class="text-xs font-bold text-secondary" id="totalDocsCount">문서 불러오는 중...</span>
+                        <button id="sortToggleBtn" class="flex items-center gap-1 text-xs font-bold text-on-surface hover:text-primary transition-colors">
+                            <span class="material-symbols-outlined text-sm">sort</span>
+                            <span id="sortToggleText">최신순</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="relative">
+                    <span class="material-symbols-outlined absolute left-3 top-2.5 text-secondary text-sm">search</span>
+                    <input type="text" id="archiveSearchInput" placeholder="정확한 키워드로 문서 검색..." 
+                           class="w-full bg-surface-container-highest border border-surface-container rounded-lg py-2 pl-9 pr-4 text-sm text-on-surface outline-none focus:ring-1 focus:ring-primary transition-shadow">
+                </div>
+            </div>
 
-    <div id="archiveRightPanel" class="flex-1 flex flex-col bg-surface-container-lowest relative overflow-hidden">
-        <div class="h-14 border-b border-surface-container flex justify-between items-center px-6 bg-surface-container-low shrink-0">
-            <h2 id="viewerTitle" class="text-sm font-bold font-headline text-primary truncate pr-4">문서를 선택해주세요</h2>
-            <div class="flex gap-2 shrink-0">
-                <button id="expandBtn" class="p-2 rounded hover:bg-surface-container-high text-secondary transition-colors" title="크게 보기">
-                    <span class="material-symbols-outlined text-[18px]">open_in_full</span>
+            <div id="archiveList" class="flex-1 overflow-y-auto scrolled-content p-6 grid grid-cols-2 gap-4 content-start relative">
+                </div>
+
+            <div class="p-4 border-t border-surface-container bg-surface-container-low text-center">
+                <button id="loadMoreBtn" class="hidden w-full px-4 py-2 bg-surface-container-highest hover:bg-surface-container text-xs font-bold text-on-surface rounded-xl transition-all">
+                    Load More
                 </button>
             </div>
         </div>
 
-        <div id="viewerContent" class="flex-1 overflow-y-auto scrolled-content p-8 markdown-body text-sm leading-relaxed text-on-surface">
-            <div class="flex h-full items-center justify-center text-secondary">
-                좌측 목록에서 문서를 선택하면 내용이 표시됩니다.
+        <div id="archiveResizer" class="w-1 cursor-col-resize hover:bg-primary/20 z-10 transition-colors"></div>
+
+        <div id="archiveRightPanel" class="flex-1 flex flex-col bg-surface-container-lowest relative overflow-hidden">
+            <div class="h-16 border-b border-surface-container flex justify-between items-center px-8 bg-surface-container-low shrink-0">
+                <div class="flex items-center gap-3 truncate">
+                    <span class="material-symbols-outlined text-primary text-lg">description</span>
+                    <h2 id="viewerTitle" class="text-sm font-bold font-manrope text-on-surface truncate pr-4">문서를 선택해주세요</h2>
+                </div>
+                <div class="flex gap-2 shrink-0">
+                    <button id="expandBtn" class="p-2 rounded-lg hover:bg-surface-container-high text-secondary transition-colors" title="크게 보기">
+                        <span class="material-symbols-outlined text-[18px]">open_in_full</span>
+                    </button>
+                </div>
+            </div>
+
+            <div id="viewerContent" class="flex-1 overflow-y-auto scrolled-content p-10 markdown-body text-sm leading-relaxed text-on-surface">
+                <div class="flex flex-col h-full items-center justify-center text-secondary opacity-50">
+                    <span class="material-symbols-outlined text-5xl mb-4">article</span>
+                    <p class="font-bold">좌측 목록에서 문서를 클릭하면 상세 내용이 표시됩니다.</p>
+                </div>
             </div>
         </div>
     </div>
 
-</div>
+    <div id="dictionaryTab" class="hidden flex-1 w-full h-full overflow-y-auto bg-background p-8">
+        <div class="flex justify-between items-center mb-6">
+            <div class="flex gap-3">
+                <div class="relative w-80">
+                    <span class="material-symbols-outlined absolute left-3 top-2.5 text-secondary text-sm">search</span>
+                    <input type="text" id="dictSearchInput" placeholder="Search terms or aliases..." class="w-full bg-surface-container-lowest border border-surface-container rounded-xl py-2.5 pl-9 pr-4 text-sm text-on-surface outline-none focus:ring-2 focus:ring-primary/20 transition-shadow">
+                </div>
+            </div>
+            <button onclick="openTermModal()" class="px-4 py-2 flex items-center gap-2 bg-primary text-on-primary rounded-xl text-sm font-bold shadow-sm hover:opacity-90 transition-all">
+                <span class="material-symbols-outlined text-sm">add</span>
+                Add Term
+            </button>
+        </div>
 
-<div id="imgPreview" class="img-preview hidden fixed inset-0 z-[4000] bg-black/90 flex items-center justify-center p-8"></div>
+        <div class="bg-surface-container-lowest rounded-2xl border border-surface-container overflow-hidden shadow-sm">
+            <table class="w-full text-left border-collapse">
+                <thead>
+                    <tr class="bg-surface-container-low border-b border-surface-container">
+                        <th class="px-8 py-4 text-xs font-extrabold text-secondary uppercase tracking-wider font-manrope">Canonical Term</th>
+                        <th class="px-8 py-4 text-xs font-extrabold text-secondary uppercase tracking-wider font-manrope">Aliases</th>
+                        <th class="px-8 py-4 text-xs font-extrabold text-secondary uppercase tracking-wider font-manrope">Type</th>
+                    </tr>
+                </thead>
+                <tbody id="dictionaryTableBody" class="divide-y divide-surface-container">
+                    <tr>
+                        <td colspan="3" class="px-8 py-8 text-center text-secondary text-sm">
+                            <span class="material-symbols-outlined animate-spin mb-2">refresh</span>
+                            <p>데이터를 준비 중입니다...</p>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="imgPreview" class="img-preview hidden fixed inset-0 z-[4000] bg-black/90 flex items-center justify-center p-8"></div>
+
+    <div id="addTermModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-[5000] transition-opacity">
+        <div class="bg-surface-container-lowest w-[500px] rounded-2xl p-8 shadow-2xl border border-outline/20">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-bold font-manrope text-on-surface">Suggest New Term</h3>
+                <button onclick="closeTermModal()" class="text-secondary hover:text-error transition-colors">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </div>
+            
+            <form id="proposeTermForm" class="space-y-5">
+                <div>
+                    <label class="block text-xs font-bold text-secondary mb-2 uppercase tracking-wider">Category (Type)</label>
+                    <select name="type" class="w-full rounded-lg border border-surface-container bg-surface-container-low text-sm p-3 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface">
+                        <option value="defect">Defect (불량명)</option>
+                        <option value="process">Process (공정명)</option>
+                        <option value="product">Product (제품명)</option>
+                        <option value="chemistry">Chemistry (화학물질)</option>
+                        <option value="node">Node (노드)</option>
+                    </select>
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-secondary mb-2 uppercase tracking-wider">Candidate Term (원문/약어)</label>
+                    <input type="text" name="raw_text" required class="w-full rounded-lg border border-surface-container bg-surface-container-low text-sm p-3 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface" placeholder="e.g. SF2_defect">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-secondary mb-2 uppercase tracking-wider">Canonical Name (표준명 - 선택)</label>
+                    <input type="text" name="canonical" class="w-full rounded-lg border border-surface-container bg-surface-container-low text-sm p-3 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface" placeholder="표준명칭이 따로 있다면 입력">
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-secondary mb-2 uppercase tracking-wider">Aliases (유의어 - 콤마로 구분)</label>
+                    <input type="text" name="aliases" class="w-full rounded-lg border border-surface-container bg-surface-container-low text-sm p-3 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface" placeholder="별칭1, 별칭2, 약어1">
+                </div>
+                
+                <div class="flex justify-end gap-3 mt-8 pt-4 border-t border-surface-container">
+                    <button type="button" onclick="closeTermModal()" class="px-5 py-2.5 text-sm font-bold text-secondary hover:bg-surface-container rounded-xl transition-all">Cancel</button>
+                    <button type="submit" class="px-5 py-2.5 text-sm font-bold bg-primary text-on-primary rounded-xl hover:opacity-90 shadow-lg transition-all flex items-center gap-2">
+                        <span class="material-symbols-outlined text-sm">send</span>
+                        Submit Proposal
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<script src="{{ url_for('static', path='/js/archive.js') }}?v=2"></script>
+<script src="{{ url_for('static', path='/js/archive.js') }}?v=4"></script>
+
+<script>
+    function switchArchiveTab(tabName) {
+        const reportsTab = document.getElementById('reportsTab');
+        const dictTab = document.getElementById('dictionaryTab');
+        const reportsBtn = document.getElementById('tabReportsBtn');
+        const dictBtn = document.getElementById('tabDictionaryBtn');
+
+        if (tabName === 'reports') {
+            reportsTab.classList.remove('hidden');
+            dictTab.classList.add('hidden');
+            reportsBtn.classList.replace('text-secondary', 'text-primary');
+            reportsBtn.classList.replace('border-transparent', 'border-primary');
+            dictBtn.classList.replace('text-primary', 'text-secondary');
+            dictBtn.classList.replace('border-primary', 'border-transparent');
+        } else {
+            reportsTab.classList.add('hidden');
+            dictTab.classList.remove('hidden');
+            dictBtn.classList.replace('text-secondary', 'text-primary');
+            dictBtn.classList.replace('border-transparent', 'border-primary');
+            reportsBtn.classList.replace('text-primary', 'text-secondary');
+            reportsBtn.classList.replace('border-primary', 'border-transparent');
+        }
+    }
+
+    function openTermModal() {
+        const modal = document.getElementById('addTermModal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    }
+
+    function closeTermModal() {
+        const modal = document.getElementById('addTermModal');
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        document.getElementById('proposeTermForm').reset();
+    }
+</script>
 {% endblock %}

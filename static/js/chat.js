@@ -1557,21 +1557,7 @@ function applyTopDocsN(){
 document.addEventListener("DOMContentLoaded", async () => {
   if (typeof configureMarked === "function") configureMarked();
 
-  // 테마 초기화
-  const saved = localStorage.getItem("theme") || "light";
-  if (saved === "dark") document.documentElement.classList.add("dark");
-
-  // 테마 토글
-  const themeBtn = el("themeToggleGlobal");
-  if(themeBtn){
-      themeBtn.onclick = () => {
-          // html 태그에 dark 클래스 토글
-          const isDark = document.documentElement.classList.toggle("dark");
-          // 아이콘 변경 (해 <-> 달)
-          themeBtn.querySelector('span').textContent = isDark ? "dark_mode" : "light_mode";
-          localStorage.setItem("theme", isDark ? "dark" : "light");
-      };
-  }
+  // ❌ 테마 초기화, 테마 토글, 로그아웃 로직 완벽히 삭제함 (base.html에서 전역 처리)
 
   // 사이드바 토글
   const sidebarBtn = el("toggleSidebar");
@@ -1582,15 +1568,6 @@ document.addEventListener("DOMContentLoaded", async () => {
           // 접혔을 때는 '펼치기(side_navigation)' 아이콘, 펴졌을 때는 '접기(menu_open)' 아이콘
           sidebarBtn.querySelector('span').textContent = sidebar.classList.contains("collapsed") ? "side_navigation" : "menu_open";
       };
-  }
-
-  // 로그아웃
-  const logoutBtn = el("logoutGlobal");
-  if(logoutBtn){
-    logoutBtn.onclick = async () => {
-      await fetch("/logout", {method:"POST", credentials:"include"});
-      window.location.href = "/";
-    };
   }
 
   // 모달 제어

@@ -25,6 +25,7 @@ from app import repo
 from app.agent import run_agent_loop, run_agent_loop_stream
 from app.llm_client import rewrite_query_with_history
 from app.query_normalizer import normalize_and_expand_query
+from app.dictionary_repo import propose_term_candidate
 
 app = FastAPI(title="RAG Search Web", version=VERSION)
 
@@ -58,6 +59,12 @@ def build_sliding_window_messages(
 @app.on_event("startup")
 def _startup():
     ensure_tables()
+    # 💡 서버 시작 시 아카이브 문서를 미리 로딩하여 첫 유저의 대기 시간 제거
+    try:
+        print("[Startup] 아카이브 캐시 초기화 중...")
+        get_local_archive_docs()
+    except Exception as e:
+        print(f"[Startup] 아카이브 초기 로딩 실패: {e}")
 
 
 def _require_user(request: Request) -> str:
@@ -111,20 +118,26 @@ async def archive_page(request: Request):
     user = _require_user(request)
     return templates.TemplateResponse("archive.html", {
         "request": request, 
-        "active_tab": "archive" # 프론트엔드에서 밑줄을 그리기 위한 변수
+        "active_tab": "archive", # 프론트엔드에서 밑줄을 그리기 위한 변수
+        "user_id": user
     })
 
 @app.get("/analytics", response_class=HTMLResponse)
 async def analytics_page(request: Request):
     user = _require_user(request)
     # Phase 5에서 구현할 시각화 페이지
-    return templates.TemplateResponse("base.html", {"request": request})
+    return templates.TemplateResponse("base.html", {
+        "request": request,
+        "user_id": user
+    })
 
 @app.get("/trace", response_class=HTMLResponse)
 async def trace_page(request: Request):
     user = _require_user(request)
     # Phase 5에서 구현할 인지 추적 페이지
-    return templates.TemplateResponse("base.html", {"request": request})
+    return templates.TemplateResponse("base.html", {
+        "request": request,
+        "user_id": user})
 
 
 # =========================
@@ -535,7 +548,11 @@ async def api_chat(request: Request):
 # =========================
 # 속도 최적화를 위해 파일을 한 번만 읽어 메모리에 저장하는 전역 캐시
 _ARCHIVE_CACHE = []
-_CACHE_LOADED = False
+# _CACHE_LOADED = False
+_LAST_PROCESSED_MTIME = 0.0  # processed.json의 마지막 수정 시간 저장
+
+# processed.json 파일 경로 설정
+PROCESSED_JSON_PATH = PARSE_ROOT / "_state" / "processed.json"
 
 # 💡 1. 날짜 문자열을 진짜 시간(Timestamp) 숫자로 변환하는 강력한 함수
 def _parse_date_to_timestamp(date_str):
@@ -563,93 +580,158 @@ def _parse_date_to_timestamp(date_str):
 
 # 💡 2. 로컬 문서 검색 로직
 def get_local_archive_docs():
-    global _ARCHIVE_CACHE, _CACHE_LOADED
-    if _CACHE_LOADED:
-        return _ARCHIVE_CACHE
-        
-    docs = []
+    global _ARCHIVE_CACHE, _LAST_PROCESSED_MTIME
     
-    for filepath in PARSE_ROOT.rglob("*.md"):
-        try:
-            content = filepath.read_text(encoding="utf-8", errors="ignore")
-            
-            # 중간 산출물 무시 로직
-            if "[MAIL_META]" not in content:
+    if not PROCESSED_JSON_PATH.exists():
+        print(f"[Archive] {PROCESSED_JSON_PATH} 파일을 찾을 수 없습니다.")
+        return []
+
+    current_mtime = os.path.getmtime(PROCESSED_JSON_PATH)
+
+    if _LAST_PROCESSED_MTIME == current_mtime and _ARCHIVE_CACHE:
+        return _ARCHIVE_CACHE
+
+    print(f"[Archive] 새 문서 감지 또는 초기 로딩 시작... (mtime: {current_mtime})")
+    
+    try:
+        with open(PROCESSED_JSON_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        items = data.get("items", {})
+        print(f"[Archive Debug] JSON에서 읽어온 전체 아이템 수: {len(items)}")
+        
+        category_max_versions = {}
+        for rel_path in items.keys():
+            parts = rel_path.split('/')
+            if len(parts) >= 2:
+                category = parts[0]
+                version_str = parts[1]
+                match = re.search(r'ver(\d+)', version_str)
+                if match:
+                    v_num = int(match.group(1))
+                    if v_num > category_max_versions.get(category, -1):
+                        category_max_versions[category] = v_num
+
+        print(f"[Archive Debug] 탐지된 카테고리별 최신 버전: {category_max_versions}")
+
+        docs = []
+        
+        # 💡 스킵 사유를 기록할 카운터
+        skip_reasons = {
+            "status_not_done": 0,
+            "not_latest_version": 0,
+            "md_file_not_found": 0,
+            "no_mail_meta_tag": 0,
+            "parse_error": 0
+        }
+        
+        first_missing_path = None # 에러가 난 첫 번째 경로를 기억하기 위함
+
+        for rel_path, info in items.items():
+            if info.get("status") != "DONE":
+                skip_reasons["status_not_done"] += 1
                 continue
             
-            title = filepath.stem
-            mail_from = ""
-            mail_date = ""
-            report_links = []
+            parts = rel_path.split('/')
+            category = parts[0]
+            version_str = parts[1]
+            match = re.search(r'ver(\d+)', version_str)
             
-            # 💡 3. 메타데이터 파싱 로직 강화 (정규식 기반: 한 줄 / 여러 줄 완벽 방어)
-            # From: 뒤부터 다음 예약어(Date, Subject 등)나 대괄호([), 줄바꿈이 오기 전까지 추출
-            from_match = re.search(r'From\s*:\s*(.*?)(?=\s*(?:Date|To|Cc|Bcc|Subject|\[)|\n|$)', content, re.IGNORECASE)
-            if from_match:
-                mail_from = from_match.group(1).strip()
-                
-            # Date: 뒤부터 다음 예약어나 대괄호([), 줄바꿈이 오기 전까지 추출
-            date_match = re.search(r'Date\s*:\s*(.*?)(?=\s*(?:From|To|Cc|Bcc|Subject|\[)|\n|$)', content, re.IGNORECASE)
-            if date_match:
-                mail_date = date_match.group(1).strip()
-                
-            # Subject: 가 있을 경우 타이틀 덮어쓰기
-            subject_match = re.search(r'Subject\s*:\s*(.*?)(?=\s*(?:From|Date|To|Cc|Bcc|\[)|\n|$)', content, re.IGNORECASE)
-            if subject_match:
-                title = subject_match.group(1).strip()
-                
-            # EDM 링크: 뒤의 http 주소 추출
-            edm_match = re.search(r'EDM\s*링크\s*:\s*(http[^\s\n]+)', content, re.IGNORECASE)
-            if edm_match:
-                report_links.append(edm_match.group(1).strip())
-                            
-            # 프론트엔드 경로
-            rel_md_path = str(filepath.relative_to(PARSE_ROOT)).replace("\\", "/")
-            
-            # 1. PARSE_ROOT 기준 상대 경로 추출
-            rel_dir = filepath.parent.relative_to(PARSE_ROOT)
-            # attachments_dir = MAIL_ROOT / rel_dir / "attachments"
+            if not match or int(match.group(1)) != category_max_versions.get(category):
+                skip_reasons["not_latest_version"] += 1
+                continue
 
-            # print(f"debug 마크다운 파일: {filepath}")
-            # print(f"debug 예상 이미지 폴더: {attachments_dir}")
-            # print(f"debug 폴더 존재 여부: {attachments_dir.exists()}")
-
-            # 2. 'export_' 로 시작하는 폴더를 찾으면 그 앞까지만 경로로 사용 (재귀 탐색 X)
-            target_parts = []
-            for part in rel_dir.parts:
-                if part.startswith("export_"):
-                    break
-                target_parts.append(part)
-
-            # 3. MAIL_ROOT와 잘라낸 경로를 결합하여 정확한 이미지 폴더 경로 생성
-            attachments_dir = MAIL_ROOT.joinpath(*target_parts) / "attachments"
+            # 경로 계산
+            safe_rel_dir = Path(rel_path).parent
+            safe_out_dir = PARSE_ROOT / safe_rel_dir
+            md_files = list(safe_out_dir.rglob("*.md"))
             
-            assets = []
-            if attachments_dir.exists() and attachments_dir.is_dir():
-                for ext in ["*.png", "*.jpg", "*.jpeg", "*.webp", "*.PNG", "*.JPG"]:
-                    for img_path in attachments_dir.glob(ext):
-                        rel_img_path = str(img_path.relative_to(MAIL_ROOT)).replace("\\", "/")
-                        assets.append({"path": rel_img_path, "file_name": img_path.name})
-                        
-            # 카드 객체 추가
-            docs.append({
-                "doc_id": filepath.name,
-                "title": title,
-                "mail_from": mail_from,
-                "mail_date": mail_date,
-                "report_links": report_links,
-                "storage": {"parsed_md_rel_path": rel_md_path},
-                "assets": assets,
-                "raw_content": content 
-            })
-        except Exception as e:
-            print(f"[Archive Error] Failed to load {filepath}: {e}")
+            if not md_files:
+                skip_reasons["md_file_not_found"] += 1
+                if not first_missing_path:
+                    first_missing_path = safe_out_dir # 경로가 어떻게 꼬였는지 터미널에 출력하기 위해 저장
+                continue
             
-    # 💡 4. 가장 중요한 정렬 로직! (알파벳 정렬이 아닌 실제 시간 기준 내림차순 정렬)
-    docs.sort(key=lambda x: _parse_date_to_timestamp(x["mail_date"]), reverse=True)
-    
-    _ARCHIVE_CACHE = docs
-    _CACHE_LOADED = True
+            filepath = md_files[0]
+            
+            try:
+                content = filepath.read_text(encoding="utf-8", errors="ignore")
+                
+                # 메타데이터가 없는 파일 거르기
+                if "[MAIL_META]" not in content:
+                    skip_reasons["no_mail_meta_tag"] += 1
+                    continue
+                
+                title = filepath.stem
+                mail_from = ""
+                mail_date = ""
+                report_links = []
+                
+                from_match = re.search(r'From\s*:\s*(.*?)(?=\s*(?:Date|To|Cc|Bcc|Subject|\[)|\n|$)', content, re.IGNORECASE)
+                if from_match: mail_from = from_match.group(1).strip()
+                
+                date_match = re.search(r'Date\s*:\s*(.*?)(?=\s*(?:From|To|Cc|Bcc|Subject|\[)|\n|$)', content, re.IGNORECASE)
+                if date_match: mail_date = date_match.group(1).strip()
+                
+                subject_match = re.search(r'Subject\s*:\s*(.*?)(?=\s*(?:From|Date|To|Cc|Bcc|\[)|\n|$)', content, re.IGNORECASE)
+                if subject_match: title = subject_match.group(1).strip()
+                
+                edm_match = re.search(r'EDM\s*링크\s*:\s*(http[^\s\n]+)', content, re.IGNORECASE)
+                if edm_match: report_links.append(edm_match.group(1).strip())
+                
+                rel_dir = filepath.parent.relative_to(PARSE_ROOT)
+                target_parts = []
+                for part in rel_dir.parts:
+                    if part.startswith("export_"): break
+                    target_parts.append(part)
+                
+                attachments_dir = MAIL_ROOT.joinpath(*target_parts) / "attachments"
+                assets = []
+                if attachments_dir.exists() and attachments_dir.is_dir():
+                    for ext in ["*.png", "*.jpg", "*.jpeg", "*.webp", "*.PNG", "*.JPG"]:
+                        for img_path in attachments_dir.glob(ext):
+                            assets.append({
+                                "path": str(img_path.relative_to(MAIL_ROOT)).replace("\\", "/"),
+                                "file_name": img_path.name
+                            })
+
+                docs.append({
+                    "doc_id": filepath.name,
+                    "title": title,
+                    "mail_from": mail_from,
+                    "mail_date": mail_date,
+                    "report_links": report_links,
+                    "storage": {"parsed_md_rel_path": str(filepath.relative_to(PARSE_ROOT)).replace("\\", "/")},
+                    "assets": assets,
+                    "raw_content": content,
+                    "version_tag": version_str.upper()
+                })
+            except Exception as e:
+                skip_reasons["parse_error"] += 1
+                # print(f"[Archive Error] 파일 파싱 실패 {filepath}: {e}")
+
+        docs.sort(key=lambda x: _parse_date_to_timestamp(x["mail_date"]), reverse=True)
+        
+        _ARCHIVE_CACHE = docs
+        _LAST_PROCESSED_MTIME = current_mtime
+        
+        # 💡 리포트 최종 출력
+        print("-" * 50)
+        print(f"[Archive Report] 필터링 및 로딩 결과")
+        print(f"  - 성공적으로 로드된 문서: {len(docs)}개")
+        print(f"  - [Skip] 상태가 DONE이 아님: {skip_reasons['status_not_done']}개")
+        print(f"  - [Skip] 구버전 폴더(최신 아님): {skip_reasons['not_latest_version']}개")
+        print(f"  - [Skip] MD 파일 경로 못 찾음: {skip_reasons['md_file_not_found']}개")
+        print(f"  - [Skip] 문서 내 [MAIL_META] 없음: {skip_reasons['no_mail_meta_tag']}개")
+        print(f"  - [Skip] 읽기 에러 등: {skip_reasons['parse_error']}개")
+        if first_missing_path:
+            print(f"\n⚠️ 주의: MD 파일을 찾지 못한 첫 번째 경로를 확인해보세요!")
+            print(f"서버가 찾으려 한 경로: {first_missing_path}")
+        print("-" * 50)
+        
+    except Exception as e:
+        print(f"[Archive] processed.json 읽기 실패: {e}")
+        
     return _ARCHIVE_CACHE
 
 @app.get("/api/archive/documents")
@@ -704,4 +786,94 @@ def _safe_join(root: Path, rel_path: str) -> Path:
     p = (root / rp).resolve()
     root_r = root.resolve()
     if not str(p).startswith(str(root_r)):
-        raise HTTPE
+        raise HTTPException(status_code=400, detail="Invalid path")
+    return p
+
+
+@app.get("/api/view/md")
+async def view_md(request: Request, rel: str):
+    _ = _require_user(request)
+    p = _safe_join(PARSE_ROOT, rel)
+    if not p.exists() or not p.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    return PlainTextResponse(p.read_text(encoding="utf-8", errors="ignore"), media_type="text/plain; charset=utf-8")
+
+
+@app.get("/api/view/asset")
+async def view_asset(request: Request, rel: str):
+    _ = _require_user(request)
+    p = _safe_join(MAIL_ROOT, rel)
+    if not p.exists() or not p.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+
+    data = p.read_bytes()
+    ext = p.suffix.lower()
+    if ext in (".png",):
+        mt = "image/png"
+    elif ext in (".jpg", ".jpeg"):
+        mt = "image/jpeg"
+    elif ext in (".webp",):
+        mt = "image/webp"
+    else:
+        mt = "application/octet-stream"
+    return Response(content=data, media_type=mt)
+
+
+@app.get("/api/search-log/by-user-msg/{user_msg_id}")
+async def api_search_log_by_user_msg(user_msg_id: str, request: Request, session_id: str = Query(...)):
+    user = _require_user(request)
+    log = repo.get_search_log_by_user_msg(session_id=session_id, user_id=user, user_msg_id=user_msg_id)
+    return {"search_log": log}
+
+
+@app.post("/api/sessions/{session_id}/archive")
+async def api_archive_session(session_id: str, request: Request):
+    user = _require_user(request)
+    repo.archive_session(session_id, user)
+    return {"ok": True}
+
+
+@app.get("/api/sessions/{session_id}/latest-artifact")
+async def api_latest_artifact(session_id: str, request: Request):
+    user = _require_user(request)
+    art = repo.get_latest_artifact(session_id, user)
+    return {"artifact": art}
+
+
+@app.get("/api/artifacts/by-assistant/{assistant_msg_id}")
+async def api_artifact_by_assistant(assistant_msg_id: str, request: Request, session_id: str = Query(...)):
+    user = _require_user(request)
+    art = repo.get_artifact_by_assistant_msg(session_id=session_id, user_id=user, assistant_msg_id=assistant_msg_id)
+    return {"artifact": art}
+
+@app.post("/api/dictionary/propose")
+async def api_propose_term(request: Request):
+    # 기존에 구현해두신 인증 로직 활용 (JWT 토큰 등에서 user id 추출)
+    user_id = _require_user(request) 
+    
+    body = await request.json()
+    
+    candidate_kind = body.get("kind", "new_term")
+    candidate_type = body.get("type", "defect")
+    raw_text = body.get("raw_text")
+    canonical_name = body.get("canonical")
+    target_term_id = body.get("target_id")
+    aliases = body.get("aliases", [])
+    
+    if not raw_text:
+        raise HTTPException(status_code=400, detail="raw_text is required")
+        
+    success = propose_term_candidate(
+        user_id=user_id,
+        candidate_kind=candidate_kind,
+        candidate_type=candidate_type,
+        raw_text=raw_text,
+        canonical_name=canonical_name,
+        target_term_id=target_term_id,
+        aliases=aliases
+    )
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to submit proposal to DB")
+        
+    return {"status": "success", "message": "Term proposed successfully. Pending approval."}

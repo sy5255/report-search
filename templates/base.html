@@ -85,7 +85,7 @@
     <header class="bg-surface border-b border-surface-container flex items-center justify-between px-6 h-16 w-full shrink-0 z-50">
         <div class="flex items-center gap-8">
             <div class="flex items-center gap-2">
-                <span class="material-symbols-outlined text-primary">database</span> 여기서 다른 아이콘 어떻게 설정해?
+                <span class="material-symbols-outlined text-primary">book_4</span>
                 <h1 class="text-xl font-bold tracking-tight font-headline">Intellectual Curator</h1>
             </div>
             <nav class="hidden md:flex items-center gap-6">
@@ -98,7 +98,7 @@
         
         <div class="flex items-center gap-4">
             <button id="themeToggleGlobal" class="p-2 rounded-full hover:bg-surface-container transition-colors">
-                <span class="material-symbols-outlined text-secondary">light_mode</span>
+                <span class="material-symbols-outlined text-secondary" id="themeIcon">light_mode</span>
             </button>
             <button id="logoutGlobal" class="px-3 py-1.5 rounded-full bg-error/10 text-error text-xs font-bold hover:bg-error/20 transition-colors">Logout</button>
             <div class="w-8 h-8 rounded-full bg-primary-container flex items-center justify-center text-on-primary text-xs font-bold uppercase" title="{{ user_id }}">
@@ -112,5 +112,50 @@
     </div>
 
     {% block scripts %}{% endblock %}
+
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            const htmlEl = document.documentElement;
+            const themeIcon = document.getElementById('themeIcon');
+
+            // 초기 테마 설정 반영 (로컬 스토리지 기준)
+            if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                htmlEl.classList.add('dark');
+                if (themeIcon) themeIcon.textContent = "dark_mode";
+            } else {
+                htmlEl.classList.remove('dark');
+                if (themeIcon) themeIcon.textContent = "light_mode";
+            }
+
+            // 테마 토글 버튼 이벤트
+            const themeBtn = document.getElementById('themeToggleGlobal');
+            if (themeBtn) {
+                themeBtn.addEventListener('click', () => {
+                    htmlEl.classList.toggle('dark');
+                    const isDark = htmlEl.classList.contains('dark');
+                    localStorage.theme = isDark ? 'dark' : 'light';
+                    if (themeIcon) themeIcon.textContent = isDark ? "dark_mode" : "light_mode";
+                });
+            }
+
+            // 3. 로그아웃 버튼 클릭 이벤트 (완벽 수정)
+            const logoutBtn = document.getElementById('logoutGlobal');
+            if (logoutBtn) {
+                logoutBtn.addEventListener('click', async () => {
+                    if (!confirm("로그아웃 하시겠습니까?")) return;
+                    try {
+                        // main.py에 정의된 정확한 경로(/logout)로 POST 요청
+                        await fetch('/logout', { method: 'POST' });
+                        
+                        // 💡 핵심 수정: 존재하지 않는 '/login'이 아니라 로그인 화면이 있는 '/' 로 이동
+                        window.location.href = '/';
+                    } catch (err) {
+                        console.error('Logout error:', err);
+                        window.location.href = '/'; 
+                    }
+                });
+            }
+        });
+    </script>
 </body>
 </html>
