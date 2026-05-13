@@ -1,9 +1,11 @@
-import os 
-import re  
+import os
+import re
+import time
 import json
 from pathlib import Path
-from datetime import datetime 
+from datetime import datetime
 from email.utils import parsedate_to_datetime
+
 from fastapi import FastAPI, Request, Response, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -25,7 +27,7 @@ from app import repo
 from app.agent import run_agent_loop, run_agent_loop_stream
 from app.llm_client import rewrite_query_with_history
 from app.query_normalizer import normalize_and_expand_query
-from app.dictionary_repo import propose_term_candidate
+from app.dictionary_repo import propose_term_candidate, get_all_terms
 
 app = FastAPI(title="RAG Search Web", version=VERSION)
 
@@ -550,11 +552,17 @@ async def api_chat(request: Request):
 _ARCHIVE_CACHE = []
 # _CACHE_LOADED = False
 _LAST_PROCESSED_MTIME = 0.0  # processed.json의 마지막 수정 시간 저장
+_LAST_CHECK_TIME = 0.0 
+# 24시간(86,400초) 간격으로 체크하도록 수정
+CACHE_CHECK_INTERVAL = 86400 
 
 # processed.json 파일 경로 설정
 PROCESSED_JSON_PATH = PARSE_ROOT / "_state" / "processed.json"
 
-# 💡 1. 날짜 문자열을 진짜 시간(Timestamp) 숫자로 변환하는 강력한 함수
+# 허용된 작성자 화이트리스트 (이름만 작성)
+ALLOWED_AUTHORS = ["성지아 <j.na@s.com>", "김지수 <s.go@s.com>", "고미연 <y.ko@s.com>", "김영인 <i.kim@s.com>", "진연수 <s.jin@s.com>", "유미래 <g.y@s.com>", "신현빈 <s.shin@s.com>", "서세린 <s.se@s.com>", "오슬미 <s.y@s.com>", "이자린 <k.lee@s.com>", "김장미 <m.kim@s.com>", "김소희 <j.kim@s.com>", "이나연 <h.oh@s.com>", "윤희서 <k.y@s.com>", "미인지 <s.mg@s.com>"]
+
+# 1. 날짜 문자열을 진짜 시간(Timestamp) 숫자로 변환하는 강력한 함수
 def _parse_date_to_timestamp(date_str):
     if not date_str:
         return 0.0 # 날짜가 아예 없으면 맨 뒤로 보냄
@@ -580,18 +588,27 @@ def _parse_date_to_timestamp(date_str):
 
 # 💡 2. 로컬 문서 검색 로직
 def get_local_archive_docs():
-    global _ARCHIVE_CACHE, _LAST_PROCESSED_MTIME
+    global _ARCHIVE_CACHE, _LAST_PROCESSED_MTIME, _LAST_CHECK_TIME
+    
+    now = time.time()
+
+    # 마지막 체크 후 24시간이 지나지 않았고 캐시가 있다면 즉시 반환
+    if now - _LAST_CHECK_TIME < CACHE_CHECK_INTERVAL and _ARCHIVE_CACHE:
+        # 💡 이 조건문 덕분에 서버는 24시간 동안 파일 시스템을 건드리지 않고 
+        # 메모리(RAM)에 있는 데이터를 0.0001초 만에 반환합니다.
+        return _ARCHIVE_CACHE
     
     if not PROCESSED_JSON_PATH.exists():
         print(f"[Archive] {PROCESSED_JSON_PATH} 파일을 찾을 수 없습니다.")
         return []
 
+    _LAST_CHECK_TIME = now
     current_mtime = os.path.getmtime(PROCESSED_JSON_PATH)
 
     if _LAST_PROCESSED_MTIME == current_mtime and _ARCHIVE_CACHE:
         return _ARCHIVE_CACHE
 
-    print(f"[Archive] 새 문서 감지 또는 초기 로딩 시작... (mtime: {current_mtime})")
+    print(f"[Archive] 24시간 경과: 주기적 캐시 갱신 시작... (mtime: {current_mtime})")
     
     try:
         with open(PROCESSED_JSON_PATH, "r", encoding="utf-8") as f:
@@ -662,14 +679,24 @@ def get_local_archive_docs():
                     skip_reasons["no_mail_meta_tag"] += 1
                     continue
                 
+                # 💡 여기서 변수들을 모두 '빈 바구니'로 초기화해야 합니다! (이 부분이 지워져서 났던 에러입니다)
                 title = filepath.stem
                 mail_from = ""
                 mail_date = ""
-                report_links = []
+                report_links = [] 
                 
+                # 1. 작성자(From) 파싱
                 from_match = re.search(r'From\s*:\s*(.*?)(?=\s*(?:Date|To|Cc|Bcc|Subject|\[)|\n|$)', content, re.IGNORECASE)
-                if from_match: mail_from = from_match.group(1).strip()
+                if from_match: 
+                    # 꺾쇠 유지, 따옴표만 제거
+                    mail_from = from_match.group(1).strip().replace('"', '').replace("'", "")
                 
+                # 💡 2. 화이트리스트 검사 (허용된 사람 아니면 여기서 바로 스킵!)
+                if mail_from not in ALLOWED_AUTHORS:
+                    skip_reasons["not_allowed_author"] = skip_reasons.get("not_allowed_author", 0) + 1
+                    continue
+                
+                # 3. 날짜, 제목, EDM 링크 파싱
                 date_match = re.search(r'Date\s*:\s*(.*?)(?=\s*(?:From|To|Cc|Bcc|Subject|\[)|\n|$)', content, re.IGNORECASE)
                 if date_match: mail_date = date_match.group(1).strip()
                 
@@ -679,6 +706,7 @@ def get_local_archive_docs():
                 edm_match = re.search(r'EDM\s*링크\s*:\s*(http[^\s\n]+)', content, re.IGNORECASE)
                 if edm_match: report_links.append(edm_match.group(1).strip())
                 
+                # 4. 이미지 에셋 탐색 로직
                 rel_dir = filepath.parent.relative_to(PARSE_ROOT)
                 target_parts = []
                 for part in rel_dir.parts:
@@ -695,6 +723,7 @@ def get_local_archive_docs():
                                 "file_name": img_path.name
                             })
 
+                # 5. 모든 데이터를 묶어서 카드 1개 완성!
                 docs.append({
                     "doc_id": filepath.name,
                     "title": title,
@@ -706,9 +735,11 @@ def get_local_archive_docs():
                     "raw_content": content,
                     "version_tag": version_str.upper()
                 })
+                
             except Exception as e:
                 skip_reasons["parse_error"] += 1
-                # print(f"[Archive Error] 파일 파싱 실패 {filepath}: {e}")
+                if skip_reasons["parse_error"] == 1:
+                    print(f"\n🚨 [디버그] 치명적 에러 원인 발견: {type(e).__name__} - {e}\n")
 
         docs.sort(key=lambda x: _parse_date_to_timestamp(x["mail_date"]), reverse=True)
         
@@ -734,13 +765,18 @@ def get_local_archive_docs():
         
     return _ARCHIVE_CACHE
 
+
+
 @app.get("/api/archive/documents")
 async def api_get_archive_documents(
     request: Request,
     q: str = Query("", description="검색 키워드"),
-    skip: int = Query(0, description="건너뛸 문서 수"),
-    limit: int = Query(20, description="가져올 문서 수"),
-    sort: str = Query("desc", description="정렬 순서 (desc/asc)")
+    author: str = Query("", description="담당자 다중 필터 (콤마로 구분)"), # 💡 all 대신 빈 문자열 기본값
+    start_date: str = Query("", description="시작일"),
+    end_date: str = Query("", description="종료일"),
+    skip: int = Query(0),
+    limit: int = Query(20),
+    sort: str = Query("desc")
 ):
     user = _require_user(request)
     all_docs = get_local_archive_docs()
@@ -748,35 +784,45 @@ async def api_get_archive_documents(
     filtered = []
     q_lower = q.lower().strip()
     
-    # 1. Exact Match 키워드 검색
-    for doc in all_docs:
-        if not q_lower:
-            filtered.append(doc) 
-        else:
-            if q_lower in doc["title"].lower() or q_lower in doc["raw_content"].lower():
-                filtered.append(doc)
-                
-    # 💡 2. 여기가 문제였습니다! (알파벳 정렬 -> 타임스탬프 정렬로 완벽 교체)
-    filtered.sort(
-        key=lambda x: _parse_date_to_timestamp(x.get("mail_date", "")),
-        reverse=(sort == "desc")
-    )
+    # 💡 콤마로 구분된 담당자 문자열을 리스트로 변환
+    author_list = [a.strip() for a in author.split(",")] if author else []
     
-    # 3. 페이지네이션
+    start_ts = _parse_date_to_timestamp(start_date) if start_date else 0
+    end_ts = _parse_date_to_timestamp(end_date) + 86399 if end_date else float('inf')
+    
+    for doc in all_docs:
+        if q_lower and (q_lower not in doc["title"].lower() and q_lower not in doc["raw_content"].lower()):
+            continue
+            
+        # 💡 담당자 다중 필터 로직 적용
+        if author_list and doc.get("mail_from") not in author_list:
+            continue
+            
+        doc_ts = _parse_date_to_timestamp(doc.get("mail_date", ""))
+        if not (start_ts <= doc_ts <= end_ts):
+            continue
+            
+        filtered.append(doc)
+                
+    filtered.sort(key=lambda x: _parse_date_to_timestamp(x.get("mail_date", "")), reverse=(sort == "desc"))
     paginated = filtered[skip : skip + limit]
     
-    # 4. 프론트엔드 전송 (무거운 raw_content는 제외)
-    res_docs = []
-    for d in paginated:
-        r = dict(d)
-        r.pop("raw_content", None)
-        res_docs.append(r)
-        
+    res_docs = [dict(d, raw_content=None) for d in paginated]
     return {
         "total_fetched": len(filtered),
         "documents": res_docs,
         "has_more": len(filtered) > (skip + limit)
     }
+    
+# 담당자 목록 추출 API 추가
+@app.get("/api/archive/filters")
+async def api_get_archive_filters(request: Request):
+    user = _require_user(request)
+    all_docs = get_local_archive_docs()
+    
+    # 중복 제거된 담당자(mail_from) 목록 추출 (가나다순 정렬)
+    authors = sorted(list(set(doc.get("mail_from", "") for doc in all_docs if doc.get("mail_from"))))
+    return {"authors": authors}
 
 # =========================
 # Viewers: md / eml / asset
@@ -877,3 +923,11 @@ async def api_propose_term(request: Request):
         raise HTTPException(status_code=500, detail="Failed to submit proposal to DB")
         
     return {"status": "success", "message": "Term proposed successfully. Pending approval."}
+
+# API: Term Dictionary 목록 조회
+@app.get("/api/dictionary/terms")
+async def api_get_dictionary_terms(request: Request):
+    user = _require_user(request)
+
+    terms = get_all_terms()
+    return {"terms": terms}

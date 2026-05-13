@@ -23,7 +23,7 @@
 
     <div id="reportsTab" class="flex-1 flex w-full h-full overflow-hidden transition-all duration-300">
         <div id="archiveLeftPanel" class="w-[700px] border-r border-surface-container flex flex-col bg-surface-container-lowest shrink-0">
-            <div class="p-6 border-b border-surface-container bg-surface-container-low">
+            <div class="p-6 border-b border-surface-container bg-surface-container-low transition-all">
                 <div class="flex justify-between items-center mb-4">
                     <h2 class="text-lg font-bold text-on-surface font-manrope">Document List</h2>
                     <div class="flex items-center gap-4">
@@ -34,10 +34,41 @@
                         </button>
                     </div>
                 </div>
-                <div class="relative">
-                    <span class="material-symbols-outlined absolute left-3 top-2.5 text-secondary text-sm">search</span>
-                    <input type="text" id="archiveSearchInput" placeholder="정확한 키워드로 문서 검색..." 
-                           class="w-full bg-surface-container-highest border border-surface-container rounded-lg py-2 pl-9 pr-4 text-sm text-on-surface outline-none focus:ring-1 focus:ring-primary transition-shadow">
+                
+                <div class="flex gap-2">
+                    <div class="relative flex-1">
+                        <span class="material-symbols-outlined absolute left-3 top-2.5 text-secondary text-sm">search</span>
+                        <input type="text" id="archiveSearchInput" placeholder="정확한 키워드로 문서 검색..." 
+                               class="w-full bg-surface-container-highest border border-surface-container rounded-lg py-2 pl-9 pr-4 text-sm text-on-surface outline-none focus:ring-1 focus:ring-primary transition-shadow">
+                    </div>
+                    <button id="filterToggleBtn" class="flex items-center gap-2 px-3 py-2 bg-surface-container-highest border border-surface-container rounded-lg text-sm text-secondary hover:text-primary hover:bg-surface-container transition-colors" title="필터 열기/닫기">
+                        <span class="material-symbols-outlined text-sm">tune</span>
+                        <span class="text-xs font-bold">Filter</span>
+                    </button>
+                </div>
+
+                <div id="filterPanel" class="hidden flex-col gap-4 mt-4 pt-4 border-t border-surface-container/50">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="relative">
+                            <label class="block text-[10px] font-bold text-secondary mb-1.5 uppercase ml-1 tracking-wider">Author</label>
+                            <button id="authorDropdownBtn" class="w-full flex justify-between items-center bg-surface-container-lowest border border-surface-container rounded-lg px-3 py-2 text-xs text-on-surface outline-none focus:ring-1 focus:ring-primary/50 transition-all">
+                                <span id="authorSelectionText" class="truncate">전체 담당자 (All)</span>
+                                <span class="material-symbols-outlined text-sm">expand_more</span>
+                            </button>
+                            
+                            <div id="authorDropdownList" class="hidden absolute left-0 right-0 mt-2 bg-surface-container-lowest border border-surface-container rounded-xl shadow-xl z-[100] max-h-60 overflow-y-auto scrolled-content p-2">
+                                </div>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-[10px] font-bold text-secondary mb-1.5 uppercase ml-1 tracking-wider">Date Range</label>
+                            <div class="flex items-center gap-2">
+                                <input type="date" id="filterStartDate" class="w-full bg-surface-container-lowest border border-surface-container rounded-lg px-2 py-2 text-xs text-on-surface outline-none focus:ring-1 focus:ring-primary/50 transition-shadow">
+                                <span class="text-secondary text-xs font-bold">~</span>
+                                <input type="date" id="filterEndDate" class="w-full bg-surface-container-lowest border border-surface-container rounded-lg px-2 py-2 text-xs text-on-surface outline-none focus:ring-1 focus:ring-primary/50 transition-shadow">
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -75,6 +106,7 @@
         </div>
     </div>
 
+
     <div id="dictionaryTab" class="hidden flex-1 w-full h-full overflow-y-auto bg-background p-8">
         <div class="flex justify-between items-center mb-6">
             <div class="flex gap-3">
@@ -91,18 +123,19 @@
 
         <div class="bg-surface-container-lowest rounded-2xl border border-surface-container overflow-hidden shadow-sm">
             <table class="w-full text-left border-collapse">
-                <thead>
-                    <tr class="bg-surface-container-low border-b border-surface-container">
-                        <th class="px-8 py-4 text-xs font-extrabold text-secondary uppercase tracking-wider font-manrope">Canonical Term</th>
-                        <th class="px-8 py-4 text-xs font-extrabold text-secondary uppercase tracking-wider font-manrope">Aliases</th>
-                        <th class="px-8 py-4 text-xs font-extrabold text-secondary uppercase tracking-wider font-manrope">Type</th>
+                <thead class="bg-surface-container-low border-b border-surface-container-high">
+                    <tr>
+                        <th class="px-8 py-5 text-xs font-bold uppercase tracking-wider text-secondary font-manrope">Term</th>
+                        <th class="px-8 py-5 text-xs font-bold uppercase tracking-wider text-secondary font-manrope">Category</th>
+                        <th class="px-8 py-5 text-xs font-bold uppercase tracking-wider text-secondary font-manrope w-1/2">Technical Definition & Aliases</th>
+                        <th class="px-8 py-5 text-xs font-bold uppercase tracking-wider text-secondary font-manrope text-right">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="dictionaryTableBody" class="divide-y divide-surface-container">
                     <tr>
-                        <td colspan="3" class="px-8 py-8 text-center text-secondary text-sm">
+                        <td colspan="4" class="px-8 py-8 text-center text-secondary text-sm">
                             <span class="material-symbols-outlined animate-spin mb-2">refresh</span>
-                            <p>데이터를 준비 중입니다...</p>
+                            <p>데이터를 불러오는 중입니다...</p>
                         </td>
                     </tr>
                 </tbody>
@@ -115,37 +148,57 @@
     <div id="addTermModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-[5000] transition-opacity">
         <div class="bg-surface-container-lowest w-[500px] rounded-2xl p-8 shadow-2xl border border-outline/20">
             <div class="flex justify-between items-center mb-6">
-                <h3 class="text-xl font-bold font-manrope text-on-surface">Suggest New Term</h3>
+                <h3 class="text-xl font-bold font-manrope text-on-surface">Suggest Term / Alias</h3>
                 <button onclick="closeTermModal()" class="text-secondary hover:text-error transition-colors">
                     <span class="material-symbols-outlined">close</span>
                 </button>
             </div>
             
             <form id="proposeTermForm" class="space-y-5">
-                <div>
-                    <label class="block text-xs font-bold text-secondary mb-2 uppercase tracking-wider">Category (Type)</label>
-                    <select name="type" class="w-full rounded-lg border border-surface-container bg-surface-container-low text-sm p-3 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface">
-                        <option value="defect">Defect (불량명)</option>
-                        <option value="process">Process (공정명)</option>
-                        <option value="product">Product (제품명)</option>
-                        <option value="chemistry">Chemistry (화학물질)</option>
-                        <option value="node">Node (노드)</option>
-                    </select>
-                </div>
                 
-                <div>
-                    <label class="block text-xs font-bold text-secondary mb-2 uppercase tracking-wider">Candidate Term (원문/약어)</label>
-                    <input type="text" name="raw_text" required class="w-full rounded-lg border border-surface-container bg-surface-container-low text-sm p-3 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface" placeholder="e.g. SF2_defect">
+                <div class="flex gap-6 p-3 bg-surface-container-low rounded-xl border border-surface-container">
+                    <label class="flex items-center gap-2 text-sm font-bold text-on-surface cursor-pointer">
+                        <input type="radio" name="proposal_mode" value="new_term" checked class="text-primary focus:ring-primary">
+                        새 용어 제안
+                    </label>
+                    <label class="flex items-center gap-2 text-sm font-bold text-on-surface cursor-pointer">
+                        <input type="radio" name="proposal_mode" value="alias_for_existing_term" class="text-primary focus:ring-primary">
+                        유의어 추가
+                    </label>
                 </div>
 
-                <div>
-                    <label class="block text-xs font-bold text-secondary mb-2 uppercase tracking-wider">Canonical Name (표준명 - 선택)</label>
-                    <input type="text" name="canonical" class="w-full rounded-lg border border-surface-container bg-surface-container-low text-sm p-3 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface" placeholder="표준명칭이 따로 있다면 입력">
+                <div id="sectionTargetTerm" class="hidden">
+                    <label class="block text-[10px] font-bold text-secondary mb-2 uppercase tracking-wider">Target Existing Term (대상 용어)</label>
+                    <select name="target_id" id="targetTermSelect" class="w-full rounded-lg border border-surface-container bg-surface-container-lowest text-sm p-3 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface">
+                        </select>
+                </div>
+
+                <div id="sectionNewTermDetails" class="space-y-5">
+                    <div>
+                        <label class="block text-[10px] font-bold text-secondary mb-2 uppercase tracking-wider">Category (Type)</label>
+                        <select name="type" class="w-full rounded-lg border border-surface-container bg-surface-container-lowest text-sm p-3 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface">
+                            <option value="defect">Defect (불량명)</option>
+                            <option value="process">Process (공정명)</option>
+                            <option value="product">Product (제품명)</option>
+                            <option value="chemistry">Chemistry (화학물질)</option>
+                            <option value="node">Node (노드)</option>
+                            <option value="acronym">Acronym (약어)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-secondary mb-2 uppercase tracking-wider">Canonical Name (표준명)</label>
+                        <input type="text" name="canonical" class="w-full rounded-lg border border-surface-container bg-surface-container-lowest text-sm p-3 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface" placeholder="e.g. SF2_defect">
+                    </div>
                 </div>
                 
                 <div>
-                    <label class="block text-xs font-bold text-secondary mb-2 uppercase tracking-wider">Aliases (유의어 - 콤마로 구분)</label>
-                    <input type="text" name="aliases" class="w-full rounded-lg border border-surface-container bg-surface-container-low text-sm p-3 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface" placeholder="별칭1, 별칭2, 약어1">
+                    <label id="rawTextLabel" class="block text-[10px] font-bold text-secondary mb-2 uppercase tracking-wider">Candidate Term (원문/대표 유의어)</label>
+                    <input type="text" id="rawTextInput" name="raw_text" required class="w-full rounded-lg border border-surface-container bg-surface-container-lowest text-sm p-3 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface" placeholder="입력 필수">
+                </div>
+                
+                <div>
+                    <label class="block text-[10px] font-bold text-secondary mb-2 uppercase tracking-wider">Additional Aliases (추가 유의어 - 콤마로 구분)</label>
+                    <input type="text" name="aliases" class="w-full rounded-lg border border-surface-container bg-surface-container-lowest text-sm p-3 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface" placeholder="별칭1, 별칭2">
                 </div>
                 
                 <div class="flex justify-end gap-3 mt-8 pt-4 border-t border-surface-container">
@@ -158,9 +211,9 @@
             </form>
         </div>
     </div>
-
 </div>
 {% endblock %}
+
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -174,15 +227,19 @@
         const dictBtn = document.getElementById('tabDictionaryBtn');
 
         if (tabName === 'reports') {
-            reportsTab.classList.remove('hidden');
-            dictTab.classList.add('hidden');
+            // 💡 CSS 충돌을 원천 차단하기 위해 강제로 display 속성 제어
+            reportsTab.style.display = 'flex';
+            dictTab.style.display = 'none';
+
             reportsBtn.classList.replace('text-secondary', 'text-primary');
             reportsBtn.classList.replace('border-transparent', 'border-primary');
             dictBtn.classList.replace('text-primary', 'text-secondary');
             dictBtn.classList.replace('border-primary', 'border-transparent');
         } else {
-            reportsTab.classList.add('hidden');
-            dictTab.classList.remove('hidden');
+            // 💡 사전 탭을 누르면 리포트 탭을 완전히 끄고 사전 탭을 켬
+            reportsTab.style.display = 'none';
+            dictTab.style.display = 'block';
+
             dictBtn.classList.replace('text-secondary', 'text-primary');
             dictBtn.classList.replace('border-transparent', 'border-primary');
             reportsBtn.classList.replace('text-primary', 'text-secondary');
@@ -200,7 +257,20 @@
         const modal = document.getElementById('addTermModal');
         modal.classList.add('hidden');
         modal.classList.remove('flex');
-        document.getElementById('proposeTermForm').reset();
+        
+        const form = document.getElementById('proposeTermForm');
+        if(form) form.reset();
+        
+        // 닫을 때 모달 상태 초기화 (새 용어 제안 모드로 복구)
+        const sectionTarget = document.getElementById("sectionTargetTerm");
+        const sectionNew = document.getElementById("sectionNewTermDetails");
+        const rawLabel = document.getElementById("rawTextLabel");
+        const rawInput = document.getElementById("rawTextInput");
+
+        if(sectionTarget) sectionTarget.classList.add("hidden");
+        if(sectionNew) sectionNew.classList.remove("hidden");
+        if(rawLabel) rawLabel.innerText = "Candidate Term (원문/대표 유의어)";
+        if(rawInput) rawInput.placeholder = "e.g. SF2_defect";
     }
 </script>
 {% endblock %}

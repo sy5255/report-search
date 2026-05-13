@@ -66,3 +66,32 @@ def propose_term_candidate(
         cur.close()
         conn.close()
 
+def get_all_terms() -> List[dict]:
+    """DB에서 정식 등록된 용어 사전 목록을 가져오는 함수 (웹 UI 렌더링용)"""
+    conn = get_mysql_conn()
+    cur = conn.cursor(dictionary=True) 
+    try:
+        # 용어 정보와 해당 용어에 속한 활성 유의어(alias)들을 콤마로 묶어서 한 번에 가져옵니다.
+        sql = """
+            SELECT 
+                td.term_id, 
+                td.term_type, 
+                td.canonical_name, 
+                td.description,
+                GROUP_CONCAT(ta.alias_text SEPARATOR ', ') as aliases
+            FROM term_dictionary td
+            LEFT JOIN term_aliases ta 
+              ON td.term_id = ta.term_id AND ta.status = 'active'
+            WHERE td.status = 'active'
+            GROUP BY td.term_id
+            ORDER BY td.term_type ASC, td.canonical_name ASC
+        """
+        cur.execute(sql)
+        rows = cur.fetchall()
+        return rows
+    except Exception as e:
+        print(f"[dictionary_repo] 사전 데이터 조회 실패: {e}")
+        return []
+    finally:
+        cur.close()
+        conn.close()
