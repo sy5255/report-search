@@ -115,10 +115,20 @@
                     <input type="text" id="dictSearchInput" placeholder="Search terms or aliases..." class="w-full bg-surface-container-lowest border border-surface-container rounded-xl py-2.5 pl-9 pr-4 text-sm text-on-surface outline-none focus:ring-2 focus:ring-primary/20 transition-shadow">
                 </div>
             </div>
-            <button onclick="openTermModal()" class="px-4 py-2 flex items-center gap-2 bg-primary text-on-primary rounded-xl text-sm font-bold shadow-sm hover:opacity-90 transition-all">
-                <span class="material-symbols-outlined text-sm">add</span>
-                Add Term
-            </button>
+            
+            <div class="flex gap-3">
+                {% if is_admin %}
+                <button onclick="window.open('/admin/dictionary', '_blank')" class="px-4 py-2 flex items-center gap-2 bg-surface-container-high text-on-surface rounded-xl text-sm font-bold shadow-sm hover:bg-surface-container-highest transition-all border border-surface-container">
+                    <span class="material-symbols-outlined text-sm">admin_panel_settings</span>
+                    Admin Dashboard
+                </button>
+                {% endif %}
+
+                <button onclick="openTermModal()" class="px-4 py-2 flex items-center gap-2 bg-primary text-on-primary rounded-xl text-sm font-bold shadow-sm hover:opacity-90 transition-all">
+                    <span class="material-symbols-outlined text-sm">add</span>
+                    Add Term
+                </button>
+            </div>
         </div>
 
         <div class="bg-surface-container-lowest rounded-2xl border border-surface-container overflow-hidden shadow-sm">

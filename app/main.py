@@ -27,7 +27,13 @@ from app import repo
 from app.agent import run_agent_loop, run_agent_loop_stream
 from app.llm_client import rewrite_query_with_history
 from app.query_normalizer import normalize_and_expand_query
-from app.dictionary_repo import propose_term_candidate, get_all_terms
+from app.dictionary_repo import (
+    propose_term_candidate, 
+    get_all_terms, 
+    get_pending_candidates, 
+    approve_candidate
+)
+# from app.rag_client import rag_get_archive_docs
 
 app = FastAPI(title="RAG Search Web", version=VERSION)
 
@@ -38,6 +44,8 @@ MAX_HISTORY_MESSAGES = 6  # 최근 6개 메시지 = 대략 최근 3턴
 RETRIEVE_TOP_K_DEFAULT = 12
 EXCLUDED_TOPDOC_INDEXES = {"rp-term-ver1"}
 
+# 관리자 권한을 가진 User ID 화이트리스트
+ADMIN_USER_IDS = ["s.park"] 
 
 def build_sliding_window_messages(
     all_messages: list[dict],
@@ -118,10 +126,15 @@ async def chat_page(request: Request):
 @app.get("/archive", response_class=HTMLResponse)
 async def archive_page(request: Request):
     user = _require_user(request)
+    
+    # 현재 접속한 유저가 관리자 리스트에 있는지 확인 (True / False)
+    is_admin = user in ADMIN_USER_IDS 
+    
     return templates.TemplateResponse("archive.html", {
         "request": request, 
-        "active_tab": "archive", # 프론트엔드에서 밑줄을 그리기 위한 변수
-        "user_id": user
+        "active_tab": "archive",
+        "user_id": user,
+        "is_admin": is_admin  # 💡 Jinja2 템플릿으로 변수 전달!
     })
 
 @app.get("/analytics", response_class=HTMLResponse)

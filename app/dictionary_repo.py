@@ -95,3 +95,68 @@ def get_all_terms() -> List[dict]:
     finally:
         cur.close()
         conn.close()
+
+def get_pending_candidates() -> List[dict]:
+    """Admin 대기열: 리뷰 대기 중인 용어 제안 목록을 가져옴"""
+    conn = get_mysql_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        sql = """
+            SELECT candidate_id, candidate_kind, candidate_type, raw_text, 
+                   suggested_canonical, target_term_id, proposed_aliases_json, 
+                   proposed_by, detected_count, confidence
+            FROM term_candidate_queue
+            WHERE review_status = 'pending'
+            ORDER BY detected_count DESC, candidate_id ASC
+        """
+        cur.execute(sql)
+        return cur.fetchall()
+    except Exception as e:
+        print(f"[dictionary_repo] 대기열 로드 에러: {e}")
+        return []
+    finally:
+        cur.close()
+        conn.close()
+
+
+def approve_candidate(data: dict, admin_user_id: str) -> bool:
+    """Admin 승인: 관리자가 수정한 값들로 큐 데이터를 덮어쓰고 상태를 approved로 변경"""
+    import json # 상단에 없다면 추가
+    conn = get_mysql_conn()
+    cur = conn.cursor()
+    try:
+        # 💡 프론트에서 넘어온 aliases 리스트를 JSON 문자열로 변환
+        aliases_json = json.dumps(data.get("aliases", []), ensure_ascii=False)
+        
+        sql = """
+            UPDATE term_candidate_queue
+            SET review_status = 'approved',
+                approved_term_type = %s,
+                approved_canonical_name = %s,
+                approved_priority = %s,
+                approved_expand_to_aliases = %s,
+                approved_search_boost = %s,
+                proposed_aliases_json = %s,  /* 💡 유의어 덮어쓰기 추가! */
+                reviewed_by = %s,
+                reviewed_at = CURRENT_TIMESTAMP
+            WHERE candidate_id = %s
+        """
+        cur.execute(sql, (
+            data.get("approved_term_type"),
+            data.get("approved_canonical_name"),
+            int(data.get("approved_priority", 100)),
+            int(data.get("approved_expand_to_aliases", 1)),
+            float(data.get("approved_search_boost", 1.0)),
+            aliases_json,  # 💡 추가된 파라미터
+            admin_user_id,
+            int(data.get("candidate_id"))
+        ))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"[dictionary_repo] 승인 처리 에러: {e}")
+        conn.rollback()
+        return False
+    finally:
+        cur.close()
+        conn.close()

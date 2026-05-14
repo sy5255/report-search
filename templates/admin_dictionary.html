@@ -1,0 +1,286 @@
+admin_dictionary.html 아래 프론트엔드는 어때보여?
+
+
+{% extends "base.html" %}
+{% block title %}Admin - Term Approval Dashboard{% endblock %}
+
+{% block content %}
+<div class="flex flex-col w-full h-full bg-background overflow-hidden">
+    <div class="px-8 py-6 border-b border-surface-container bg-surface-container-lowest shrink-0 flex justify-between items-center z-10">
+        <div class="flex items-center gap-4">
+            <div class="p-2 bg-primary/10 text-primary rounded-lg">
+                <span class="material-symbols-outlined text-2xl">admin_panel_settings</span>
+            </div>
+            <div>
+                <h1 class="text-2xl font-extrabold font-manrope text-on-surface tracking-tight">Term Approval Dashboard</h1>
+                <p class="text-xs text-secondary mt-1 font-bold uppercase tracking-wider">RAG Dictionary Optimization</p>
+            </div>
+        </div>
+        <button onclick="window.history.back()" class="px-4 py-2 bg-surface-container hover:bg-surface-container-high rounded-xl text-sm font-bold text-on-surface transition-colors flex items-center gap-2">
+            <span class="material-symbols-outlined text-sm">arrow_back</span>
+            돌아가기
+        </button>
+    </div>
+
+    <div class="flex flex-1 overflow-hidden">
+        <div class="w-[400px] border-r border-surface-container bg-surface-container-low flex flex-col shrink-0">
+            <div class="p-4 border-b border-surface-container font-extrabold text-sm text-on-surface flex justify-between items-center bg-surface-container-lowest">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-sm text-secondary">list_alt</span>
+                    Pending Queue
+                </div>
+                <span id="pendingCount" class="px-2 py-0.5 bg-primary text-on-primary rounded-md text-xs">0건</span>
+            </div>
+            <div id="pendingList" class="flex-1 overflow-y-auto p-4 space-y-3 scrolled-content">
+                <div class="text-center text-secondary text-sm mt-10">
+                    <span class="material-symbols-outlined animate-spin text-2xl mb-2">refresh</span>
+                    <p>대기열을 불러오는 중...</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex-1 bg-surface-container-lowest flex flex-col p-10 overflow-y-auto scrolled-content relative">
+            
+            <div id="emptyState" class="absolute inset-0 flex flex-col items-center justify-center text-secondary bg-surface-container-lowest z-10 transition-opacity duration-300">
+                <span class="material-symbols-outlined text-6xl mb-4 opacity-30">rule_settings</span>
+                <p class="font-bold text-lg text-on-surface">좌측 목록에서 검토할 항목을 선택해주세요.</p>
+                <p class="text-sm mt-2 opacity-80">RAG 검색 엔진 성능을 좌우하는 중요한 작업입니다.</p>
+            </div>
+
+            <div id="formState" class="hidden max-w-3xl mx-auto w-full pb-20">
+                <h2 class="text-xl font-bold font-manrope mb-6 text-on-surface border-b border-surface-container pb-4 flex items-center gap-2">
+                    <span class="material-symbols-outlined text-primary">edit_document</span>
+                    승인 및 RAG 최적화 설정
+                </h2>
+                
+                <form id="approvalForm" class="space-y-6">
+                    <input type="hidden" id="candidateId" name="candidate_id">
+                    
+                    <div class="p-5 bg-surface-container-low rounded-2xl border border-surface-container relative overflow-hidden mb-8">
+                        <div class="absolute top-0 left-0 w-1 h-full bg-primary"></div>
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <div class="text-[10px] font-extrabold text-secondary uppercase tracking-widest mb-1.5" id="displayKind">NEW_TERM</div>
+                                <div class="flex items-end gap-3">
+                                    <div id="displayRawText" class="text-2xl font-extrabold text-on-surface font-manrope"></div>
+                                    <div class="text-xs text-outline mb-1 font-bold">(최초 제안 원문)</div>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-[10px] text-outline font-bold uppercase">탐지/제안 횟수</div>
+                                <div class="text-lg font-black text-on-surface"><span id="displayCount" class="text-primary"></span><span class="text-sm text-secondary font-medium ml-0.5">회</span></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-6">
+                        <div>
+                            <label class="block text-[11px] font-extrabold text-secondary mb-2 uppercase tracking-wider">Category (Type)</label>
+                            <select id="approvedType" name="approved_term_type" class="w-full rounded-xl border border-surface-container bg-surface-container-lowest text-sm p-3.5 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface shadow-sm font-bold">
+                                <option value="chemistry">Chemistry (화학물질)</option>
+                                <option value="defect">Defect (불량명)</option>
+                                <option value="process">Process (공정명)</option>
+                                <option value="product">Product (제품명)</option>
+                                <option value="node">Node (노드)</option>
+                                <option value="owner">Owner (담당자)</option>
+                                <option value="acronym">Acronym (약어)</option>
+                                <option value="equipment">Equipment (분석설비)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[11px] font-extrabold text-secondary mb-2 uppercase tracking-wider flex justify-between">
+                                <span>Canonical Name (공식 표준명)</span>
+                                <span class="text-error">* 필수</span>
+                            </label>
+                            <input type="text" id="approvedCanonical" name="approved_canonical_name" required class="w-full rounded-xl border border-surface-container bg-surface-container-lowest text-sm p-3.5 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface shadow-sm font-bold">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-[11px] font-extrabold text-secondary mb-2 uppercase tracking-wider flex justify-between">
+                            <span>Aliases (검색 확장용 유의어)</span>
+                            <span class="text-outline font-normal">콤마(,)로 구분</span>
+                        </label>
+                        <input type="text" id="approvedAliases" class="w-full rounded-xl border border-surface-container bg-surface-container-lowest text-sm p-3.5 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface shadow-sm font-medium" placeholder="별칭1, 별칭2, 오타 등">
+                        <p class="text-[10px] font-medium text-primary/70 mt-1.5 ml-1">제안된 유의어가 있다면 자동으로 채워집니다. 관리자가 자유롭게 추가 및 수정할 수 있습니다.</p>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-6 p-5 bg-surface-container-highest/30 rounded-2xl border border-surface-container/50 mt-4">
+                        <div>
+                            <label class="block text-[11px] font-extrabold text-secondary mb-3 uppercase tracking-wider">Search Boost (가중치)</label>
+                            <div class="flex items-center gap-4 bg-surface-container-lowest p-3 rounded-xl border border-surface-container shadow-sm">
+                                <input type="range" id="searchBoost" min="0.5" max="2.0" step="0.1" value="1.0" class="w-full accent-primary cursor-pointer">
+                                <span id="boostVal" class="text-sm font-black text-primary w-8 text-right bg-primary/10 px-2 py-1 rounded">1.0</span>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-[11px] font-extrabold text-secondary mb-3 uppercase tracking-wider">Priority (충돌 우선순위)</label>
+                            <input type="number" id="approvedPriority" name="approved_priority" value="100" class="w-full rounded-xl border border-surface-container bg-surface-container-lowest text-sm p-3.5 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface shadow-sm font-bold">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="flex items-start gap-4 p-5 border border-surface-container bg-surface-container-lowest rounded-2xl cursor-pointer hover:border-primary/40 transition-colors shadow-sm group">
+                            <input type="checkbox" id="expandAliases" checked class="w-5 h-5 mt-0.5 text-primary rounded border-surface-container focus:ring-primary cursor-pointer">
+                            <div>
+                                <div class="text-sm font-extrabold text-on-surface group-hover:text-primary transition-colors">Expand to Aliases (검색어 확장 적용)</div>
+                                <div class="text-[11px] text-secondary mt-1.5 leading-relaxed font-medium">체크 시, RAG 엔진이 사용자의 질문을 분석할 때 이 용어의 <b class="text-on-surface">모든 유의어(Aliases)를 포함하여 문서를 검색</b>합니다.</div>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div class="flex justify-end gap-3 pt-8 border-t border-surface-container mt-6">
+                        <button type="button" onclick="alert('반려 기능은 추후 연동됩니다.')" class="px-6 py-3 text-sm font-bold text-error hover:bg-error/5 rounded-xl transition-colors border border-transparent hover:border-error/20">
+                            Reject (반려)
+                        </button>
+                        <button type="submit" class="px-8 py-3 text-sm font-extrabold bg-primary text-on-primary rounded-xl hover:opacity-90 shadow-lg shadow-primary/20 transition-all flex items-center gap-2">
+                            <span class="material-symbols-outlined text-sm">how_to_reg</span>
+                            Approve & Update RAG
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let pendingTerms = [];
+
+    document.addEventListener("DOMContentLoaded", () => {
+        loadPendingQueue();
+
+        const slider = document.getElementById("searchBoost");
+        const valDisplay = document.getElementById("boostVal");
+        slider.addEventListener("input", (e) => {
+            valDisplay.innerText = parseFloat(e.target.value).toFixed(1);
+        });
+
+        document.getElementById("approvalForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            
+            // 💡 콤마로 입력된 Aliases 문자열을 배열로 파싱
+            const aliasesRaw = document.getElementById("approvedAliases").value;
+            const aliasesArr = aliasesRaw.split(",").map(s => s.trim()).filter(s => s.length > 0);
+
+            const payload = {
+                candidate_id: document.getElementById("candidateId").value,
+                approved_term_type: document.getElementById("approvedType").value,
+                approved_canonical_name: document.getElementById("approvedCanonical").value,
+                approved_priority: document.getElementById("approvedPriority").value,
+                approved_search_boost: document.getElementById("searchBoost").value,
+                approved_expand_to_aliases: document.getElementById("expandAliases").checked ? 1 : 0,
+                aliases: aliasesArr // 💡 배열 통째로 전송!
+            };
+
+            try {
+                const res = await fetch("/api/dictionary/approve", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+
+                if(!res.ok) throw new Error("승인 처리 실패");
+                
+                alert("✅ 성공적으로 승인 및 RAG 인덱스 업데이트가 예약되었습니다.");
+                
+                document.getElementById("emptyState").classList.remove("hidden");
+                document.getElementById("formState").classList.add("hidden");
+                loadPendingQueue();
+                
+            } catch(err) {
+                console.error(err);
+                alert("승인 중 에러가 발생했습니다.");
+            }
+        });
+    });
+
+    async function loadPendingQueue() {
+        const listEl = document.getElementById("pendingList");
+        const countEl = document.getElementById("pendingCount");
+        
+        try {
+            const res = await fetch("/api/dictionary/pending");
+            if(!res.ok) throw new Error("로드 실패");
+            
+            const data = await res.json();
+            pendingTerms = data.pending_terms || [];
+            
+            countEl.innerText = `${pendingTerms.length}건`;
+            listEl.innerHTML = "";
+
+            if(pendingTerms.length === 0) {
+                listEl.innerHTML = `<div class="p-6 text-center text-secondary text-sm font-bold bg-surface-container-lowest rounded-xl border border-surface-container shadow-sm">대기열이 비어있습니다 🎉</div>`;
+                return;
+            }
+
+            pendingTerms.forEach(term => {
+                const card = document.createElement("div");
+                card.className = "p-4 bg-surface-container-lowest border border-surface-container rounded-xl cursor-pointer hover:border-primary/50 hover:shadow-sm transition-all group";
+                
+                const aliasesArr = term.proposed_aliases_json ? JSON.parse(term.proposed_aliases_json) : [];
+                const aliasBadge = aliasesArr.length > 0 ? `<span class="px-1.5 py-0.5 bg-secondary/10 text-secondary text-[9px] rounded font-bold ml-2">+${aliasesArr.length} aliases</span>` : '';
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="text-[9px] font-extrabold uppercase tracking-wider text-outline px-1.5 py-0.5 bg-surface-container rounded">${term.candidate_type || 'unknown'}</span>
+                        <span class="text-[10px] font-bold text-primary bg-primary/5 px-2 rounded-full border border-primary/10">${term.detected_count}회 탐지</span>
+                    </div>
+                    <div class="font-bold text-on-surface text-sm truncate group-hover:text-primary transition-colors">${term.raw_text} ${aliasBadge}</div>
+                `;
+
+                card.onclick = () => selectTerm(term, card);
+                listEl.appendChild(card);
+            });
+
+        } catch(err) {
+            listEl.innerHTML = `<div class="text-error text-center text-sm font-bold mt-10">대기열 목록을 불러오지 못했습니다.</div>`;
+        }
+    }
+
+    function selectTerm(term, cardElement) {
+        document.querySelectorAll("#pendingList > div").forEach(c => c.classList.remove("ring-2", "ring-primary", "bg-primary/5"));
+        cardElement.classList.add("ring-2", "ring-primary", "bg-primary/5");
+
+        document.getElementById("emptyState").classList.add("hidden");
+        document.getElementById("formState").classList.remove("hidden");
+
+        // 기본 정보 셋팅
+        document.getElementById("candidateId").value = term.candidate_id;
+        document.getElementById("displayKind").innerText = term.candidate_kind === "alias_for_existing_term" ? "기존 용어에 유의어 추가 제안" : "새 용어 제안";
+        document.getElementById("displayRawText").innerText = term.raw_text;
+        document.getElementById("displayCount").innerText = term.detected_count;
+        
+        // 💡 폼 기본값 셋팅
+        // 1. 카테고리가 비어있으면 기본값 defect, equipment가 넘어왔으면 equipment 선택
+        const typeSelect = document.getElementById("approvedType");
+        const termType = term.candidate_type || "defect";
+        // 옵션에 존재하는 값인지 확인 후 설정
+        if (Array.from(typeSelect.options).some(opt => opt.value === termType)) {
+            typeSelect.value = termType;
+        } else {
+            typeSelect.value = "defect"; // 매칭 안되면 기본값
+        }
+
+        document.getElementById("approvedCanonical").value = term.suggested_canonical || term.raw_text;
+        
+        // 💡 유의어 JSON을 풀어서 Input 창에 콤마(,) 문자열로 뿌려주기
+        let aliasesStr = "";
+        try {
+            const arr = JSON.parse(term.proposed_aliases_json);
+            if (Array.isArray(arr) && arr.length > 0) {
+                aliasesStr = arr.join(", ");
+            }
+        } catch(e) {}
+        document.getElementById("approvedAliases").value = aliasesStr;
+        
+        // RAG 기본 셋팅
+        document.getElementById("searchBoost").value = "1.0";
+        document.getElementById("boostVal").innerText = "1.0";
+        document.getElementById("approvedPriority").value = "100";
+        document.getElementById("expandAliases").checked = true;
+    }
+</script>
+{% endblock %}
