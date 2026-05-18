@@ -1,6 +1,3 @@
-admin_dictionary.html 아래 프론트엔드는 어때보여?
-
-
 {% extends "base.html" %}
 {% block title %}Admin - Term Approval Dashboard{% endblock %}
 
@@ -16,7 +13,7 @@ admin_dictionary.html 아래 프론트엔드는 어때보여?
                 <p class="text-xs text-secondary mt-1 font-bold uppercase tracking-wider">RAG Dictionary Optimization</p>
             </div>
         </div>
-        <button onclick="window.history.back()" class="px-4 py-2 bg-surface-container hover:bg-surface-container-high rounded-xl text-sm font-bold text-on-surface transition-colors flex items-center gap-2">
+        <button type="button" onclick="window.location.href='/archive#dictionary'" class="px-4 py-2 bg-surface-container hover:bg-surface-container-high rounded-xl text-sm font-bold text-on-surface transition-colors flex items-center gap-2">
             <span class="material-symbols-outlined text-sm">arrow_back</span>
             돌아가기
         </button>
@@ -31,6 +28,40 @@ admin_dictionary.html 아래 프론트엔드는 어때보여?
                 </div>
                 <span id="pendingCount" class="px-2 py-0.5 bg-primary text-on-primary rounded-md text-xs">0건</span>
             </div>
+
+            <div class="p-4 border-b border-surface-container bg-surface-container-lowest/60 flex flex-col gap-3 shrink-0 shadow-sm">
+                <div class="relative">
+                    <span class="material-symbols-outlined absolute left-3 top-2.5 text-secondary text-sm">search</span>
+                    <input type="text" id="pendingSearchInput" placeholder="용어 명칭 검색..." class="w-full bg-surface-container-lowest border border-surface-container rounded-xl py-2 pl-9 pr-4 text-xs text-on-surface outline-none focus:ring-2 focus:ring-primary/20 transition-shadow">
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <select id="pendingTypeFilter" class="rounded-xl border border-surface-container bg-surface-container-lowest text-[11px] p-2 outline-none focus:ring-2 focus:ring-primary/20 text-on-surface font-bold">
+                        <option value="all">전체 카테고리</option>
+                        <option value="defect">Defect (불량명)</option>
+                        <option value="process">Process (공정명)</option>
+                        <option value="product">Product (제품명)</option>
+                        <option value="chemistry">Chemistry (화학물질)</option>
+                        <option value="node">Node (노드)</option>
+                        <option value="owner">Owner (담당자)</option>
+                        <option value="acronym">Acronym (약어)</option>
+                        <option value="equipment">Equipment (분석설비)</option>
+                        <option value="analysis">Analysis (분석법)</option>
+                    </select>
+                    <select id="pendingSourceFilter" class="rounded-xl border border-surface-container bg-surface-container-lowest text-[11px] p-2 outline-none focus:ring-2 focus:ring-primary/20 text-on-surface font-bold">
+                        <option value="all">전체 출처</option>
+                        <option value="user">🙋 유저 제안 용어</option>
+                        <option value="system">🤖 시스템 자동 탐지</option>
+                    </select>
+                </div>
+
+                <div class="mt-2">
+                    <select id="pendingSortFilter" class="w-full rounded-xl border border-surface-container bg-surface-container-lowest text-[11px] p-2 outline-none focus:ring-2 focus:ring-primary/20 text-on-surface font-bold shadow-sm">
+                        <option value="frequency">RAG 탐지 빈도수 많은 순</option>
+                        <option value="latest">관리자/유저 최신 제안 등록순</option>
+                    </select>
+                </div>
+            </div>
+
             <div id="pendingList" class="flex-1 overflow-y-auto p-4 space-y-3 scrolled-content">
                 <div class="text-center text-secondary text-sm mt-10">
                     <span class="material-symbols-outlined animate-spin text-2xl mb-2">refresh</span>
@@ -85,6 +116,7 @@ admin_dictionary.html 아래 프론트엔드는 어때보여?
                                 <option value="owner">Owner (담당자)</option>
                                 <option value="acronym">Acronym (약어)</option>
                                 <option value="equipment">Equipment (분석설비)</option>
+                                <option value="analysis">Analysis (분석법)</option>
                             </select>
                         </div>
                         <div>
@@ -145,23 +177,43 @@ admin_dictionary.html 아래 프론트엔드는 어때보여?
 </div>
 {% endblock %}
 
+
 {% block scripts %}
 <script>
-    let pendingTerms = [];
+    let pendingTerms = []; 
+    let totalDbCount = 0;  
+    let currentOffset = 0; 
+    const PAGE_LIMIT = 50; 
 
     document.addEventListener("DOMContentLoaded", () => {
-        loadPendingQueue();
+        loadPendingQueue(false);
 
         const slider = document.getElementById("searchBoost");
         const valDisplay = document.getElementById("boostVal");
-        slider.addEventListener("input", (e) => {
-            valDisplay.innerText = parseFloat(e.target.value).toFixed(1);
-        });
+        if(slider && valDisplay) {
+            slider.addEventListener("input", (e) => {
+                valDisplay.innerText = parseFloat(e.target.value).toFixed(1);
+            });
+        }
+
+        // 실시간 검색 및 필터 이벤트 바인딩
+        const searchInput = document.getElementById("pendingSearchInput");
+        if(searchInput) {
+            searchInput.addEventListener("keydown", (e) => {
+                if (e.key === "Enter") loadPendingQueue(false);
+            });
+        }
+        document.getElementById("pendingTypeFilter").addEventListener("change", () => loadPendingQueue(false));
+        document.getElementById("pendingSourceFilter").addEventListener("change", () => loadPendingQueue(false));
+        
+        // 💡 [신규] 아까 추가한 정렬 드롭다운의 체인지 이벤트 바인딩
+        const sortFilter = document.getElementById("pendingSortFilter");
+        if(sortFilter) {
+            sortFilter.addEventListener("change", () => loadPendingQueue(false));
+        }
 
         document.getElementById("approvalForm").addEventListener("submit", async (e) => {
             e.preventDefault();
-            
-            // 💡 콤마로 입력된 Aliases 문자열을 배열로 파싱
             const aliasesRaw = document.getElementById("approvedAliases").value;
             const aliasesArr = aliasesRaw.split(",").map(s => s.trim()).filter(s => s.length > 0);
 
@@ -172,7 +224,7 @@ admin_dictionary.html 아래 프론트엔드는 어때보여?
                 approved_priority: document.getElementById("approvedPriority").value,
                 approved_search_boost: document.getElementById("searchBoost").value,
                 approved_expand_to_aliases: document.getElementById("expandAliases").checked ? 1 : 0,
-                aliases: aliasesArr // 💡 배열 통째로 전송!
+                aliases: aliasesArr 
             };
 
             try {
@@ -181,65 +233,151 @@ admin_dictionary.html 아래 프론트엔드는 어때보여?
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(payload)
                 });
-
                 if(!res.ok) throw new Error("승인 처리 실패");
-                
                 alert("✅ 성공적으로 승인 및 RAG 인덱스 업데이트가 예약되었습니다.");
-                
                 document.getElementById("emptyState").classList.remove("hidden");
                 document.getElementById("formState").classList.add("hidden");
-                loadPendingQueue();
-                
+                loadPendingQueue(false);
             } catch(err) {
-                console.error(err);
                 alert("승인 중 에러가 발생했습니다.");
             }
         });
     });
 
-    async function loadPendingQueue() {
-        const listEl = document.getElementById("pendingList");
-        const countEl = document.getElementById("pendingCount");
-        
-        try {
-            const res = await fetch("/api/dictionary/pending");
-            if(!res.ok) throw new Error("로드 실패");
-            
-            const data = await res.json();
-            pendingTerms = data.pending_terms || [];
-            
-            countEl.innerText = `${pendingTerms.length}건`;
-            listEl.innerHTML = "";
+    window.loadMorePending = function() {
+        currentOffset += PAGE_LIMIT;
+        const btn = document.getElementById("pendingLoadMoreBtn");
+        if(btn) btn.innerHTML = `<span class="material-symbols-outlined animate-spin text-sm">refresh</span> 로딩중...`;
+        loadPendingQueue(true);
+    };
 
-            if(pendingTerms.length === 0) {
-                listEl.innerHTML = `<div class="p-6 text-center text-secondary text-sm font-bold bg-surface-container-lowest rounded-xl border border-surface-container shadow-sm">대기열이 비어있습니다 🎉</div>`;
-                return;
+    async function loadPendingQueue(isAppend = false) {
+        try {
+            if (!isAppend) {
+                currentOffset = 0;
+                document.getElementById("pendingList").innerHTML = `
+                    <div class="text-center text-secondary text-sm mt-10">
+                        <span class="material-symbols-outlined animate-spin text-2xl mb-2">refresh</span>
+                        <p>대기열을 불러오는 중...</p>
+                    </div>`;
             }
 
-            pendingTerms.forEach(term => {
-                const card = document.createElement("div");
-                card.className = "p-4 bg-surface-container-lowest border border-surface-container rounded-xl cursor-pointer hover:border-primary/50 hover:shadow-sm transition-all group";
-                
-                const aliasesArr = term.proposed_aliases_json ? JSON.parse(term.proposed_aliases_json) : [];
-                const aliasBadge = aliasesArr.length > 0 ? `<span class="px-1.5 py-0.5 bg-secondary/10 text-secondary text-[9px] rounded font-bold ml-2">+${aliasesArr.length} aliases</span>` : '';
+            const searchTxt = document.getElementById("pendingSearchInput").value.trim();
+            const typeFilter = document.getElementById("pendingTypeFilter").value;
+            const sourceFilter = document.getElementById("pendingSourceFilter").value;
+            const sortFilterEl = document.getElementById("pendingSortFilter");
+            const sortFilter = sortFilterEl ? sortFilterEl.value : "frequency";
 
-                card.innerHTML = `
-                    <div class="flex justify-between items-start mb-2">
-                        <span class="text-[9px] font-extrabold uppercase tracking-wider text-outline px-1.5 py-0.5 bg-surface-container rounded">${term.candidate_type || 'unknown'}</span>
-                        <span class="text-[10px] font-bold text-primary bg-primary/5 px-2 rounded-full border border-primary/10">${term.detected_count}회 탐지</span>
-                    </div>
-                    <div class="font-bold text-on-surface text-sm truncate group-hover:text-primary transition-colors">${term.raw_text} ${aliasBadge}</div>
-                `;
-
-                card.onclick = () => selectTerm(term, card);
-                listEl.appendChild(card);
+            const params = new URLSearchParams({
+                limit: PAGE_LIMIT,
+                offset: currentOffset,
+                sort: sortFilter,
+                search: searchTxt,
+                type: typeFilter,
+                source: sourceFilter
             });
 
+            const res = await fetch(`/api/dictionary/pending?${params.toString()}`);
+            if(!res.ok) throw new Error(`서버 응답 오류: ${res.status}`);
+            
+            const data = await res.json();
+            
+            function extractArrayDeep(obj) {
+                if (Array.isArray(obj)) return obj;
+                if (obj !== null && typeof obj === 'object') {
+                    for (const key in obj) {
+                        const found = extractArrayDeep(obj[key]);
+                        if (found) return found;
+                    }
+                }
+                return null;
+            }
+
+            const foundArray = extractArrayDeep(data) || [];
+
+            if (data && data.total !== undefined && data.total >= 0) {
+                totalDbCount = data.total;
+            } else {
+                if (foundArray.length === PAGE_LIMIT) totalDbCount = currentOffset + PAGE_LIMIT + 1; 
+                else totalDbCount = currentOffset + foundArray.length;
+            }
+
+            if (isAppend) {
+                const newItems = foundArray.filter(newItem => !pendingTerms.some(existing => existing.candidate_id === newItem.candidate_id));
+                pendingTerms = pendingTerms.concat(newItems);
+            } else {
+                pendingTerms = foundArray;
+            }
+            
+            renderQueueCards();
+
         } catch(err) {
-            listEl.innerHTML = `<div class="text-error text-center text-sm font-bold mt-10">대기열 목록을 불러오지 못했습니다.</div>`;
+            document.getElementById("pendingList").innerHTML = `<div class="text-error text-center text-sm font-bold mt-10">대기열 목록 로딩 실패</div>`;
         }
     }
 
+    function renderQueueCards() {
+        const listEl = document.getElementById("pendingList");
+        const countEl = document.getElementById("pendingCount");
+        
+        countEl.innerHTML = `<span class="font-bold">${pendingTerms.length}</span> <span class="text-secondary/60">/ 총 ${totalDbCount}건</span>`;
+        listEl.innerHTML = "";
+
+        if(pendingTerms.length === 0) {
+            listEl.innerHTML = `<div class="p-6 text-center text-secondary text-sm font-bold bg-surface-container-lowest rounded-xl border border-surface-container shadow-sm">조건에 맞는 후보가 없습니다.</div>`;
+            return;
+        }
+
+        pendingTerms.forEach(term => {
+            const isUserProposed = term.proposed_by && term.proposed_by !== "" && !term.proposed_by.includes("build_serving");
+            const sourceBadge = isUserProposed 
+                ? `<span class="px-1.5 py-0.5 bg-amber-500/10 text-amber-600 text-[9px] rounded font-bold ml-auto flex items-center gap-0.5"><span class="material-symbols-outlined text-[10px]">person</span>User</span>` 
+                : `<span class="px-1.5 py-0.5 bg-blue-500/10 text-blue-600 text-[9px] rounded font-bold ml-auto flex items-center gap-0.5"><span class="material-symbols-outlined text-[10px]">smart_toy</span>System</span>`;
+
+            // 💡 [핵심 시각화] 새 용어 vs 유의어 배지 디자인 적용!
+            const isNewTerm = term.candidate_kind === "new_term";
+            const kindBadge = isNewTerm
+                ? `<span class="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-600 text-[9px] rounded font-extrabold flex items-center gap-0.5 border border-emerald-500/20"><span class="material-symbols-outlined text-[10px]">add_circle</span>새 용어</span>`
+                : `<span class="px-1.5 py-0.5 bg-purple-500/10 text-purple-600 text-[9px] rounded font-extrabold flex items-center gap-0.5 border border-purple-500/20"><span class="material-symbols-outlined text-[10px]">link</span>유의어 추가</span>`;
+
+            const card = document.createElement("div");
+            card.className = "p-4 bg-surface-container-lowest border border-surface-container rounded-xl cursor-pointer hover:border-primary/50 hover:shadow-sm transition-all group";
+            
+            const aliasesArr = term.proposed_aliases_json ? JSON.parse(term.proposed_aliases_json) : [];
+            const aliasBadge = aliasesArr.length > 0 ? `<span class="px-1.5 py-0.5 bg-secondary/10 text-secondary text-[9px] rounded font-bold ml-2">+${aliasesArr.length} aliases</span>` : '';
+
+            card.innerHTML = `
+                <div class="flex justify-between items-center mb-2.5">
+                    <div class="flex items-center gap-1.5">
+                        ${kindBadge}
+                        <span class="text-[9px] font-extrabold uppercase tracking-wider text-outline px-1.5 py-0.5 bg-surface-container rounded">${term.candidate_type || 'unknown'}</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-[9px] font-bold text-primary bg-primary/5 px-1.5 py-0.5 rounded border border-primary/10">${term.detected_count}회</span>
+                        ${sourceBadge}
+                    </div>
+                </div>
+                <div class="font-bold text-on-surface text-sm truncate group-hover:text-primary transition-colors">${term.raw_text} ${aliasBadge}</div>
+            `;
+
+            card.onclick = () => selectTerm(term, card);
+            listEl.appendChild(card);
+        });
+
+        if (pendingTerms.length < totalDbCount) {
+            const moreDiv = document.createElement("div");
+            moreDiv.className = "pt-2 pb-6 flex justify-center";
+            moreDiv.innerHTML = `
+                <button id="pendingLoadMoreBtn" onclick="loadMorePending()" class="px-4 py-2 bg-surface-container-high hover:bg-surface-container-highest rounded-xl text-xs font-bold text-on-surface transition-colors flex items-center gap-2 shadow-sm border border-surface-container w-full justify-center">
+                    <span class="material-symbols-outlined text-sm">expand_more</span>
+                    더 보기 (${pendingTerms.length} / ${totalDbCount})
+                </button>
+            `;
+            listEl.appendChild(moreDiv);
+        }
+    }
+
+    // 💡 [핵심 수정] 폼 데이터 분기 매핑 로직 완벽 적용!
     function selectTerm(term, cardElement) {
         document.querySelectorAll("#pendingList > div").forEach(c => c.classList.remove("ring-2", "ring-primary", "bg-primary/5"));
         cardElement.classList.add("ring-2", "ring-primary", "bg-primary/5");
@@ -247,36 +385,51 @@ admin_dictionary.html 아래 프론트엔드는 어때보여?
         document.getElementById("emptyState").classList.add("hidden");
         document.getElementById("formState").classList.remove("hidden");
 
-        // 기본 정보 셋팅
         document.getElementById("candidateId").value = term.candidate_id;
-        document.getElementById("displayKind").innerText = term.candidate_kind === "alias_for_existing_term" ? "기존 용어에 유의어 추가 제안" : "새 용어 제안";
-        document.getElementById("displayRawText").innerText = term.raw_text;
         document.getElementById("displayCount").innerText = term.detected_count;
         
-        // 💡 폼 기본값 셋팅
-        // 1. 카테고리가 비어있으면 기본값 defect, equipment가 넘어왔으면 equipment 선택
         const typeSelect = document.getElementById("approvedType");
         const termType = term.candidate_type || "defect";
-        // 옵션에 존재하는 값인지 확인 후 설정
         if (Array.from(typeSelect.options).some(opt => opt.value === termType)) {
             typeSelect.value = termType;
         } else {
-            typeSelect.value = "defect"; // 매칭 안되면 기본값
+            typeSelect.value = "defect";
         }
 
-        document.getElementById("approvedCanonical").value = term.suggested_canonical || term.raw_text;
-        
-        // 💡 유의어 JSON을 풀어서 Input 창에 콤마(,) 문자열로 뿌려주기
-        let aliasesStr = "";
+        const isNewTerm = term.candidate_kind === "new_term";
+        document.getElementById("displayKind").innerText = isNewTerm ? "새 용어 제안" : "기존 용어에 유의어 추가 제안";
+        document.getElementById("displayRawText").innerText = term.raw_text;
+
+        const canonicalInput = document.getElementById("approvedCanonical");
+        const aliasesInput = document.getElementById("approvedAliases");
+
+        let aliasesArr = [];
         try {
             const arr = JSON.parse(term.proposed_aliases_json);
-            if (Array.isArray(arr) && arr.length > 0) {
-                aliasesStr = arr.join(", ");
-            }
+            if (Array.isArray(arr)) aliasesArr = arr;
         } catch(e) {}
-        document.getElementById("approvedAliases").value = aliasesStr;
+
+        // 💡 여기서 새 용어인지, 유의어 추가인지에 따라 동작을 완전히 가릅니다.
+        if (isNewTerm) {
+            // 새 용어: 제안 원문 또는 추천 표준명을 Canonical 칸에 넣고 수정을 허용합니다.
+            canonicalInput.value = term.suggested_canonical || term.raw_text;
+            canonicalInput.readOnly = false;
+            canonicalInput.classList.remove("opacity-50", "cursor-not-allowed");
+            
+            aliasesInput.value = aliasesArr.join(", ");
+        } else {
+            // 유의어 추가: 백엔드에서 JOIN으로 찾아온 타겟 표준명을 채우고, 잠급니다!
+            canonicalInput.value = term.target_canonical_name || "매핑 오류 (ID: " + term.target_term_id + ")";
+            canonicalInput.readOnly = true;
+            canonicalInput.classList.add("opacity-50", "cursor-not-allowed");
+            
+            // 제안한 원문(raw_text)은 새로운 유의어이므로 Aliases 칸 맨 앞에 넣어줍니다.
+            if (!aliasesArr.includes(term.raw_text)) {
+                aliasesArr.unshift(term.raw_text);
+            }
+            aliasesInput.value = aliasesArr.join(", ");
+        }
         
-        // RAG 기본 셋팅
         document.getElementById("searchBoost").value = "1.0";
         document.getElementById("boostVal").innerText = "1.0";
         document.getElementById("approvedPriority").value = "100";

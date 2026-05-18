@@ -1,4 +1,4 @@
-console.log("🔥 archive.js (다중 선택 커스텀 드롭다운 & 용어사전 듀얼모드 적용 완료) 로드됨!");
+console.log("🔥 archive.js (다중 선택 커스텀 드롭다운 & 용어사전 관리자 권한 통합본) 로드됨!");
 
 let currentSkip = 0;
 const PAGE_LIMIT = 20;
@@ -19,9 +19,11 @@ function initArchive() {
     // 서버에서 담당자 목록, 문서 목록, 그리고 용어사전 목록을 모두 초기 로드!
     fetchFilterData();
     fetchDocuments(false);
-    loadDictionaryTerms(); // 💡 누락되었던 용어사전 로딩 함수 추가!
+    loadDictionaryTerms(); // 용어사전 데이터 최초 1회 로딩
 
-    // 검색창 이벤트
+    // ----------------------------------------------------
+    // [Reports 탭] UI 이벤트 바인딩 (검색, 정렬, 더보기 등)
+    // ----------------------------------------------------
     const searchInput = document.getElementById("archiveSearchInput");
     if(searchInput) {
         searchInput.addEventListener("keydown", (e) => {
@@ -32,7 +34,6 @@ function initArchive() {
         });
     }
 
-    // 정렬 이벤트
     const sortBtn = document.getElementById("sortToggleBtn");
     if(sortBtn) {
         sortBtn.addEventListener("click", () => {
@@ -42,15 +43,11 @@ function initArchive() {
         });
     }
 
-    // Load More 이벤트
     const loadMoreBtn = document.getElementById("loadMoreBtn");
     if(loadMoreBtn) {
-        loadMoreBtn.addEventListener("click", () => {
-            fetchDocuments(true);
-        });
+        loadMoreBtn.addEventListener("click", () => fetchDocuments(true));
     }
 
-    // 우측 화면 확장 토글 이벤트
     const expandBtn = document.getElementById("expandBtn");
     if(expandBtn) {
         expandBtn.addEventListener("click", () => {
@@ -70,54 +67,35 @@ function initArchive() {
         });
     }
     
-    // ============================================
-    // 💡 2. 필터 패널 확장 토글 이벤트
-    // ============================================
+    // 필터 토글 이벤트
     const filterToggleBtn = document.getElementById("filterToggleBtn");
     const filterPanel = document.getElementById("filterPanel");
-    
     if(filterToggleBtn && filterPanel) {
         filterToggleBtn.addEventListener("click", () => {
-            if (filterPanel.classList.contains("hidden")) {
-                filterPanel.classList.remove("hidden");
-                filterPanel.classList.add("flex");
-                filterToggleBtn.classList.add("bg-surface-container", "text-primary");
-            } else {
-                filterPanel.classList.add("hidden");
-                filterPanel.classList.remove("flex");
-                filterToggleBtn.classList.remove("bg-surface-container", "text-primary");
-            }
+            filterPanel.classList.toggle("hidden");
+            filterPanel.classList.toggle("flex");
+            filterToggleBtn.classList.toggle("bg-surface-container");
+            filterToggleBtn.classList.toggle("text-primary");
         });
     }
 
-    // ============================================
-    // 💡 3. 커스텀 담당자 드롭다운 이벤트
-    // ============================================
+    // 커스텀 담당자 드롭다운 이벤트
     const authorBtn = document.getElementById("authorDropdownBtn");
     const authorList = document.getElementById("authorDropdownList");
-    
     if(authorBtn && authorList) {
-        // 버튼 클릭 시 리스트 열고 닫기
         authorBtn.addEventListener("click", (e) => {
             e.stopPropagation();
             authorList.classList.toggle("hidden");
             authorBtn.classList.toggle("ring-2");
             authorBtn.classList.toggle("ring-primary/20");
         });
-        
-        // 리스트 바깥쪽(배경) 클릭 시 리스트 닫기
         document.addEventListener("click", () => {
             authorList.classList.add("hidden");
             authorBtn.classList.remove("ring-2", "ring-primary/20");
         });
-
-        // 리스트 내부를 클릭했을 때는 닫히지 않도록 이벤트 전파 막기
-        authorList.addEventListener("click", (e) => {
-            e.stopPropagation();
-        });
+        authorList.addEventListener("click", (e) => e.stopPropagation());
     }
 
-    // 날짜 시작일 변경 이벤트
     const startDateInput = document.getElementById("filterStartDate");
     if(startDateInput) {
         startDateInput.addEventListener("change", (e) => {
@@ -126,7 +104,6 @@ function initArchive() {
         });
     }
 
-    // 날짜 종료일 변경 이벤트
     const endDateInput = document.getElementById("filterEndDate");
     if(endDateInput) {
         endDateInput.addEventListener("change", (e) => {
@@ -138,17 +115,19 @@ function initArchive() {
     setupArchiveResizer();
 }
 
-
 if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", initArchive);
 } else {
     initArchive();
 }
 
+
+// ==========================================
+// 💡 [Reports 탭] 핵심 기능 함수들
+// ==========================================
 function showLoading(listEl) {
     const countEl = document.getElementById("totalDocsCount");
     if (countEl) countEl.innerText = "문서 불러오는 중...";
-    
     listEl.innerHTML = `
         <div class="col-span-2 flex flex-col items-center justify-center h-40 text-secondary">
             <span class="material-symbols-outlined animate-spin text-4xl mb-3 text-primary">progress_activity</span>
@@ -157,31 +136,25 @@ function showLoading(listEl) {
     `;
 }
 
-// 💡 4. 담당자 데이터 로드 및 드롭다운 체크박스 생성
 async function fetchFilterData() {
     try {
         const res = await fetch("/api/archive/filters");
         if (!res.ok) return;
-        
         const data = await res.json();
         const listContainer = document.getElementById("authorDropdownList");
         if (!listContainer) return;
-
         listContainer.innerHTML = "";
 
         data.authors.forEach(auth => {
             if (!auth) return;
             const label = document.createElement("label");
             label.className = "flex items-center gap-3 px-3 py-2 hover:bg-primary/5 rounded-lg cursor-pointer transition-colors group";
-            
-            // 한 줄로 통일하고 전체 bold 처리
             label.innerHTML = `
                 <input type="checkbox" value="${escapeHtml(auth)}" class="author-checkbox w-4 h-4 rounded border-surface-container text-primary focus:ring-primary/30 cursor-pointer">
                 <span class="text-xs font-bold text-on-surface group-hover:text-primary truncate" title="${escapeHtml(auth)}">
                     ${escapeHtml(auth)}
                 </span>
             `;
-
             const checkbox = label.querySelector("input");
             checkbox.addEventListener("change", () => {
                 const checkedNodes = document.querySelectorAll(".author-checkbox:checked");
@@ -189,17 +162,14 @@ async function fetchFilterData() {
                 updateAuthorButtonText();
                 fetchDocuments(false);
             });
-
             listContainer.appendChild(label);
         });
     } catch (e) { console.error("필터 데이터 로드 실패", e); }
 }
 
-// 💡 5. 선택된 담당자 수에 따라 드롭다운 버튼 텍스트 변경
 function updateAuthorButtonText() {
     const textEl = document.getElementById("authorSelectionText");
     if (!textEl) return;
-
     if (currentAuthors.length === 0) {
         textEl.innerText = "전체 담당자 (All)";
         textEl.classList.remove("text-primary", "font-bold");
@@ -214,7 +184,6 @@ function updateAuthorButtonText() {
     }
 }
 
-// 💡 6. 필터 파라미터를 담아 문서 검색 API 호출
 async function fetchDocuments(isAppend = false) {
     const listEl = document.getElementById("archiveList");
     const moreBtn = document.getElementById("loadMoreBtn");
@@ -228,7 +197,7 @@ async function fetchDocuments(isAppend = false) {
     try {
         const params = new URLSearchParams({
             q: currentQuery,
-            author: currentAuthors.join(","), // 배열을 문자열(콤마 구분)로 변환
+            author: currentAuthors.join(","),
             start_date: currentStartDate,
             end_date: currentEndDate,
             skip: currentSkip,
@@ -236,10 +205,8 @@ async function fetchDocuments(isAppend = false) {
             sort: currentSort
         });
 
-        const url = `/api/archive/documents?${params.toString()}`;
-        const res = await fetch(url, { credentials: "include" });
-        if (!res.ok) throw new Error("서버 응답 오류 (상태 코드: " + res.status + ")");
-        
+        const res = await fetch(`/api/archive/documents?${params.toString()}`, { credentials: "include" });
+        if (!res.ok) throw new Error("서버 응답 오류");
         const data = await res.json();
         
         if (data.total_fetched !== undefined && !isAppend) {
@@ -257,29 +224,19 @@ async function fetchDocuments(isAppend = false) {
             moreBtn.classList.add("hidden");
         }
     } catch (err) {
-        console.error("🔥 fetchDocuments 에러 발생:", err);
+        console.error("🔥 fetchDocuments 에러:", err);
         const countEl = document.getElementById("totalDocsCount");
         if(countEl) countEl.innerText = "로딩 실패";
-        
         if(listEl) {
-            listEl.innerHTML = `
-                <div class="col-span-2 text-center text-error mt-10 bg-error/10 p-4 rounded-xl border border-error/20">
-                    <span class="material-symbols-outlined text-3xl mb-2">error</span>
-                    <p class="font-bold">데이터를 불러오거나 화면에 그리는 중 문제가 발생했습니다.</p>
-                    <p class="text-xs opacity-80 mt-1">${err.message}</p>
-                </div>
-            `;
+            listEl.innerHTML = `<div class="col-span-2 text-center text-error mt-10 p-4">데이터 로딩 오류: ${err.message}</div>`;
         }
     }
 }
 
-// 문서 카드 렌더링 함수
 function renderCards(docs, isAppend) {
     const listEl = document.getElementById("archiveList");
     if(!listEl) return;
-    
     if (!isAppend) listEl.innerHTML = "";
-
     if (docs.length === 0 && !isAppend) {
         listEl.innerHTML = `<div class="col-span-2 text-center text-sm font-bold text-secondary mt-10 p-8 bg-surface-container-highest rounded-2xl">조건에 맞는 검색 결과가 없습니다.</div>`;
         return;
@@ -287,67 +244,32 @@ function renderCards(docs, isAppend) {
 
     docs.forEach(doc => {
         const af = doc.additionalField || {};
-        
-        let displayTitle = (doc.title || "(제목 없음)")
-            .replace(/\.enriched$/i, "")
-            .replace(/_/g, " ");
-
+        let displayTitle = (doc.title || "(제목 없음)").replace(/\.enriched$/i, "").replace(/_/g, " ");
         const dateRaw = af.mail_date || doc.mail_date;
         const dateStr = dateRaw ? new Date(dateRaw).toLocaleDateString('ko-KR') : "날짜 없음";
-        
         const versionTag = af.version_tag || "DOC";
         const summary = af.summary || ""; 
-        
         const sender = af.mail_from || doc.mail_from; 
         const links = Array.isArray(af.report_links) ? af.report_links : (Array.isArray(doc.report_links) ? doc.report_links : []);
         
         let tagsHtml = "";
-        
         if (sender) {
-            tagsHtml += `
-                <span class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-primary/10 text-primary text-[10px] font-bold truncate max-w-full" title="${escapeHtml(sender)}">
-                    <span class="material-symbols-outlined text-[14px]">person</span>
-                    ${escapeHtml(sender)}
-                </span>
-            `;
+            tagsHtml += `<span class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-primary/10 text-primary text-[10px] font-bold"><span class="material-symbols-outlined text-[14px]">person</span>${escapeHtml(sender)}</span>`;
         }
-        
-        if (links.length > 0) {
-            links.forEach(link => {
-                tagsHtml += `
-                    <a href="${escapeHtml(link)}" target="_blank" onclick="event.stopPropagation()" 
-                       class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-secondary/10 hover:bg-secondary/20 text-secondary text-[10px] font-bold truncate max-w-full transition-all" title="${escapeHtml(link)}">
-                        <span class="material-symbols-outlined text-[14px]">link</span>
-                        ${escapeHtml(link)}
-                    </a>
-                `;
-            });
-        }
+        links.forEach(link => {
+            tagsHtml += `<a href="${escapeHtml(link)}" target="_blank" onclick="event.stopPropagation()" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-secondary/10 hover:bg-secondary/20 text-secondary text-[10px] font-bold"><span class="material-symbols-outlined text-[14px]">link</span>${escapeHtml(link)}</a>`;
+        });
 
         const card = document.createElement("div");
-        card.className = "archive-card group bg-surface-container-lowest border border-surface-container rounded-2xl p-6 shadow-sm hover:shadow-md hover:border-primary/40 transition-all cursor-pointer flex flex-col min-h-[255px] overflow-hidden";
-        
+        card.className = "archive-card group bg-surface-container-lowest border border-surface-container rounded-2xl p-6 shadow-sm hover:border-primary/40 transition-all cursor-pointer flex flex-col min-h-[255px]";
         card.innerHTML = `
             <div class="flex justify-between items-start mb-4 gap-2">
-                <span class="text-[10px] font-extrabold text-secondary uppercase tracking-tighter bg-surface-container-highest px-2 py-0.5 rounded-md shrink-0">
-                    ${escapeHtml(versionTag)}
-                </span>
-                <span class="text-[10px] font-semibold text-outline shrink-0">${escapeHtml(dateStr)}</span>
+                <span class="text-[10px] font-extrabold text-secondary uppercase tracking-tighter bg-surface-container-highest px-2 py-0.5 rounded-md">${escapeHtml(versionTag)}</span>
+                <span class="text-[10px] font-semibold text-outline">${escapeHtml(dateStr)}</span>
             </div>
-
-            <h3 class="text-[15px] font-extrabold text-on-surface mb-3 line-clamp-3 group-hover:text-primary transition-colors font-manrope leading-tight">
-                ${escapeHtml(displayTitle)}
-            </h3>
-
-            ${summary ? `
-                <p class="text-[11px] text-secondary mb-5 line-clamp-3 leading-relaxed flex-1 opacity-80">
-                    ${escapeHtml(summary)}
-                </p>
-            ` : '<div class="flex-1"></div>'}
-
-            <div class="mt-auto pt-4 border-t border-surface-container flex flex-wrap gap-2">
-                ${tagsHtml}
-            </div>
+            <h3 class="text-[15px] font-extrabold text-on-surface mb-3 line-clamp-3 group-hover:text-primary transition-colors font-manrope">${escapeHtml(displayTitle)}</h3>
+            ${summary ? `<p class="text-[11px] text-secondary mb-5 line-clamp-3 leading-relaxed flex-1 opacity-80">${escapeHtml(summary)}</p>` : '<div class="flex-1"></div>'}
+            <div class="mt-auto pt-4 border-t border-surface-container flex flex-wrap gap-2">${tagsHtml}</div>
         `;
 
         card.addEventListener("click", () => {
@@ -355,13 +277,10 @@ function renderCards(docs, isAppend) {
             card.classList.add("ring-2", "ring-primary", "bg-primary/5");
             openViewer(doc, displayTitle);
         });
-        
         listEl.appendChild(card);
     });
 }
 
-
-// 뷰어 창 오픈 함수
 async function openViewer(doc, displayTitle) {
     const titleEl = document.getElementById("viewerTitle");
     if(titleEl) titleEl.innerText = displayTitle;
@@ -380,7 +299,7 @@ async function openViewer(doc, displayTitle) {
     const assets = Array.isArray(doc.assets) ? doc.assets : [];
 
     if (!mdRel) {
-        contentEl.innerHTML = `<div class="flex flex-col items-center justify-center h-full text-error opacity-80"><span class="material-symbols-outlined text-5xl mb-4">broken_image</span><div class="font-bold">문서 원본(Markdown) 경로를 찾을 수 없습니다.</div></div>`;
+        contentEl.innerHTML = `<div class="flex flex-col items-center justify-center h-full text-error opacity-80"><span class="material-symbols-outlined text-5xl mb-4">broken_image</span><div class="font-bold">원본 경로를 찾을 수 없습니다.</div></div>`;
         return;
     }
 
@@ -389,11 +308,9 @@ async function openViewer(doc, displayTitle) {
         if (!res.ok) throw new Error("마크다운 파일을 읽어올 수 없습니다.");
         
         const rawMdText = await res.text();
-        
         const processedText = preProcessMarkdown(rawMdText);
         const mdNoMeta = stripLeadingMailMetaBlock(processedText);
         const mdWithImgs = injectImagesIntoMarkdown(mdNoMeta, assets);
-        
         contentEl.innerHTML = renderDocumentMarkdown(mdWithImgs);
 
         contentEl.querySelectorAll("img").forEach(img => {
@@ -401,13 +318,11 @@ async function openViewer(doc, displayTitle) {
             img.className = "max-w-full h-auto rounded-xl cursor-pointer hover:opacity-90 transition-opacity my-6 shadow-sm border border-outline/10";
             img.onclick = () => showImgPreview(img.src);
         });
-
     } catch (e) {
         contentEl.innerHTML = `<div class="text-error text-center mt-10 font-bold">${escapeHtml(String(e))}</div>`;
     }
 }
 
-// 유틸리티 함수들
 function stripLeadingMailMetaBlock(mdText){
     let t = String(mdText || "").replace(/\r\n/g, "\n");
     t = t.replace(/^\s*```[^\n]*\n([\s\S]*?)\n```[\t ]*\n*/i, (full, inner) => {
@@ -420,15 +335,10 @@ function stripLeadingMailMetaBlock(mdText){
 
 function renderDocumentMarkdown(mdText){
     const raw = String(mdText || "");
-    if(typeof marked === "undefined"){
-      return escapeHtml(raw).replace(/\n/g, "<br>");
-    }
+    if(typeof marked === "undefined") return escapeHtml(raw).replace(/\n/g, "<br>");
     let rendered = marked.parse(raw);
     if(typeof DOMPurify !== "undefined"){
-      rendered = DOMPurify.sanitize(rendered, {
-        USE_PROFILES: { html: true },
-        ADD_TAGS: ['details', 'summary']
-      });
+      rendered = DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true }, ADD_TAGS: ['details', 'summary'] });
     }
     return rendered;
 }
@@ -466,23 +376,17 @@ function setupArchiveResizer(){
     const resizer = document.getElementById("archiveResizer");
     const leftPanel = document.getElementById("archiveLeftPanel");
     if(!resizer || !leftPanel) return;
-    
     let dragging = false;
-
     resizer.addEventListener("mousedown", ()=>{
         dragging = true;
         document.body.classList.add("dragging");
         document.body.style.cursor = "col-resize";
     });
-
     window.addEventListener("mousemove", (e)=>{
         if(!dragging) return;
-        const x = e.clientX;
-        const max = window.innerWidth * 0.6;
-        const w = Math.max(300, Math.min(max, x));
+        const w = Math.max(300, Math.min(window.innerWidth * 0.6, e.clientX));
         leftPanel.style.width = w + "px";
     });
-
     window.addEventListener("mouseup", ()=>{
         if(dragging){
             dragging = false;
@@ -492,22 +396,20 @@ function setupArchiveResizer(){
     });
 } 
 
+
 function preProcessMarkdown(mdText) {
     let t = String(mdText || "");
     t = t.replace(/\[\s*placeholder\s*\]/gi, "");
-    const truncRegex = /\.\/images\/\|attachments\/inline|<img\s+src=/i;
-    const match = t.match(truncRegex);
-    if (match) {
-        t = t.substring(0, match.index);
-    }
+    const match = t.match(/\.\/images\/\|attachments\/inline|<img\s+src=/i);
+    if (match) t = t.substring(0, match.index);
     return t;
 }
 
 // ==========================================
-// 💡 Term Dictionary & Add Term Modal 로직 (신규 반영 부분)
+// 💡 [Term Dictionary 탭] 핵심 기능 및 모달 이벤트
 // ==========================================
 
-// 1. 용어 사전 데이터 로드 및 초기 렌더링
+// 1. 용어 사전 데이터 로드 및 렌더링
 async function loadDictionaryTerms() {
     const tbody = document.getElementById("dictionaryTableBody");
     const targetSelect = document.getElementById("targetTermSelect");
@@ -520,7 +422,7 @@ async function loadDictionaryTerms() {
         const data = await res.json();
         allDictionaryTerms = data.terms || [];
         
-        // A. 모달의 대상 용어 드롭다운 채우기 (처음 한 번만)
+        // 타겟 선택 드롭다운 채우기 (유의어 추가 모드용)
         if (targetSelect) {
             targetSelect.innerHTML = "";
             allDictionaryTerms.forEach(term => {
@@ -530,21 +432,17 @@ async function loadDictionaryTerms() {
                 targetSelect.appendChild(opt);
             });
         }
-
-        // B. 전체 데이터 렌더링
         renderDictionaryTable(allDictionaryTerms);
 
     } catch (error) {
-        console.error("🔥 사전 데이터 로딩 실패:", error);
         tbody.innerHTML = `<tr><td colspan="4" class="px-8 py-8 text-center text-error text-sm font-bold">데이터 로딩 오류</td></tr>`;
     }
 }
 
-// 💡 1-1. 검색 필터링을 위해 테이블 그리는 로직을 별도 함수로 분리
+// 테이블에 데이터 그리기 + 관리자 권한 분기
 function renderDictionaryTable(termsToRender) {
     const tbody = document.getElementById("dictionaryTableBody");
     if (!tbody) return;
-
     tbody.innerHTML = "";
 
     if (termsToRender.length === 0) {
@@ -555,6 +453,18 @@ function renderDictionaryTable(termsToRender) {
     termsToRender.forEach(term => {
         const description = term.description ? escapeHtml(term.description) : `<span class="text-outline italic">설명 없음</span>`;
         const aliases = term.aliases ? `<div class="mt-2 text-[11px] text-primary bg-primary/5 inline-block px-2 py-0.5 rounded border border-primary/10 font-semibold">Aliases: ${escapeHtml(term.aliases)}</div>` : '';
+
+        // 💡 관리자(IS_ADMIN)인 경우에만 실제 수정/삭제 버튼 렌더링 (IS_ADMIN은 HTML에서 전역변수로 전달됨)
+        const actionHtml = typeof IS_ADMIN !== "undefined" && IS_ADMIN ? `
+            <div class="flex justify-end gap-2">
+                <button onclick="openEditTermModal(${term.term_id})" class="p-2 text-outline-variant hover:text-primary hover:bg-primary/5 rounded-lg transition-all" title="Edit Term">
+                    <span class="material-symbols-outlined">edit</span>
+                </button>
+                <button onclick="deleteTerm(${term.term_id})" class="p-2 text-outline-variant hover:text-error hover:bg-error/5 rounded-lg transition-all" title="Delete Term">
+                    <span class="material-symbols-outlined">delete</span>
+                </button>
+            </div>
+        ` : `<span class="text-xs text-secondary italic">권한 없음</span>`;
 
         const tr = document.createElement("tr");
         tr.className = "hover:bg-surface-container-low/50 transition-colors group border-b border-surface-container/50";
@@ -573,44 +483,45 @@ function renderDictionaryTable(termsToRender) {
                 <br>${aliases}
             </td>
             <td class="px-8 py-6 text-right">
-                <button class="p-2 text-outline-variant hover:text-error hover:bg-error/5 rounded-lg transition-all" ON-CLICK="alert('용어 삭제는 관리자 권한이 필요합니다.')" title="Delete Term">
-                    <span class="material-symbols-outlined">delete</span>
-                </button>
+                ${actionHtml}
             </td>
         `;
         tbody.appendChild(tr);
     });
 }
 
-// 2. 모달 및 사전 검색 이벤트 설정
+// 용어 사전 내 검색 & 폼 이벤트 바인딩
 document.addEventListener("DOMContentLoaded", () => {
-    // 💡 2-1. 용어 사전 실시간 검색 이벤트 추가!
+    // 2-1. 용어 사전 실시간 검색 필터
     const dictSearchInput = document.getElementById("dictSearchInput");
+    const editSlider = document.getElementById("editSearchBoost");
+    const editValDisplay = document.getElementById("editBoostVal");
+
+    if(editSlider && editValDisplay) {
+        editSlider.addEventListener("input", (e) => {
+            editValDisplay.innerText = parseFloat(e.target.value).toFixed(1);
+        });
+    }
+
     if (dictSearchInput) {
         dictSearchInput.addEventListener("input", (e) => {
             const query = e.target.value.toLowerCase().trim();
-            
-            // 검색어가 없으면 전체 보여주기
             if (!query) {
                 renderDictionaryTable(allDictionaryTerms);
                 return;
             }
-
-            // 검색어가 있으면 Term(이름), Type(카테고리), Aliases, 설명 중에서 찾아서 필터링
             const filteredTerms = allDictionaryTerms.filter(term => {
                 const cName = (term.canonical_name || "").toLowerCase();
                 const tType = (term.term_type || "").toLowerCase();
                 const desc = (term.description || "").toLowerCase();
                 const als = (term.aliases || "").toLowerCase();
-
                 return cName.includes(query) || tType.includes(query) || desc.includes(query) || als.includes(query);
             });
-
             renderDictionaryTable(filteredTerms);
         });
     }
 
-    // 2-2. 듀얼 모드 라디오 버튼 전환 로직
+    // 2-2. 제안 모드(라디오 버튼) 전환 시 입력 필드 변경 로직
     const radios = document.querySelectorAll('input[name="proposal_mode"]');
     const sectionTarget = document.getElementById("sectionTargetTerm");
     const sectionNew = document.getElementById("sectionNewTermDetails");
@@ -621,61 +532,151 @@ document.addEventListener("DOMContentLoaded", () => {
         radio.addEventListener('change', (e) => {
             const mode = e.target.value;
             if(mode === "new_term") {
-                sectionTarget.classList.add("hidden");
-                sectionNew.classList.remove("hidden");
-                rawLabel.innerText = "Candidate Term (원문/대표 유의어)";
-                rawInput.placeholder = "e.g. SF2_defect";
+                if(sectionTarget) sectionTarget.classList.add("hidden");
+                if(sectionNew) sectionNew.classList.remove("hidden");
+                if(rawLabel) rawLabel.innerText = "Candidate Term (원문/대표 유의어)";
+                if(rawInput) rawInput.placeholder = "e.g. SF2_defect";
             } else {
-                sectionTarget.classList.remove("hidden");
-                sectionNew.classList.add("hidden");
-                rawLabel.innerText = "New Alias (새로 추가할 유의어)";
-                rawInput.placeholder = "e.g. SF2불량";
+                if(sectionTarget) sectionTarget.classList.remove("hidden");
+                if(sectionNew) sectionNew.classList.add("hidden");
+                if(rawLabel) rawLabel.innerText = "New Alias (새로 추가할 유의어)";
+                if(rawInput) rawInput.placeholder = "e.g. SF2불량";
             }
         });
     });
 
-    // 3. 폼 제출 로직 (백엔드 파이프라인 규격에 맞게 전송)
+    // 💡 2-3. 제안/수정 폼 제출 통합 처리 (POST vs PUT)
     const proposeForm = document.getElementById("proposeTermForm");
     if(proposeForm) {
         proposeForm.addEventListener("submit", async (e) => {
             e.preventDefault();
             const formData = new FormData(proposeForm);
             
-            const kind = formData.get("proposal_mode"); 
+            // 숨김 필드(editTermId)에 값이 있으면 '관리자 수정 모드(PUT)'
+            const editTermId = formData.get("edit_term_id");
             const aliasesStr = formData.get("aliases") || "";
             const aliasesArr = aliasesStr.split(",").map(s => s.trim()).filter(s => s.length > 0);
 
-            const payload = {
-                kind: kind,
-                raw_text: formData.get("raw_text"),
-                aliases: aliasesArr
-            };
-
-            if (kind === "new_term") {
-                payload.type = formData.get("type");
-                payload.canonical = formData.get("canonical") || payload.raw_text;
-            } else {
-                const targetId = formData.get("target_id");
-                payload.target_id = parseInt(targetId);
-                const targetTerm = allDictionaryTerms.find(t => t.term_id === payload.target_id);
-                payload.type = targetTerm ? targetTerm.term_type : "unknown";
+            // 🟢 [PUT] 관리자 수정 모드
+            if (editTermId) {
+                const payload = {
+                    term_type: formData.get("type"),
+                    canonical_name: formData.get("canonical"),
+                    description: formData.get("description"),
+                    aliases: aliasesArr,
+                    // 💡 파라미터 값들을 함께 묶어서 보냅니다.
+                    priority: parseInt(formData.get("priority") || 100),
+                    search_boost: parseFloat(formData.get("search_boost") || 1.0),
+                    expand_to_aliases: document.getElementById("editExpandAliases").checked ? 1 : 0
+                };
+                
+                try {
+                    const res = await fetch(`/api/dictionary/terms/${editTermId}`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload)
+                    });
+                    
+                    if (!res.ok) {
+                        let errMsg = "수정 실패";
+                        try { const errData = await res.json(); errMsg = errData.detail || errMsg; } catch(e){}
+                        throw new Error(errMsg);
+                    }
+                    
+                    alert("수정 완료되었습니다.");
+                    if(typeof closeTermModal === "function") closeTermModal();
+                    loadDictionaryTerms(); 
+                } catch (err) {
+                    alert("수정 중 오류가 발생했습니다:\n" + err.message);
+                }
             }
 
-            try {
-                const res = await fetch("/api/dictionary/propose", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload)
-                });
+            // 🔵 [POST] 사용자 제안 모드 (기존 기능)
+            else {
+                const kind = formData.get("proposal_mode"); 
+                const payload = {
+                    kind: kind,
+                    raw_text: formData.get("raw_text"),
+                    aliases: aliasesArr
+                };
 
-                if (!res.ok) throw new Error("제안 실패");
-                
-                alert("성공적으로 제안되었습니다. 관리자 승인 후 반영됩니다.");
-                if(typeof closeTermModal === "function") closeTermModal();
-            } catch (err) {
-                console.error(err);
-                alert("제안 중 오류가 발생했습니다.");
+                if (kind === "new_term") {
+                    payload.type = formData.get("type");
+                    payload.canonical = formData.get("canonical") || payload.raw_text;
+                } else {
+                    const targetId = formData.get("target_id");
+                    payload.target_id = parseInt(targetId);
+                    const targetTerm = allDictionaryTerms.find(t => t.term_id === payload.target_id);
+                    payload.type = targetTerm ? targetTerm.term_type : "unknown";
+                }
+
+                try {
+                    const res = await fetch("/api/dictionary/propose", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!res.ok) throw new Error("제안 실패");
+                    
+                    alert("성공적으로 제안되었습니다. 관리자 승인 후 반영됩니다.");
+                    if(typeof closeTermModal === "function") closeTermModal();
+                } catch (err) {
+                    alert("제안 중 오류가 발생했습니다.");
+                }
             }
         });
     }
 });
+
+// 💡 3. 관리자 전용 삭제 API 호출
+window.deleteTerm = async function(termId) {
+    if (!confirm("정말 이 용어를 삭제하시겠습니까?\n(비활성화되어 검색 엔진에서 즉시 제외됩니다)")) return;
+    try {
+        const res = await fetch(`/api/dictionary/terms/${termId}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('삭제 처리 실패');
+        alert("삭제 완료되었습니다.");
+        loadDictionaryTerms(); // 리스트 갱신
+    } catch(e) {
+        alert("오류가 발생했습니다: " + e.message);
+    }
+}
+
+// 💡 4. 관리자 전용 수정 모달 열기 (기존 Add Modal 재활용)
+window.openEditTermModal = function(termId) {
+    const term = allDictionaryTerms.find(t => t.term_id === termId);
+    if(!term) return;
+
+    const modal = document.getElementById('addTermModal');
+    const form = document.getElementById('proposeTermForm');
+    if(form) form.reset();
+
+    // UI 모드 세팅 (생략)
+    document.getElementById('termModalTitle').innerText = "Edit Term (용어 수정)";
+    document.getElementById('proposalModeSection').classList.add('hidden'); 
+    document.getElementById('sectionCandidateRaw').classList.add('hidden'); 
+    document.getElementById('rawTextInput').required = false; 
+    document.getElementById('sectionNewTermDetails').classList.remove('hidden');
+    document.getElementById('sectionAdminEdit').classList.remove('hidden'); 
+
+    // 기존 데이터 폼에 주입
+    document.getElementById('editTermId').value = term.term_id;
+    document.querySelector('#proposeTermForm select[name="type"]').value = term.term_type;
+    document.querySelector('#proposeTermForm input[name="canonical"]').value = term.canonical_name;
+    document.getElementById('termAliasesInput').value = term.aliases || "";
+    
+    // 💡 어드민 파라미터 주입! (undefined 일 경우 기본값 처리)
+    const editDesc = document.getElementById('editDescription');
+    if(editDesc) editDesc.value = term.description || "";
+    
+    document.getElementById('editPriority').value = term.priority !== undefined ? term.priority : 100;
+    
+    const boostVal = term.search_boost !== undefined ? term.search_boost : 1.0;
+    document.getElementById('editSearchBoost').value = boostVal;
+    document.getElementById('editBoostVal').innerText = parseFloat(boostVal).toFixed(1);
+    
+    document.getElementById('editExpandAliases').checked = (term.expand_to_aliases !== 0); // 0이 아니면 무조건 체크
+
+    document.getElementById('submitProposalBtn').innerHTML = `<span class="material-symbols-outlined text-sm">save</span> 수정 완료`;
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}

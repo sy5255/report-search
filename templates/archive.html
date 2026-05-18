@@ -158,15 +158,16 @@
     <div id="addTermModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-[5000] transition-opacity">
         <div class="bg-surface-container-lowest w-[500px] rounded-2xl p-8 shadow-2xl border border-outline/20">
             <div class="flex justify-between items-center mb-6">
-                <h3 class="text-xl font-bold font-manrope text-on-surface">Suggest Term / Alias</h3>
+                <h3 id="termModalTitle" class="text-xl font-bold font-manrope text-on-surface">Suggest Term / Alias</h3>
                 <button onclick="closeTermModal()" class="text-secondary hover:text-error transition-colors">
                     <span class="material-symbols-outlined">close</span>
                 </button>
             </div>
             
             <form id="proposeTermForm" class="space-y-5">
+                <input type="hidden" id="editTermId" name="edit_term_id">
                 
-                <div class="flex gap-6 p-3 bg-surface-container-low rounded-xl border border-surface-container">
+                <div id="proposalModeSection" class="flex gap-6 p-3 bg-surface-container-low rounded-xl border border-surface-container">
                     <label class="flex items-center gap-2 text-sm font-bold text-on-surface cursor-pointer">
                         <input type="radio" name="proposal_mode" value="new_term" checked class="text-primary focus:ring-primary">
                         새 용어 제안
@@ -193,6 +194,8 @@
                             <option value="chemistry">Chemistry (화학물질)</option>
                             <option value="node">Node (노드)</option>
                             <option value="acronym">Acronym (약어)</option>
+                            <option value="equipment">Equipment (분석설비)</option>
+                            <option value="analysis">Analysis (분석법)</option>
                         </select>
                     </div>
                     <div>
@@ -201,19 +204,49 @@
                     </div>
                 </div>
                 
-                <div>
+                <div id="sectionCandidateRaw">
                     <label id="rawTextLabel" class="block text-[10px] font-bold text-secondary mb-2 uppercase tracking-wider">Candidate Term (원문/대표 유의어)</label>
                     <input type="text" id="rawTextInput" name="raw_text" required class="w-full rounded-lg border border-surface-container bg-surface-container-lowest text-sm p-3 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface" placeholder="입력 필수">
                 </div>
                 
-                <div>
+                <div id="sectionAliases">
                     <label class="block text-[10px] font-bold text-secondary mb-2 uppercase tracking-wider">Additional Aliases (추가 유의어 - 콤마로 구분)</label>
-                    <input type="text" name="aliases" class="w-full rounded-lg border border-surface-container bg-surface-container-lowest text-sm p-3 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface" placeholder="별칭1, 별칭2">
+                    <input type="text" id="termAliasesInput" name="aliases" class="w-full rounded-lg border border-surface-container bg-surface-container-lowest text-sm p-3 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface" placeholder="별칭1, 별칭2">
+                </div>
+
+                <div id="sectionAdminEdit" class="hidden space-y-5 border-t border-surface-container pt-4 mt-4">
+                    <div>
+                        <label class="block text-[10px] font-bold text-secondary mb-2 uppercase tracking-wider">Description (용어 설명)</label>
+                        <textarea name="description" id="editDescription" rows="2" class="w-full rounded-lg border border-surface-container bg-surface-container-lowest text-sm p-3 outline-none focus:ring-2 focus:ring-primary/50 text-on-surface" placeholder="용어에 대한 설명을 입력하세요"></textarea>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-6 p-4 bg-surface-container-highest/30 rounded-xl border border-surface-container/50">
+                        <div>
+                            <label class="block text-[10px] font-bold text-secondary mb-3 uppercase tracking-wider">Search Boost (가중치)</label>
+                            <div class="flex items-center gap-3">
+                                <input type="range" id="editSearchBoost" name="search_boost" min="0.5" max="2.0" step="0.1" value="1.0" class="w-full accent-primary cursor-pointer">
+                                <span id="editBoostVal" class="text-xs font-black text-primary w-8 text-right bg-primary/10 px-1 py-0.5 rounded">1.0</span>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-secondary mb-3 uppercase tracking-wider">Priority (우선순위)</label>
+                            <input type="number" id="editPriority" name="priority" value="100" class="w-full rounded-lg border border-surface-container bg-surface-container-lowest text-xs p-2 outline-none focus:ring-1 focus:ring-primary/50 text-on-surface font-bold">
+                        </div>
+                    </div>
+
+                    <div class="pt-1">
+                        <label class="flex items-start gap-3 p-3 border border-surface-container bg-surface-container-lowest rounded-xl cursor-pointer hover:border-primary/40 transition-colors">
+                            <input type="checkbox" id="editExpandAliases" name="expand_to_aliases" checked class="w-4 h-4 mt-0.5 text-primary rounded border-surface-container focus:ring-primary">
+                            <div>
+                                <div class="text-xs font-bold text-on-surface">Expand to Aliases (검색어 확장 적용)</div>
+                            </div>
+                        </label>
+                    </div>
                 </div>
                 
                 <div class="flex justify-end gap-3 mt-8 pt-4 border-t border-surface-container">
-                    <button type="button" onclick="closeTermModal()" class="px-5 py-2.5 text-sm font-bold text-secondary hover:bg-surface-container rounded-xl transition-all">Cancel</button>
-                    <button type="submit" class="px-5 py-2.5 text-sm font-bold bg-primary text-on-primary rounded-xl hover:opacity-90 shadow-lg transition-all flex items-center gap-2">
+                    <button type="button" ondblclick="closeTermModal()" class="px-5 py-2.5 text-sm font-bold text-secondary hover:bg-surface-container rounded-xl transition-all">Cancel</button>
+                    <button type="submit" id="submitProposalBtn" class="px-5 py-2.5 text-sm font-bold bg-primary text-on-primary rounded-xl hover:opacity-90 shadow-lg transition-all flex items-center gap-2">
                         <span class="material-symbols-outlined text-sm">send</span>
                         Submit Proposal
                     </button>
@@ -224,10 +257,13 @@
 </div>
 {% endblock %}
 
-
 {% block scripts %}
+<script>
+    // 💡 VS Code 빨간줄 에러를 없애고 안전하게 파이썬 변수를 JS로 넘기는 방법
+    const IS_ADMIN = ("{{ 'True' if is_admin else 'False' }}" === "True");
+</script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<script src="{{ url_for('static', path='/js/archive.js') }}?v=4"></script>
+<script src="{{ url_for('static', path='/js/archive.js') }}?v=6"></script>
 
 <script>
     function switchArchiveTab(tabName) {
@@ -237,7 +273,6 @@
         const dictBtn = document.getElementById('tabDictionaryBtn');
 
         if (tabName === 'reports') {
-            // 💡 CSS 충돌을 원천 차단하기 위해 강제로 display 속성 제어
             reportsTab.style.display = 'flex';
             dictTab.style.display = 'none';
 
@@ -246,7 +281,6 @@
             dictBtn.classList.replace('text-primary', 'text-secondary');
             dictBtn.classList.replace('border-primary', 'border-transparent');
         } else {
-            // 💡 사전 탭을 누르면 리포트 탭을 완전히 끄고 사전 탭을 켬
             reportsTab.style.display = 'none';
             dictTab.style.display = 'block';
 
@@ -255,10 +289,33 @@
             reportsBtn.classList.replace('text-primary', 'text-secondary');
             reportsBtn.classList.replace('border-primary', 'border-transparent');
         }
+        
+        window.history.replaceState(null, null, "#" + tabName);
     }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        if (window.location.hash === "#dictionary") {
+            switchArchiveTab('dictionary');
+        } else {
+            switchArchiveTab('reports'); 
+        }
+    });
 
     function openTermModal() {
         const modal = document.getElementById('addTermModal');
+        // 신규 추가 시 폼 초기화 (수정 모드 데이터 지우기)
+        const form = document.getElementById('proposeTermForm');
+        if(form) form.reset();
+        
+        // UI를 Add Term 모드로 초기화
+        document.getElementById('termModalTitle').innerText = "Suggest Term / Alias";
+        document.getElementById('editTermId').value = "";
+        document.getElementById('proposalModeSection').classList.remove('hidden');
+        document.getElementById('sectionCandidateRaw').classList.remove('hidden');
+        document.getElementById('rawTextInput').required = true;
+        document.getElementById('sectionAdminEdit').classList.add('hidden');
+        document.getElementById('submitProposalBtn').innerHTML = `<span class="material-symbols-outlined text-sm">send</span> Submit Proposal`;
+
         modal.classList.remove('hidden');
         modal.classList.add('flex');
     }
@@ -271,7 +328,7 @@
         const form = document.getElementById('proposeTermForm');
         if(form) form.reset();
         
-        // 닫을 때 모달 상태 초기화 (새 용어 제안 모드로 복구)
+        // 닫을 때 모달 상태 완전 초기화
         const sectionTarget = document.getElementById("sectionTargetTerm");
         const sectionNew = document.getElementById("sectionNewTermDetails");
         const rawLabel = document.getElementById("rawTextLabel");
@@ -280,7 +337,14 @@
         if(sectionTarget) sectionTarget.classList.add("hidden");
         if(sectionNew) sectionNew.classList.remove("hidden");
         if(rawLabel) rawLabel.innerText = "Candidate Term (원문/대표 유의어)";
-        if(rawInput) rawInput.placeholder = "e.g. SF2_defect";
+        if(rawInput) {
+            rawInput.placeholder = "e.g. defect";
+            rawInput.required = true;
+        }
+        
+        document.getElementById('proposalModeSection').classList.remove('hidden');
+        document.getElementById('sectionCandidateRaw').classList.remove('hidden');
+        document.getElementById('sectionAdminEdit').classList.add('hidden');
     }
 </script>
 {% endblock %}

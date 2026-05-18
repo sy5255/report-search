@@ -944,3 +944,97 @@ async def api_get_dictionary_terms(request: Request):
 
     terms = get_all_terms()
     return {"terms": terms}
+
+@app.get("/api/dictionary/pending")
+async def api_get_pending_candidates(
+    request: Request,
+    limit: int = Query(50),
+    offset: int = Query(0),
+    sort: str = Query("frequency"),
+    search: str = Query(""),      # 💡 검색어
+    type: str = Query("all"),     # 💡 카테고리
+    source: str = Query("all")    # 💡 출처(user/system)
+):
+    """대기열(Pending Queue) 로딩 (페이지네이션 및 정렬 정책 적용)"""
+    user = _require_user(request)
+    
+    if user not in ADMIN_USER_IDS:
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+        
+    from app.dictionary_repo import get_pending_candidates
+    result_dict = get_pending_candidates(
+        limit=limit, offset=offset, sort=sort, search=search, term_type=type, source=source
+    )
+    return result_dict
+
+@app.post("/api/dictionary/approve")
+async def api_approve_term(request: Request):
+    user = _require_user(request)
+    if user not in ADMIN_USER_IDS:
+        raise HTTPException(status_code=403)
+        
+    body = await request.json()
+    success = approve_candidate(body, user)
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="승인 처리 중 DB 에러가 발생했습니다.")
+    return {"status": "success"}
+
+# =========================
+# API: Admin Dictionary (Pending, Approve, Update, Delete)
+# =========================
+
+@app.get("/api/dictionary/pending")
+async def api_get_pending_candidates(
+    request: Request,
+    limit: int = Query(100),
+    offset: int = Query(0)
+):
+    """대기열(Pending Queue) 로딩 (페이지네이션 적용됨)"""
+    user = _require_user(request)
+    
+    # 관리자만 대기열을 볼 수 있도록 권한 체크
+    if user not in ADMIN_USER_IDS:
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+        
+    # dictionary_repo에서 {"total": int, "items": list} 형태로 반환
+    result_dict = get_pending_candidates(limit=limit, offset=offset)
+    return result_dict
+
+
+@app.delete("/api/dictionary/terms/{term_id}")
+async def api_delete_term(term_id: int, request: Request):
+    """정식 용어 사전 Soft Delete (비활성화)"""
+    user = _require_user(request)
+    
+    # 💡 1. 관리자 권한(Admin) 체크 로직 추가
+    if user not in ADMIN_USER_IDS:
+        raise HTTPException(status_code=403, detail="용어 삭제는 관리자 권한이 필요합니다.")
+    
+    # 2. 삭제(Soft Delete) 로직 실행 (앞서 dictionary_repo.py에 추가한 함수 호출)
+    from app.dictionary_repo import soft_delete_term
+    success = soft_delete_term(term_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="용어 삭제에 실패했습니다.")
+        
+    return {"status": "success", "message": "용어가 삭제(비활성화) 되었습니다. 5분 내에 검색 엔진에 반영됩니다."}
+
+
+@app.put("/api/dictionary/terms/{term_id}")
+async def api_update_term(term_id: int, request: Request):
+    """정식 용어 사전 정보 수정"""
+    user = _require_user(request)
+    
+    # 💡 1. 관리자 권한(Admin) 체크 로직 추가
+    if user not in ADMIN_USER_IDS:
+        raise HTTPException(status_code=403, detail="용어 수정은 관리자 권한이 필요합니다.")
+    
+    payload = await request.json()
+    
+    # 2. 수정 로직 실행 (앞서 dictionary_repo.py에 추가한 함수 호출)
+    from app.dictionary_repo import update_term_details
+    success = update_term_details(term_id, payload)
+    if not success:
+        raise HTTPException(status_code=500, detail="용어 수정에 실패했습니다.")
+        
+    return {"status": "success", "message": "용어가 수정되었습니다. 5분 내에 검색 엔진에 반영됩니다."}

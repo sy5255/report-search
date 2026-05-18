@@ -67,17 +67,20 @@ def propose_term_candidate(
         conn.close()
 
 def get_all_terms() -> List[dict]:
-    """DB에서 정식 등록된 용어 사전 목록을 가져오는 함수 (웹 UI 렌더링용)"""
+    """DB에서 정식 등록된 용어 사전 목록을 가져오는 함수"""
     conn = get_mysql_conn()
     cur = conn.cursor(dictionary=True) 
     try:
-        # 용어 정보와 해당 용어에 속한 활성 유의어(alias)들을 콤마로 묶어서 한 번에 가져옵니다.
+        # 💡 프론트엔드 모달에 띄워주기 위해 priority, search_boost, expand_to_aliases 도 같이 가져옵니다!
         sql = """
             SELECT 
                 td.term_id, 
                 td.term_type, 
                 td.canonical_name, 
                 td.description,
+                td.priority,
+                td.search_boost,
+                td.expand_to_aliases,
                 GROUP_CONCAT(ta.alias_text SEPARATOR ', ') as aliases
             FROM term_dictionary td
             LEFT JOIN term_aliases ta 
@@ -96,24 +99,74 @@ def get_all_terms() -> List[dict]:
         cur.close()
         conn.close()
 
-def get_pending_candidates() -> List[dict]:
-    """Admin 대기열: 리뷰 대기 중인 용어 제안 목록을 가져옴"""
+
+def get_pending_candidates(
+    limit: int = 50, 
+    offset: int = 0, 
+    sort: str = "frequency",
+    search: str = "",
+    term_type: str = "all",
+    source: str = "all"
+) -> dict:
+    """Admin 대기열: 서버사이드 필터링, 정렬, 그리고 대상 용어(Target Term) 조인 기능 추가"""
     conn = get_mysql_conn()
     cur = conn.cursor(dictionary=True)
     try:
-        sql = """
-            SELECT candidate_id, candidate_kind, candidate_type, raw_text, 
-                   suggested_canonical, target_term_id, proposed_aliases_json, 
-                   proposed_by, detected_count, confidence
-            FROM term_candidate_queue
-            WHERE review_status = 'pending'
-            ORDER BY detected_count DESC, candidate_id ASC
+        # 💡 테이블에 별칭(q, d)을 붙여 쿼리 충돌을 방지합니다.
+        where_clauses = ["q.review_status = 'pending'"]
+        args = []
+
+        if search:
+            where_clauses.append("q.raw_text LIKE %s")
+            args.append(f"%{search}%")
+            
+        if term_type and term_type != "all":
+            where_clauses.append("q.candidate_type = %s")
+            args.append(term_type)
+            
+        if source == "user":
+            where_clauses.append("q.proposed_by IS NOT NULL AND q.proposed_by != '' AND q.proposed_by NOT LIKE '%build_serving%'")
+        elif source == "system":
+            where_clauses.append("(q.proposed_by IS NULL OR q.proposed_by = '' OR q.proposed_by LIKE '%build_serving%')")
+            
+        where_str = " AND ".join(where_clauses)
+
+        # 전체 개수 카운트
+        count_sql = f"SELECT COUNT(*) FROM term_candidate_queue q WHERE {where_str}"
+        cur.execute(count_sql, tuple(args))
+        row = cur.fetchone()
+        total_count = list(row.values())[0] if row else 0
+
+        # 정렬 기준 분기 (최신 제안순 vs 빈도순)
+        if sort == "latest":
+            order_by = "q.candidate_id DESC" 
+        else:
+            order_by = "q.detected_count DESC, q.candidate_id ASC" 
+
+        # 💡 [핵심] LEFT JOIN을 사용해 정식 사전(term_dictionary)의 표준명(canonical_name)을 함께 가져옵니다.
+        select_sql = f"""
+            SELECT q.candidate_id, q.candidate_kind, q.candidate_type, q.raw_text, 
+                   q.suggested_canonical, q.target_term_id, q.proposed_aliases_json, 
+                   q.proposed_by, q.detected_count, q.confidence,
+                   d.canonical_name AS target_canonical_name
+            FROM term_candidate_queue q
+            LEFT JOIN term_dictionary d ON q.target_term_id = d.term_id
+            WHERE {where_str}
+            ORDER BY {order_by}
+            LIMIT {int(limit)} OFFSET {int(offset)}
         """
-        cur.execute(sql)
-        return cur.fetchall()
+        cur.execute(select_sql, tuple(args))
+        items = cur.fetchall()
+        
+        return {
+            "total": total_count,
+            "items": items if items else [],
+            "limit": limit,
+            "offset": offset
+        }
     except Exception as e:
-        print(f"[dictionary_repo] 대기열 로드 에러: {e}")
-        return []
+        print(f"🚨 [dictionary_repo] 대기열 로드 에러: {e}")
+        return {"total": 0, "items": [], "limit": limit, "offset": offset}
     finally:
         cur.close()
         conn.close()
@@ -160,3 +213,90 @@ def approve_candidate(data: dict, admin_user_id: str) -> bool:
     finally:
         cur.close()
         conn.close()
+
+def soft_delete_term(term_id: int) -> bool:
+    """용어를 Soft Delete (status = 'inactive'로 변경)"""
+    conn = get_mysql_conn()
+    cur = conn.cursor()
+    try:
+        # 1. 마스터 테이블 비활성화
+        cur.execute("UPDATE term_dictionary SET status = 'inactive' WHERE term_id = %s", (term_id,))
+        # 2. 하위 Alias들도 모두 비활성화
+        cur.execute("UPDATE term_aliases SET status = 'inactive' WHERE term_id = %s", (term_id,))
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        print(f"[dictionary_repo] Soft Delete 에러: {e}")
+        return False
+    finally:
+        cur.close()
+        conn.close()
+
+
+def update_term_details(term_id: int, payload: dict) -> bool:
+    """용어 정보 수정 (에러 완벽 방어 및 어드민 파라미터 추가)"""
+    conn = get_mysql_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("SELECT * FROM term_dictionary WHERE term_id = %s", (term_id,))
+        row = cur.fetchone()
+        if not row:
+            return False
+        
+        # 💡 dictionary.get()을 써서 파이썬 KeyError를 원천 차단합니다.
+        term_type = payload.get("term_type", row.get("term_type"))
+        canonical_name = payload.get("canonical_name", row.get("canonical_name"))
+        display_name = payload.get("display_name", row.get("display_name", canonical_name))
+        description = payload.get("description", row.get("description", ""))
+        
+        # 💡 새롭게 추가된 어드민 전용 파라미터들
+        priority = int(payload.get("priority", row.get("priority", 100)))
+        search_boost = float(payload.get("search_boost", row.get("search_boost", 1.0)))
+        expand_to_aliases = int(payload.get("expand_to_aliases", row.get("expand_to_aliases", 1)))
+        
+        sql = """
+            UPDATE term_dictionary 
+            SET term_type = %s,
+                canonical_name = %s,
+                display_name = %s,
+                description = %s,
+                priority = %s,
+                search_boost = %s,
+                expand_to_aliases = %s
+            WHERE term_id = %s
+        """
+        cur.execute(sql, (term_type, canonical_name, display_name, description, priority, search_boost, expand_to_aliases, term_id))
+        
+        # 유의어 업데이트 로직
+        aliases = payload.get("aliases")
+        if aliases is not None:
+            cur.execute("UPDATE term_aliases SET status = 'inactive' WHERE term_id = %s", (term_id,))
+            for alt in aliases:
+                alt_clean = alt.strip()
+                if not alt_clean: continue
+                import re
+                alt_norm = re.sub(r"\s+", " ", alt_clean.lower().replace("-", " ").replace("_", " ").replace("/", " ")).strip()
+                
+                # 중복 에러(Integrity Error) 방지를 위한 UPSERT 논리
+                cur.execute("SELECT alias_id FROM term_aliases WHERE term_id = %s AND alias_normalized = %s", (term_id, alt_norm))
+                alias_row = cur.fetchone()
+                
+                if alias_row:
+                    cur.execute("UPDATE term_aliases SET status = 'active', alias_text = %s WHERE alias_id = %s", (alt_clean, alias_row['alias_id']))
+                else:
+                    cur.execute("""
+                        INSERT INTO term_aliases (term_id, alias_text, alias_normalized, match_type, status)
+                        VALUES (%s, %s, %s, 'contains', 'active')
+                    """, (term_id, alt_clean, alt_norm))
+                    
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        # 💡 만약 또 에러가 난다면, 파이썬 터미널에 범인이 적나라하게 찍힙니다!
+        print(f"🚨 [dictionary_repo] 쿼리 에러 상세 발생: {type(e).__name__} - {e}")
+        return False
+    finally:
+        cur.close()
+        conn.close() 
