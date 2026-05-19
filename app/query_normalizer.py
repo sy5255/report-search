@@ -10,21 +10,21 @@ TERM_CACHE_LIMIT = 5000
 
 WORDLIKE_TYPES = {"chemistry", "process", "product", "defect", "node", "owner"}
 
-# 확장 강도 정책
-# - aggressive: canonical + aliases 적극 확장
-# - conservative: canonical 위주, alias는 소수만
-# - minimal: canonical만 유지하거나 거의 확장 안 함
+# 💡 논의된 카테고리별 확장 강도 정책 완벽 반영
 TERM_TYPE_EXPANSION_POLICY = {
     "chemistry": "aggressive",
-    "product": "aggressive",
     "node": "aggressive",
-    "owner": "minimal",
     "process": "conservative",
+    "product": "minimal",
     "defect": "minimal",
+    "owner": "minimal",
+    "equipment": "minimal",
+    "analysis": "minimal",
+    "acronym": "minimal",
 }
 
-PROCESS_ALIAS_EXPANSION_LIMIT = 2   # process는 최대 2개까지만 확장(canonical 포함)
-DEFAULT_ALIAS_EXPANSION_LIMIT = 5   # aggressive 타입도 너무 길어지지 않게 제한
+PROCESS_ALIAS_EXPANSION_LIMIT = 2
+DEFAULT_ALIAS_EXPANSION_LIMIT = 5
 
 
 def normalize_alias_text(s: str) -> str:
@@ -40,13 +40,11 @@ def _token_boundary_pattern(alias_text: str) -> re.Pattern:
     alias_text = str(alias_text or "").strip()
     escaped = re.escape(alias_text)
     escaped = escaped.replace(r"\ ", r"\s+")
-
     # 1. 단어의 첫 글자와 마지막 글자가 영어/숫자인지 확인
     is_start_alnum = re.match(r"^[A-Za-z0-9]", alias_text)
     is_end_alnum = re.search(r"[A-Za-z0-9]$", alias_text)
-
     # 2. 왼쪽 경계 (Left Boundary)
-    if is_start_alnum:
+    if is_start_alnum:        
         # 영어/숫자로 시작하면 앞에 한글이 붙어도 됨 (예: 고DHF)
         left_bound = r"(?<![A-Za-z0-9])"
     else:
@@ -61,9 +59,9 @@ def _token_boundary_pattern(alias_text: str) -> re.Pattern:
         # 한글로 끝나면 뒤에 한국어 조사 20여종만 예외적으로 허용
         josa_list = r"은|는|이|가|을|를|의|과|와|에|에서|로|으로|에게|한테|부터|까지|도|만|랑|이랑|이나|나"
         right_bound = rf"(?=(?:{josa_list})?(?![A-Za-z0-9가-힣]))"
-
     # 4. 최종 정규식 조립 및 반환
     return re.compile(rf"(?i){left_bound}{escaped}{right_bound}")
+
 
 def load_term_dictionary(scope_candidates: List[str] | None = None) -> List[Dict[str, Any]]:
     """
@@ -78,12 +76,14 @@ def load_term_dictionary(scope_candidates: List[str] | None = None) -> List[Dict
 
     placeholders = ",".join(["%s"] * len(scopes))
 
+    # 💡 LLM 동적 프롬프트를 위해 td.description 도 함께 가져오도록 쿼리 수정!
     sql = f"""
     SELECT
         td.term_id,
         td.term_type,
         td.canonical_name,
         td.display_name,
+        td.description,
         td.scope,
         td.status,
         td.is_verified,
@@ -136,6 +136,7 @@ def build_term_entries(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "term_type": r["term_type"],
                 "canonical_name": r["canonical_name"],
                 "display_name": r.get("display_name") or r["canonical_name"],
+                "description": r.get("description") or "", # 💡 Description 속성 바인딩
                 "scope": r.get("scope") or "all",
                 "priority": int(r.get("priority") or 100),
                 "expand_to_aliases": int(r.get("expand_to_aliases") or 0),
@@ -207,6 +208,7 @@ def _collect_all_term_matches(query: str, term_entries: List[Dict[str, Any]]) ->
                     "term_type": term["term_type"],
                     "canonical_name": term["canonical_name"],
                     "display_name": term["display_name"],
+                    "description": term["description"], # 💡 Description 속성 바인딩
                     "matched_text": matched_text,
                     "matched_span": [m.start(), m.end()],
                     "alias_text": alias_text,
@@ -422,13 +424,12 @@ def build_expanded_query(
             # 정규화된 전체 쿼리 문장 자체와 완벽히 일치하면 스킵 (예외 방어)
             if norm in seen_norm_phrases:
                 continue
-                
-            # 해당 블록(카테고리) 내에서 중복 방지
+
+            # 해당 블록(카테고리) 내에서 중복 방지                
             if norm in seen_in_block:
                 continue
 
             seen_in_block.add(norm)
-            
             # ⭐️ 핵심: "희석 불산"처럼 띄어쓰기가 있는 동의어가 쪼개지지 않도록 큰따옴표로 감쌈
             valid_terms.append(f'"{st}"')
 
@@ -471,6 +472,7 @@ def normalize_and_expand_query(
                 "term_id": d["term_id"],
                 "term_type": d["term_type"],
                 "canonical_name": d["canonical_name"],
+                "description": d.get("description"), # 💡 Description 속성 반환
                 "matched_text": d["matched_text"],
                 "alias_text": d["alias_text"],
                 "matched_span": d["matched_span"],

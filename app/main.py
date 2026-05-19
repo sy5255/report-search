@@ -201,7 +201,6 @@ async def api_get_session_messages(session_id: str, request: Request):
 
     return {"messages": msgs, "search_logs_by_user_msg_id": search_log_by_user_msg_id}
 
-
 # =========================
 # API: chat_stream (실시간 스트리밍 전용 - 💡 신규 추가)
 # =========================
@@ -256,10 +255,8 @@ async def api_chat_stream(request: Request):
 
     # 💡 스트리밍 제너레이터 함수
     async def generate_response():
-        # 첫 번째 터미널 메시지 스트리밍
         yield json.dumps({"type": "step", "message": "🔄 질의어 문맥 분석 및 정규화 진행 중..."}, ensure_ascii=False) + "\n"
 
-        # 3) rewrite
         rewritten_query = user_text
         try:
             rewritten_query = rewrite_query_with_history(
@@ -270,7 +267,6 @@ async def api_chat_stream(request: Request):
         except Exception as e:
             print(f"Query rewrite failed: {e}")
 
-        # 4) normalization + expansion
         query_norm = {
             "original_query": rewritten_query,
             "normalized_query": rewritten_query,
@@ -287,10 +283,36 @@ async def api_chat_stream(request: Request):
         except Exception as e:
             print(f"Query normalization failed: {e}")
 
+        # 💡 [핵심] 동적 미니 용어 사전 생성 및 프롬프트 주입
+        detected_terms = query_norm.get("detected_terms") or []
+        unique_terms = {}
+        
+        for dt in detected_terms:
+            c_name = dt.get("canonical_name")
+            desc = dt.get("description")
+            t_type = dt.get("term_type", "unknown")
+            if c_name and desc and c_name not in unique_terms:
+                unique_terms[c_name] = f"* {c_name} ({t_type}): {desc}"
+
+        # 💡 프론트엔드 UI에 띄워줄 강제 주입용 로그 문자열 준비
+        glossary_step_log = None
+        if unique_terms:
+            glossary_text = "\n".join(unique_terms.values())
+            system_prompt = (
+                "당신은 사내 지식 도우미입니다. 사용자의 질문과 관련된 사내 전문 용어의 뜻을 아래 사전을 통해 파악하고, "
+                "이를 바탕으로 검색된 문서의 문맥을 깊이 있게 이해하여 답변을 작성하세요.\n\n"
+                f"[사내 용어 사전 (Mini-Glossary)]\n{glossary_text}"
+            )
+            previous_messages.insert(0, {"role": "system", "content": system_prompt})
+            
+            term_keys = ", ".join(unique_terms.keys())
+            glossary_step_log = f"📚 사내 용어 사전 지식 적용 완료 ({term_keys})"
+
         retrieval_query = (query_norm.get("expanded_query") or rewritten_query).strip() or rewritten_query
 
-        # 5) Agent Loop 실행 및 실시간 데이터 중계
         final_data = None
+        is_first_agent_chunk = True
+
         for chunk in run_agent_loop_stream(
             user_id=user,
             user_query=retrieval_query,
@@ -299,8 +321,29 @@ async def api_chat_stream(request: Request):
             ui_top_k=ui_top_k,
             forced_intent=forced_intent
         ):
-            # 에이전트 단계별 로그 텍스트를 바로 프론트엔드로 쏩니다
+            # 💡 [핵심 해킹 로직] 에이전트 스트림 청크를 가로채어 배열 맨 앞에 로그를 끼워 넣습니다.
+            if glossary_step_log:
+                try:
+                    chunk_dict = json.loads(chunk.strip())
+                    # 실시간 스텝 배열 업데이트 시
+                    if "steps" in chunk_dict and isinstance(chunk_dict["steps"], list):
+                        if glossary_step_log not in chunk_dict["steps"]:
+                            chunk_dict["steps"].insert(0, glossary_step_log)
+                        chunk = json.dumps(chunk_dict, ensure_ascii=False) + "\n"
+                    # 최종 완료 데이터 업데이트 시
+                    elif chunk_dict.get("type") == "final" and "steps" in chunk_dict.get("data", {}):
+                        if glossary_step_log not in chunk_dict["data"]["steps"]:
+                            chunk_dict["data"]["steps"].insert(0, glossary_step_log)
+                        chunk = json.dumps(chunk_dict, ensure_ascii=False) + "\n"
+                except Exception:
+                    pass
+
             yield chunk
+            
+            # 💡 만약 배열이 아니라 단일 메시지 방식의 UI라면, 첫 청크 직후에 다시 한번 확실하게 쏴줍니다.
+            if is_first_agent_chunk and glossary_step_log:
+                yield json.dumps({"type": "step", "message": glossary_step_log}, ensure_ascii=False) + "\n"
+                is_first_agent_chunk = False
             
             try:
                 chunk_dict = json.loads(chunk.strip())
@@ -479,7 +522,12 @@ async def api_chat(request: Request):
        
         intent = agent_result.get("intent")
         suggested_actions = agent_result.get("suggested_actions", [])
+        
+        # 💡 [신규 추가] agent_steps 배열의 맨 앞에 로그 강제 주입
         agent_steps = agent_result.get("steps", [])
+        if unique_terms:
+            term_keys = ", ".join(unique_terms.keys())
+            agent_steps.insert(0, f"📚 사내 용어 사전 지식 적용 완료 ({term_keys})")
 
     except Exception as e:
         print(f"Agent error: {e}")
@@ -983,23 +1031,23 @@ async def api_approve_term(request: Request):
 # =========================
 # API: Admin Dictionary (Pending, Approve, Update, Delete)
 # =========================
-
-@app.get("/api/dictionary/pending")
-async def api_get_pending_candidates(
-    request: Request,
-    limit: int = Query(100),
-    offset: int = Query(0)
-):
-    """대기열(Pending Queue) 로딩 (페이지네이션 적용됨)"""
-    user = _require_user(request)
+# @app.get("/api/dictionary/pending")
+# async def api_get_pending_candidates(
+#     request: Request,
+#     limit: int = Query(100),
+#     offset: int = Query(0)
+# ):
+#     """대기열(Pending Queue) 로딩 (페이지네이션 적용됨)"""
+#     user = _require_user(request)
     
-    # 관리자만 대기열을 볼 수 있도록 권한 체크
-    if user not in ADMIN_USER_IDS:
-        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+#     # 관리자만 대기열을 볼 수 있도록 권한 체크
+#     if user not in ADMIN_USER_IDS:
+#         raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
         
-    # dictionary_repo에서 {"total": int, "items": list} 형태로 반환
-    result_dict = get_pending_candidates(limit=limit, offset=offset)
-    return result_dict
+#     # dictionary_repo에서 {"total": int, "items": list} 형태로 반환
+#     result_dict = get_pending_candidates(limit=limit, offset=offset)
+#     return result_dict
+
 
 
 @app.delete("/api/dictionary/terms/{term_id}")
