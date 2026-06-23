@@ -116,6 +116,16 @@ def get_pending_candidates(
         where_clauses = ["q.review_status = 'pending'"]
         args = []
 
+        # 💡 [핵심 추가] 이미 정식 등록된 용어(표준어 및 동의어)는 대기열에서 제외
+        # term_aliases 테이블에는 표준어(is_preferred=1)와 유의어가 모두 들어있으므로 이 테이블 하나만 검사해도 충분합니다.
+        where_clauses.append("""
+            NOT EXISTS (
+                SELECT 1 FROM term_aliases ta 
+                WHERE ta.alias_normalized = q.normalized_text 
+                  AND ta.status = 'active'
+            )
+        """)
+
         if search:
             where_clauses.append("q.raw_text LIKE %s")
             args.append(f"%{search}%")
@@ -171,17 +181,23 @@ def get_pending_candidates(
         cur.close()
         conn.close()
 
-
 def approve_candidate(data: dict, admin_user_id: str) -> bool:
-    """Admin 승인: 관리자가 수정한 값들로 큐 데이터를 덮어쓰고 상태를 approved로 변경"""
-    import json # 상단에 없다면 추가
+    """Admin 승인: 관리자가 수정한 값들로 큐 데이터를 덮어쓰고 상태를 approved로 변경 및 중복 큐 정리"""
+    import json
     conn = get_mysql_conn()
     cur = conn.cursor()
     try:
-        # 💡 프론트에서 넘어온 aliases 리스트를 JSON 문자열로 변환
+        candidate_id = int(data.get("candidate_id"))
+        
+        # 💡 1. 승인할 단어의 정규화 텍스트(normalized_text)를 먼저 조회합니다.
+        cur.execute("SELECT normalized_text FROM term_candidate_queue WHERE candidate_id = %s", (candidate_id,))
+        row = cur.fetchone()
+        norm_text = row[0] if row else None
+
+        # 💡 2. 메인 단어 승인 처리 (기존 승인 로직 유지)
         aliases_json = json.dumps(data.get("aliases", []), ensure_ascii=False)
         
-        sql = """
+        sql_approve = """
             UPDATE term_candidate_queue
             SET review_status = 'approved',
                 approved_term_type = %s,
@@ -189,21 +205,35 @@ def approve_candidate(data: dict, admin_user_id: str) -> bool:
                 approved_priority = %s,
                 approved_expand_to_aliases = %s,
                 approved_search_boost = %s,
-                proposed_aliases_json = %s,  /* 💡 유의어 덮어쓰기 추가! */
+                proposed_aliases_json = %s,
                 reviewed_by = %s,
                 reviewed_at = CURRENT_TIMESTAMP
             WHERE candidate_id = %s
         """
-        cur.execute(sql, (
+        cur.execute(sql_approve, (
             data.get("approved_term_type"),
             data.get("approved_canonical_name"),
             int(data.get("approved_priority", 100)),
             int(data.get("approved_expand_to_aliases", 1)),
             float(data.get("approved_search_boost", 1.0)),
-            aliases_json,  # 💡 추가된 파라미터
+            aliases_json,
             admin_user_id,
-            int(data.get("candidate_id"))
+            candidate_id
         ))
+        
+        # 💡 3. [고스트 트래킹 적용] 큐에 남아있는 동일한 단어(다른 카테고리 등)를 'pending'에서 'already_active'로 일괄 전환
+        if norm_text:
+            sql_clean_duplicates = """
+                UPDATE term_candidate_queue 
+                SET review_status = 'already_active', 
+                    reviewed_by = 'system_auto_sync',
+                    reviewed_at = CURRENT_TIMESTAMP
+                WHERE normalized_text = %s 
+                  AND candidate_id != %s 
+                  AND review_status = 'pending'
+            """
+            cur.execute(sql_clean_duplicates, (norm_text, candidate_id))
+
         conn.commit()
         return True
     except Exception as e:
