@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 180" width="240" height="180" role="img" aria-label="조건에 맞는 문서가 없습니다">
+  <defs>
+    <linearGradient id="ea-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0ea5b4"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+  </defs>
+  <!-- Folder body -->
+  <path d="M40 56h54l10 10h96a8 8 0 0 1 8 8v60a8 8 0 0 1-8 8H40a8 8 0 0 1-8-8V64a8 8 0 0 1 8-8z"
+        fill="#ffffff" stroke="url(#ea-grad)" stroke-width="1.8"/>
+  <!-- Stacked papers peeking -->
+  <rect x="64" y="78" width="120" height="58" rx="6" fill="url(#ea-grad)" opacity="0.10" stroke="url(#ea-grad)" stroke-width="1.2"/>
+  <rect x="76" y="92" width="120" height="50" rx="6" fill="#ffffff" stroke="url(#ea-grad)" stroke-width="1.2"/>
+  <line x1="92" y1="108" x2="172" y2="108" stroke="url(#ea-grad)" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+  <line x1="92" y1="122" x2="156" y2="122" stroke="url(#ea-grad)" stroke-width="2" stroke-linecap="round" opacity="0.45"/>
+  <!-- Search loupe overlapping -->
+  <circle cx="170" cy="60" r="16" fill="#ffffff" stroke="url(#ea-grad)" stroke-width="2.4"/>
+  <line x1="182" y1="72" x2="196" y2="86" stroke="url(#ea-grad)" stroke-width="3" stroke-linecap="round"/>
+</svg>

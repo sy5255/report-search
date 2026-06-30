@@ -10,6 +10,25 @@ let currentAuthors = [];
 let currentStartDate = "";
 let currentEndDate = "";
 let allDictionaryTerms = []; // 모달 드롭다운용 저장소
+let currentViewerDoc = null;
+let currentViewerMarkdown = "";
+let currentViewerTitle = "";
+const LS_BOOKMARKS = "rs_archive_bookmarks";
+
+function readBookmarks(){
+  try {
+    const raw = localStorage.getItem(LS_BOOKMARKS);
+    if(!raw) return {};
+    return JSON.parse(raw) || {};
+  } catch(_){ return {}; }
+}
+function writeBookmarks(map){
+  try { localStorage.setItem(LS_BOOKMARKS, JSON.stringify(map || {})); } catch(_){}
+}
+function bookmarkKeyFromDoc(doc){
+  if(!doc) return "";
+  return (doc.storage && doc.storage.parsed_md_rel_path) || doc.doc_id || doc.id || "";
+}
 
 function initArchive() {
     if(typeof marked !== "undefined"){
@@ -46,6 +65,53 @@ function initArchive() {
     const loadMoreBtn = document.getElementById("loadMoreBtn");
     if(loadMoreBtn) {
         loadMoreBtn.addEventListener("click", () => fetchDocuments(true));
+    }
+
+    const downloadBtn = document.getElementById("downloadMdBtn");
+    if(downloadBtn){
+        downloadBtn.addEventListener("click", () => {
+            if(!currentViewerMarkdown){
+                if(window.Toast) window.Toast.warn("먼저 문서를 열어주세요.");
+                return;
+            }
+            const safeTitle = (currentViewerTitle || "document")
+                .replace(/[^\w\-가-힣]/g, "_").slice(0, 80) || "document";
+            const blob = new Blob([currentViewerMarkdown], { type: "text/markdown;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${safeTitle}.md`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        });
+    }
+
+    const bookmarkBtn = document.getElementById("bookmarkBtn");
+    if(bookmarkBtn){
+        bookmarkBtn.addEventListener("click", () => {
+            const key = bookmarkKeyFromDoc(currentViewerDoc);
+            if(!key){
+                if(window.Toast) window.Toast.warn("이 문서는 즐겨찾기할 수 없습니다.");
+                return;
+            }
+            const marks = readBookmarks();
+            if(marks[key]){
+                delete marks[key];
+                if(window.Toast) window.Toast.info("즐겨찾기에서 제거했습니다.");
+            } else {
+                marks[key] = {
+                    title: currentViewerTitle,
+                    saved_at: new Date().toISOString()
+                };
+                if(window.Toast) window.Toast.success("즐겨찾기에 추가했습니다.");
+            }
+            writeBookmarks(marks);
+            refreshBookmarkButtonState();
+            // also refresh card star badges
+            refreshCardBookmarkBadges();
+        });
     }
 
     const expandBtn = document.getElementById("expandBtn");
@@ -238,7 +304,36 @@ function renderCards(docs, isAppend) {
     if(!listEl) return;
     if (!isAppend) listEl.innerHTML = "";
     if (docs.length === 0 && !isAppend) {
-        listEl.innerHTML = `<div class="col-span-2 text-center text-sm font-bold text-secondary mt-10 p-8 bg-surface-container-highest rounded-2xl">조건에 맞는 검색 결과가 없습니다.</div>`;
+        listEl.innerHTML = `
+          <div class="col-span-2 welcome-screen" style="padding:32px 16px;">
+            <img src="/static/images/empty-archive.svg" alt=""/>
+            <h2>조건에 맞는 보고서가 없습니다</h2>
+            <p>검색어 · 담당자 · 기간 필터를 조정하거나 초기화해 다시 시도해보세요.</p>
+            <div class="welcome-chips">
+              <button class="welcome-chip" id="emptyArchiveResetBtn" type="button">
+                <span class="material-symbols-outlined">restart_alt</span>
+                <span>필터 전부 초기화</span>
+              </button>
+            </div>
+          </div>`;
+        const resetBtn = document.getElementById("emptyArchiveResetBtn");
+        if(resetBtn){
+          resetBtn.addEventListener("click", () => {
+            const search = document.getElementById("archiveSearchInput");
+            if(search) search.value = "";
+            document.querySelectorAll('input[name="authorFilter"]').forEach(cb => { cb.checked = false; });
+            const sd = document.getElementById("startDate"); if(sd) sd.value = "";
+            const ed = document.getElementById("endDate");   if(ed) ed.value = "";
+            if(typeof fetchDocuments === "function"){
+              currentSkip = 0;
+              currentQuery = "";
+              currentAuthors = [];
+              currentStartDate = "";
+              currentEndDate = "";
+              fetchDocuments(false);
+            }
+          });
+        }
         return;
     }
 
@@ -261,8 +356,12 @@ function renderCards(docs, isAppend) {
         });
 
         const card = document.createElement("div");
-        card.className = "archive-card group bg-surface-container-lowest border border-surface-container rounded-2xl p-6 shadow-sm hover:border-primary/40 transition-all cursor-pointer flex flex-col min-h-[255px]";
+        const bmKey = bookmarkKeyFromDoc(doc);
+        card.dataset.bookmarkKey = bmKey;
+        const isBookmarked = !!(readBookmarks())[bmKey];
+        card.className = "archive-card group bg-surface-container-lowest border border-surface-container rounded-2xl p-6 shadow-sm hover:border-primary/40 transition-all cursor-pointer flex flex-col min-h-[255px] relative";
         card.innerHTML = `
+            <span class="archive-bookmark-badge material-symbols-outlined absolute top-3 right-3 text-yellow-500 ${isBookmarked ? '' : 'hidden'}" style="font-variation-settings:'FILL' 1;font-size:18px;" title="즐겨찾은 문서">star</span>
             <div class="flex justify-between items-start mb-4 gap-2">
                 <span class="text-[10px] font-extrabold text-secondary uppercase tracking-tighter bg-surface-container-highest px-2 py-0.5 rounded-md">${escapeHtml(versionTag)}</span>
                 <span class="text-[10px] font-semibold text-outline">${escapeHtml(dateStr)}</span>
@@ -281,10 +380,86 @@ function renderCards(docs, isAppend) {
     });
 }
 
+function refreshCardBookmarkBadges(){
+    const marks = readBookmarks();
+    document.querySelectorAll(".archive-card").forEach(card => {
+        const key = card.dataset.bookmarkKey;
+        const badge = card.querySelector(".archive-bookmark-badge");
+        if(!badge) return;
+        if(marks[key]) badge.classList.remove("hidden");
+        else badge.classList.add("hidden");
+    });
+}
+
+function highlightSearchTermsIn(rootEl, query){
+  if(!rootEl || !query) return;
+  const terms = query.split(/\s+/).filter(t => t && t.length >= 2);
+  if(!terms.length) return;
+  const escaped = terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const re = new RegExp("(" + escaped.join("|") + ")", "gi");
+  const walker = document.createTreeWalker(rootEl, NodeFilter.SHOW_TEXT, {
+    acceptNode(n){
+      if(!n.nodeValue || !n.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+      const p = n.parentElement;
+      if(!p) return NodeFilter.FILTER_REJECT;
+      const tag = p.tagName;
+      if(tag === "SCRIPT" || tag === "STYLE" || tag === "CODE" || tag === "PRE") return NodeFilter.FILTER_REJECT;
+      if(p.closest && p.closest("mark.archive-highlight")) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  const targets = [];
+  let n; while((n = walker.nextNode())) targets.push(n);
+  targets.forEach(node => {
+    if(!re.test(node.nodeValue)) { re.lastIndex = 0; return; }
+    re.lastIndex = 0;
+    const frag = document.createDocumentFragment();
+    const parts = node.nodeValue.split(re);
+    parts.forEach((seg, i) => {
+      if(i % 2 === 1){
+        const mark = document.createElement("mark");
+        mark.className = "archive-highlight";
+        mark.textContent = seg;
+        frag.appendChild(mark);
+      } else if(seg){
+        frag.appendChild(document.createTextNode(seg));
+      }
+    });
+    node.parentNode.replaceChild(frag, node);
+  });
+}
+
+function setViewerToolbarVisible(visible){
+  const bm = document.getElementById("bookmarkBtn");
+  const dl = document.getElementById("downloadMdBtn");
+  [bm, dl].forEach(b => { if(b) b.classList.toggle("hidden", !visible); });
+}
+
+function refreshBookmarkButtonState(){
+  const btn = document.getElementById("bookmarkBtn");
+  if(!btn) return;
+  const key = bookmarkKeyFromDoc(currentViewerDoc);
+  const marks = readBookmarks();
+  const on = !!marks[key];
+  btn.classList.toggle("text-yellow-500", on);
+  btn.classList.toggle("text-secondary", !on);
+  const icon = btn.querySelector(".material-symbols-outlined");
+  if(icon){
+    icon.textContent = on ? "star" : "star_outline";
+    icon.style.fontVariationSettings = on ? "'FILL' 1" : "'FILL' 0";
+  }
+  btn.title = on ? "즐겨찾기 해제" : "즐겨찾기에 추가";
+}
+
 async function openViewer(doc, displayTitle) {
+    currentViewerDoc = doc;
+    currentViewerMarkdown = "";
+    currentViewerTitle = displayTitle || "";
     const titleEl = document.getElementById("viewerTitle");
     if(titleEl) titleEl.innerText = displayTitle;
-    
+    setViewerToolbarVisible(true);
+    refreshBookmarkButtonState();
+
     const contentEl = document.getElementById("viewerContent");
     if(!contentEl) return;
     
@@ -308,16 +483,20 @@ async function openViewer(doc, displayTitle) {
         if (!res.ok) throw new Error("마크다운 파일을 읽어올 수 없습니다.");
         
         const rawMdText = await res.text();
+        currentViewerMarkdown = rawMdText;
         const processedText = preProcessMarkdown(rawMdText);
         const mdNoMeta = stripLeadingMailMetaBlock(processedText);
         const mdWithImgs = injectImagesIntoMarkdown(mdNoMeta, assets);
         contentEl.innerHTML = renderDocumentMarkdown(mdWithImgs);
 
         contentEl.querySelectorAll("img").forEach(img => {
-            if(img.classList.contains("max-w-full")) return; 
+            if(img.classList.contains("max-w-full")) return;
             img.className = "max-w-full h-auto rounded-xl cursor-pointer hover:opacity-90 transition-opacity my-6 shadow-sm border border-outline/10";
             img.onclick = () => showImgPreview(img.src);
         });
+
+        // 검색어 하이라이트
+        if(currentQuery) highlightSearchTermsIn(contentEl, currentQuery);
     } catch (e) {
         contentEl.innerHTML = `<div class="text-error text-center mt-10 font-bold">${escapeHtml(String(e))}</div>`;
     }
@@ -583,11 +762,13 @@ document.addEventListener("DOMContentLoaded", () => {
                         throw new Error(errMsg);
                     }
                     
-                    alert("수정 완료되었습니다.");
+                    (window.Toast ? window.Toast.success("수정 완료되었습니다.") : alert("수정 완료되었습니다."));
                     if(typeof closeTermModal === "function") closeTermModal();
-                    loadDictionaryTerms(); 
+                    loadDictionaryTerms();
                 } catch (err) {
-                    alert("수정 중 오류가 발생했습니다:\n" + err.message);
+                    (window.Toast
+                      ? window.Toast.error(err.message || "수정 중 오류가 발생했습니다.", { title: "수정 실패" })
+                      : alert("수정 중 오류가 발생했습니다:\n" + err.message));
                 }
             }
 
@@ -617,11 +798,15 @@ document.addEventListener("DOMContentLoaded", () => {
                         body: JSON.stringify(payload)
                     });
                     if (!res.ok) throw new Error("제안 실패");
-                    
-                    alert("성공적으로 제안되었습니다. 관리자 승인 후 반영됩니다.");
+
+                    (window.Toast
+                      ? window.Toast.success("관리자 승인 후 반영됩니다.", { title: "제안 등록 완료" })
+                      : alert("성공적으로 제안되었습니다. 관리자 승인 후 반영됩니다."));
                     if(typeof closeTermModal === "function") closeTermModal();
                 } catch (err) {
-                    alert("제안 중 오류가 발생했습니다.");
+                    (window.Toast
+                      ? window.Toast.error("제안 중 오류가 발생했습니다.")
+                      : alert("제안 중 오류가 발생했습니다."));
                 }
             }
         });
@@ -630,14 +815,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // 💡 3. 관리자 전용 삭제 API 호출
 window.deleteTerm = async function(termId) {
-    if (!confirm("정말 이 용어를 삭제하시겠습니까?\n(비활성화되어 검색 엔진에서 즉시 제외됩니다)")) return;
+    const ok = window.Toast
+      ? await window.Toast.confirm(
+          "비활성화되어 검색 엔진에서 즉시 제외됩니다.",
+          { title: "이 용어를 삭제하시겠습니까?", okText: "삭제", destructive: true })
+      : confirm("정말 이 용어를 삭제하시겠습니까?\n(비활성화되어 검색 엔진에서 즉시 제외됩니다)");
+    if (!ok) return;
     try {
         const res = await fetch(`/api/dictionary/terms/${termId}`, { method: 'DELETE' });
         if (!res.ok) throw new Error('삭제 처리 실패');
-        alert("삭제 완료되었습니다.");
-        loadDictionaryTerms(); // 리스트 갱신
+        (window.Toast ? window.Toast.success("삭제 완료되었습니다.") : alert("삭제 완료되었습니다."));
+        loadDictionaryTerms();
     } catch(e) {
-        alert("오류가 발생했습니다: " + e.message);
+        (window.Toast
+          ? window.Toast.error(e.message || "삭제 처리 실패", { title: "오류" })
+          : alert("오류가 발생했습니다: " + e.message));
     }
 }
 

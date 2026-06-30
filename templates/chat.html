@@ -5,12 +5,19 @@
 <aside id="sidebar" class="w-64 bg-surface-container-low border-r border-surface-container flex flex-col h-full shrink-0 relative">
   <div id="sidebarHeader" class="p-4 flex items-center justify-between border-b border-surface-container overflow-hidden">
       <button id="newSession" class="flex-1 py-2 px-4 bg-primary text-on-primary rounded-lg font-headline text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 whitespace-nowrap">
-          <span class="material-symbols-outlined text-sm">add</span> 
+          <span class="material-symbols-outlined text-sm">add</span>
           <span class="sidebar-text">New Inquiry</span>
       </button>
-      <button id="toggleSidebar" class="ml-2 p-2 rounded hover:bg-surface-container text-secondary shrink-0">
+      <button id="toggleSidebar" class="ml-2 p-2 rounded hover:bg-surface-container text-secondary shrink-0" aria-label="사이드바 토글">
           <span class="material-symbols-outlined text-sm">menu_open</span>
       </button>
+  </div>
+  <div id="sessionSearchWrap" class="px-3 pt-3 pb-1 sidebar-text">
+    <div class="relative">
+      <span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-[16px] text-secondary pointer-events-none">search</span>
+      <input id="sessionSearchInput" type="search" placeholder="세션 검색 (Ctrl/⌘ K)"
+             class="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-surface-container-low border border-surface-container focus:border-rag focus:outline-none placeholder:text-secondary/70"/>
+    </div>
   </div>
   <div id="sessionList" class="flex-1 overflow-y-auto scrolled-content py-2 space-y-1"></div>
 </aside>
@@ -21,11 +28,39 @@
     <div id="chatArea" class="flex-1 overflow-y-auto scrolled-content p-6 flex flex-col"></div>
 
     <div class="p-6 bg-white dark:bg-[#0f1a33] border-t border-surface-container dark:border-[#1f2b4a]">
-      <div class="max-w-5xl mx-auto relative flex items-center gap-4">
-          <textarea id="userInput" rows="2" class="flex-1 bg-surface-container-highest border-none rounded-lg p-4 pr-16 text-sm focus:ring-1 focus:ring-primary min-h-[56px] resize-none" placeholder="질문을 입력하세요..."></textarea>
-          <button id="sendBtn" class="w-12 h-12 bg-primary text-on-primary rounded-full flex shrink-0 items-center justify-center hover:opacity-90">
+      <div class="max-w-5xl mx-auto">
+        <div class="composer-toolbar flex items-center gap-2 mb-3 flex-wrap relative">
+          <button id="modeAuto" data-mode="" class="composer-chip is-active" type="button" title="자동 판단 (LLM이 라우팅)">
+            <span class="material-symbols-outlined">auto_awesome</span><span>자동</span>
+          </button>
+          <button id="modeDb" data-mode="[DB_ANALYSIS]" class="composer-chip" type="button" title="DB 통계 강제 호출">
+            <span class="material-symbols-outlined">monitoring</span><span>DB 분석</span>
+          </button>
+          <button id="modeRag" data-mode="[RAG_KNOWLEDGE]" class="composer-chip" type="button" title="문서 검색 강제 호출">
+            <span class="material-symbols-outlined">description</span><span>문서 검색</span>
+          </button>
+          <span class="composer-divider"></span>
+          <button id="indexBtn" class="composer-chip" type="button" aria-haspopup="true" aria-expanded="false">
+            <span class="material-symbols-outlined">database</span>
+            <span id="indexBtnLabel">기본 인덱스</span>
+            <span class="material-symbols-outlined" style="font-size:16px;">arrow_drop_down</span>
+          </button>
+          <div id="indexPopup" class="composer-popup hidden" role="dialog" aria-label="인덱스 선택">
+            <div class="composer-popup-head">검색할 인덱스</div>
+            <div id="indexPopupList" class="composer-popup-list"></div>
+            <div class="composer-popup-foot">
+              <button id="indexResetBtn" class="composer-popup-link" type="button">기본값으로</button>
+              <button id="indexCloseBtn" class="composer-popup-btn" type="button">완료</button>
+            </div>
+          </div>
+        </div>
+        <div class="relative flex items-end gap-4">
+          <div id="inputAidPopup" class="hidden absolute bottom-full left-0 right-16 mb-2 bg-surface border border-outline-variant rounded-xl shadow-card overflow-hidden z-30" style="box-shadow: var(--shadow-card-hover);"></div>
+          <textarea id="userInput" rows="2" class="flex-1 bg-surface-container-highest border-none rounded-lg p-4 pr-16 text-sm focus:ring-1 focus:ring-primary min-h-[56px] resize-none" placeholder="질문을 입력하세요... (Shift+Enter 줄바꿈, / 명령, @ 용어)"></textarea>
+          <button id="sendBtn" class="w-12 h-12 bg-primary text-on-primary rounded-full flex shrink-0 items-center justify-center hover:opacity-90" aria-label="전송">
               <span class="material-symbols-outlined">send</span>
           </button>
+        </div>
       </div>
     </div>
 </main>
@@ -43,7 +78,7 @@
         <div class="panel flex flex-col min-h-[120px]" data-panel="topdocs">
             <div class="p-3 bg-surface-container-low border-b border-surface-container flex items-center justify-between z-10">
                 <div class="text-xs font-bold">Top Documents</div>
-                <button class="panel-max p-1 hover:bg-surface-container rounded" data-target="topdocs">⤢</button>
+                <button class="panel-max p-1 hover:bg-surface-container rounded" data-target="topdocs" aria-label="Top Documents 패널 확대">⤢</button>
             </div>
             <div id="topDocs" class="flex-1 overflow-y-auto p-3 space-y-3"></div>
         </div>
@@ -51,7 +86,7 @@
         <div class="panel flex flex-col flex-1" data-panel="citations">
             <div class="p-3 bg-surface-container-low border-b border-surface-container flex items-center justify-between z-10">
                 <div class="text-xs font-bold">Sentence Citations</div>
-                <button class="panel-max p-1 hover:bg-surface-container rounded" data-target="citations">⤢</button>
+                <button class="panel-max p-1 hover:bg-surface-container rounded" data-target="citations" aria-label="Sentence Citations 패널 확대">⤢</button>
             </div>
             <div id="citations" class="flex-1 overflow-y-auto p-3 space-y-3"></div>
         </div>
@@ -74,10 +109,37 @@
     </div>
 </div>
 <div id="imgPreview" class="img-preview hidden fixed inset-0 z-[4000] bg-black/90 flex items-center justify-center p-8"></div>
+
+<div id="shortcutModal" class="modal hidden fixed inset-0 z-[3500] flex items-center justify-center" aria-hidden="true">
+  <div id="shortcutModalBackdrop" class="absolute inset-0 bg-black/50"></div>
+  <div class="relative w-[min(520px,92vw)] bg-surface border border-outline-variant rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+    <div class="px-5 py-4 border-b border-outline-variant flex items-center justify-between">
+      <h2 class="font-headline font-bold text-base flex items-center gap-2">
+        <span class="material-symbols-outlined text-rag">keyboard</span>
+        키보드 단축키
+      </h2>
+      <button id="shortcutModalClose" class="p-1 rounded hover:bg-surface-container-low text-secondary" aria-label="닫기">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <div class="p-5 grid grid-cols-1 gap-2 text-sm">
+      <div class="shortcut-row"><span>새 세션</span><kbd>Ctrl/⌘</kbd><kbd>N</kbd></div>
+      <div class="shortcut-row"><span>세션 검색 포커스</span><kbd>Ctrl/⌘</kbd><kbd>K</kbd></div>
+      <div class="shortcut-row"><span>사이드바 토글</span><kbd>Ctrl/⌘</kbd><kbd>\</kbd></div>
+      <div class="shortcut-row"><span>응답 중단</span><kbd>Esc</kbd></div>
+      <div class="shortcut-row"><span>도움말</span><kbd>Ctrl/⌘</kbd><kbd>/</kbd></div>
+      <div class="shortcut-row"><span>전송 / 줄바꿈</span><kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd></div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<script>window.__BOOT__ = { defaultIndex: "{{ default_index }}" };</script>
+<script>window.__BOOT__ = {
+  defaultIndex: "{{ default_index }}",
+  indexOptions: {{ index_options | tojson }},
+  defaultTopK: {{ default_top_k | default(5) }}
+};</script>
 <script src="{{ url_for('static', path='/js/chat.js') }}"></script>
 {% endblock %} 

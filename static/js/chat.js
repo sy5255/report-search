@@ -6,6 +6,10 @@ let currentEvidenceAssistantMsgId = null;
 // 최근 로드된 evidence 데이터 (topdocs/citations)
 let lastTopDocs = [];
 let lastCitations = null;
+let activeStreamController = null;
+let isSending = false;
+let forcedMode = "";                 // "", "[DB_ANALYSIS]", "[RAG_KNOWLEDGE]"
+let selectedIndexNames = null;       // null = default, otherwise array of index names
 
 // UI에서 보여줄 topdocs 개수
 let topDocsShowN = 5;
@@ -30,21 +34,41 @@ function toggleEvidencePanel(hasDocs) {
   }
 }
 
-async function apiGet(url){
-  const r = await fetch(url, {credentials:"include"});
-  if(!r.ok) throw new Error(await r.text());
+async function _apiFetch(method, url, body){
+  let r;
+  try {
+    r = await fetch(url, {
+      method,
+      headers: body ? {"Content-Type":"application/json"} : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      credentials:"include"
+    });
+  } catch(networkErr){
+    if(window.Toast) window.Toast.error("네트워크 연결을 확인해주세요.", { title: "연결 실패" });
+    throw networkErr;
+  }
+  if(r.status === 401){
+    if(window.Toast) window.Toast.warn("로그인이 만료되었습니다. 다시 로그인합니다.");
+    setTimeout(() => { window.location.href = "/"; }, 800);
+    throw new Error("Unauthorized");
+  }
+  if(r.status === 403){
+    if(window.Toast) window.Toast.error("권한이 없습니다.");
+    throw new Error("Forbidden");
+  }
+  if(!r.ok){
+    let detail = "";
+    try { detail = await r.text(); } catch(_) {}
+    if(r.status >= 500 && window.Toast){
+      window.Toast.error(detail.slice(0, 200) || "서버 오류가 발생했습니다.", { title: `오류 ${r.status}` });
+    }
+    throw new Error(detail || `HTTP ${r.status}`);
+  }
   return await r.json();
 }
-async function apiPost(url, body){
-  const r = await fetch(url, {
-    method:"POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify(body),
-    credentials:"include"
-  });
-  if(!r.ok) throw new Error(await r.text());
-  return await r.json();
-}
+async function apiGet(url){   return _apiFetch("GET", url, null); }
+async function apiPost(url, body){ return _apiFetch("POST", url, body || {}); }
+async function apiPatch(url, body){ return _apiFetch("PATCH", url, body || {}); }
 
 function escapeHtml(s){
   return (s||"").replace(/[&<>"']/g, (m)=>({
@@ -299,6 +323,67 @@ function enhanceRenderedMessage(scope){
   const contentNodes = scope.querySelectorAll(".content.markdown-body");
   contentNodes.forEach(node => {
     autoLinkPlainUrls(node);
+    addCodeCopyButtons(node);
+  });
+  attachCitationHovers(scope);
+}
+
+/* ---------- citation pill hover preview ---------- */
+function attachCitationHovers(scope){
+  if(!scope) return;
+  if(!attachCitationHovers._tip){
+    const tip = document.createElement("div");
+    tip.className = "citation-tooltip";
+    tip.setAttribute("role", "tooltip");
+    document.body.appendChild(tip);
+    attachCitationHovers._tip = tip;
+  }
+  const tip = attachCitationHovers._tip;
+  scope.querySelectorAll(".citation-pill").forEach(pill => {
+    if(pill.dataset.hoverBound === "1") return;
+    pill.dataset.hoverBound = "1";
+
+    pill.addEventListener("mouseenter", () => {
+      const idx = parseInt(pill.textContent.trim(), 10);
+      if(!idx) return;
+      const ans = (lastCitations && Array.isArray(lastCitations.answer)) ? lastCitations.answer : [];
+      const item = ans[idx - 1];
+      let quote = "";
+      let docHint = "";
+      if(item){
+        quote = (item.quote || item.cited_quote || item.sentence || item.text || "").toString();
+        docHint = (item.doc_id || item.title || "").toString();
+      }
+      if(!quote){
+        const td = Array.isArray(lastTopDocs) ? lastTopDocs[idx - 1] : null;
+        if(td){
+          quote = td.title || td.snippet || "(인용 문장이 없습니다)";
+          docHint = td.doc_id || td.index || "";
+        } else {
+          quote = "(인용 문장을 찾을 수 없습니다)";
+        }
+      }
+      tip.innerHTML = `
+        <span class="ct-label">인용 [${idx}]</span>
+        <div class="ct-quote">${escapeHtml(quote.length > 280 ? quote.slice(0, 280) + "…" : quote)}</div>
+        ${docHint ? `<span class="ct-doc">${escapeHtml(docHint)}</span>` : ""}
+      `;
+      // Position above the pill (or below if near top)
+      const rect = pill.getBoundingClientRect();
+      tip.style.visibility = "hidden";
+      tip.classList.add("is-visible");
+      const tipRect = tip.getBoundingClientRect();
+      let top = rect.top - tipRect.height - 10;
+      if (top < 8) top = rect.bottom + 10;
+      let left = rect.left + rect.width / 2 - tipRect.width / 2;
+      left = Math.max(8, Math.min(left, window.innerWidth - tipRect.width - 8));
+      tip.style.top = `${top}px`;
+      tip.style.left = `${left}px`;
+      tip.style.visibility = "";
+    });
+    pill.addEventListener("mouseleave", () => {
+      tip.classList.remove("is-visible");
+    });
   });
 }
 
@@ -565,9 +650,36 @@ function injectImagesIntoMarkdown(mdText, assets){
 }
 
 /* ---------- sessions ---------- */
+function showSessionListSkeleton(){
+  const box = el("sessionList");
+  if(!box) return;
+  let html = "";
+  for(let i = 0; i < 5; i++){
+    html += `
+      <div class="session-card flex flex-col gap-2 p-3 mx-2 mb-2 rounded-xl border border-surface-container bg-surface-container-low">
+        <div class="skeleton" style="height:10px; width:${60 + Math.random()*30}%;"></div>
+        <div class="skeleton" style="height:8px; width:${30 + Math.random()*20}%;"></div>
+      </div>`;
+  }
+  box.innerHTML = html;
+}
+
 async function refreshSessions(){
-  const data = await apiGet("/api/sessions");
-  renderSessions(data.sessions || []);
+  const box = el("sessionList");
+  if(box && !box.children.length) showSessionListSkeleton();
+  try {
+    const data = await apiGet("/api/sessions");
+    renderSessions(data.sessions || []);
+    applySessionFilter();
+  } catch(err){
+    if(box) box.innerHTML = `
+      <div class="p-4 mx-2 mb-2 rounded-xl border border-error/30 bg-error/5 text-error text-xs">
+        세션을 불러오지 못했습니다.
+        <button type="button" id="sessionListRetry" class="ml-2 underline font-bold">다시 시도</button>
+      </div>`;
+    const retry = el("sessionListRetry");
+    if(retry) retry.addEventListener("click", refreshSessions);
+  }
 }
 
 function renderSessions(sessions){
@@ -575,12 +687,23 @@ function renderSessions(sessions){
   box.innerHTML = "";
   sessions.forEach(s => {
     const div = document.createElement("div");
-    // transition-all 제거
     div.className = "session-card group flex flex-col gap-1 p-3 mx-2 mb-2 rounded-xl bg-surface-container-low hover:bg-surface-container border border-surface-container cursor-pointer";
+    div.dataset.sessionId = s.session_id;
+    div.dataset.title = (s.title || "").toLowerCase();
+    if(s.session_id === currentSessionId) div.classList.add("is-active");
     div.innerHTML = `
       <div class="flex items-center justify-between gap-2 overflow-hidden">
-        <div class="session-title text-xs font-bold text-on-surface truncate flex-1">${escapeHtml(s.title || "Untitled")}</div>
-        <button class="session-delete-btn icon-btn danger opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-error/10 text-error shrink-0" title="Delete">
+        <div class="session-title text-xs font-bold text-on-surface truncate flex-1" title="더블클릭으로 이름 변경">${escapeHtml(s.title || "Untitled")}</div>
+        <button class="session-pin-btn icon-btn p-1 rounded hover:bg-surface-container-high shrink-0 ${s.pinned ? '' : 'opacity-0 group-hover:opacity-100'} ${s.pinned ? 'text-rag-strong' : 'text-secondary'}" title="${s.pinned ? '핀 해제' : '핀'}" aria-label="${s.pinned ? '핀 해제' : '핀'}">
+          <span class="material-symbols-outlined text-[14px]">${s.pinned ? 'push_pin' : 'keep'}</span>
+        </button>
+        <button class="session-rename-btn icon-btn opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-surface-container-high text-secondary shrink-0" title="이름 변경" aria-label="이름 변경">
+          <span class="material-symbols-outlined text-[14px]">edit</span>
+        </button>
+        <button class="session-export-btn icon-btn opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-surface-container-high text-secondary shrink-0" title="Markdown 내보내기" aria-label="Markdown 내보내기">
+          <span class="material-symbols-outlined text-[14px]">download</span>
+        </button>
+        <button class="session-delete-btn icon-btn danger opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-error/10 text-error shrink-0" title="Delete" aria-label="삭제">
           <span class="material-symbols-outlined text-[14px]">delete</span>
         </button>
       </div>
@@ -589,14 +712,61 @@ function renderSessions(sessions){
 
     div.addEventListener("click", (ev) => {
       if(ev.target && ev.target.closest("button")) return;
+      if(div.dataset.renaming === "1") return;
       loadSession(s.session_id);
     });
 
-    const deleteBtn = div.querySelector("button");
+    const titleEl = div.querySelector(".session-title");
+    if(titleEl){
+      titleEl.addEventListener("dblclick", (ev) => {
+        ev.stopPropagation();
+        enterSessionRenameMode(div, s);
+      });
+    }
+    const renameBtn = div.querySelector(".session-rename-btn");
+    if(renameBtn){
+      renameBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        enterSessionRenameMode(div, s);
+      });
+    }
+
+    const exportBtn = div.querySelector(".session-export-btn");
+    if(exportBtn){
+      exportBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        const url = `/api/sessions/${encodeURIComponent(s.session_id)}/export?fmt=md`;
+        const a = document.createElement("a");
+        a.href = url;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      });
+    }
+
+    const pinBtn = div.querySelector(".session-pin-btn");
+    if(pinBtn){
+      pinBtn.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        try {
+          const res = await apiPost(`/api/sessions/${encodeURIComponent(s.session_id)}/pin`, { pinned: !s.pinned });
+          s.pinned = !!(res && res.pinned);
+          await refreshSessions();
+        } catch(err){
+          if(window.Toast) window.Toast.error("핀 처리에 실패했습니다.");
+        }
+      });
+    }
+
+    const deleteBtn = div.querySelector(".session-delete-btn");
     if(deleteBtn) {
       deleteBtn.addEventListener("click", async (ev) => {
-        ev.stopPropagation(); 
-        if(!confirm("이 대화를 목록에서 제거할까요?")) return;
+        ev.stopPropagation();
+        const ok = window.Toast
+          ? await window.Toast.confirm("이 대화를 목록에서 제거할까요?", { okText: "제거", destructive: true })
+          : confirm("이 대화를 목록에서 제거할까요?");
+        if(!ok) return;
         await apiPost(`/api/sessions/${encodeURIComponent(s.session_id)}/archive`, {});
         if(currentSessionId === s.session_id){
           currentSessionId = null;
@@ -611,8 +781,215 @@ function renderSessions(sessions){
   });
 }
 
+/* ---------- session rename + sidebar search ---------- */
+function rebindSessionTitle(card, session){
+  const oldTitleEl = card.querySelector(".session-title");
+  if(!oldTitleEl) return;
+  const fresh = oldTitleEl.cloneNode(true);
+  oldTitleEl.replaceWith(fresh);
+  fresh.addEventListener("dblclick", (ev) => {
+    ev.stopPropagation();
+    enterSessionRenameMode(card, session);
+  });
+}
+
+function enterSessionRenameMode(card, session){
+  if(!card || card.dataset.renaming === "1") return;
+  const titleEl = card.querySelector(".session-title");
+  if(!titleEl) return;
+  card.dataset.renaming = "1";
+
+  const oldText = (session && session.title) || titleEl.textContent || "";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = oldText;
+  input.className = "session-title-edit text-xs font-bold text-on-surface bg-transparent border-b border-rag flex-1 outline-none px-1";
+  input.maxLength = 255;
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let finished = false;
+  const restore = (newText) => {
+    if(finished) return;
+    finished = true;
+    card.dataset.renaming = "0";
+    const replacement = document.createElement("div");
+    replacement.className = "session-title text-xs font-bold text-on-surface truncate flex-1";
+    replacement.setAttribute("title", "더블클릭으로 이름 변경");
+    replacement.textContent = newText;
+    input.replaceWith(replacement);
+    replacement.addEventListener("dblclick", (ev) => {
+      ev.stopPropagation();
+      enterSessionRenameMode(card, session);
+    });
+    card.dataset.title = (newText || "").toLowerCase();
+    applySessionFilter();
+  };
+
+  const commit = async () => {
+    const newTitle = (input.value || "").trim();
+    if(!newTitle || newTitle === oldText){
+      restore(oldText);
+      return;
+    }
+    try{
+      await apiPatch(`/api/sessions/${encodeURIComponent(session.session_id)}`, { title: newTitle });
+      if(session) session.title = newTitle;
+      restore(newTitle);
+      if(window.Toast) window.Toast.success("세션 이름을 변경했습니다.");
+    } catch(err){
+      restore(oldText);
+      if(window.Toast) window.Toast.error("이름 변경에 실패했습니다.");
+    }
+  };
+
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if(e.key === "Enter"){ e.preventDefault(); commit(); }
+    else if(e.key === "Escape"){ e.preventDefault(); restore(oldText); }
+  });
+  input.addEventListener("blur", commit);
+  input.addEventListener("click", (e) => e.stopPropagation());
+}
+
+function applySessionFilter(){
+  const input = el("sessionSearchInput");
+  const q = (input && input.value || "").trim().toLowerCase();
+  const cards = document.querySelectorAll("#sessionList .session-card");
+  cards.forEach(card => {
+    const title = card.dataset.title || "";
+    card.style.display = (!q || title.includes(q)) ? "" : "none";
+  });
+}
+
+/* ---------- assistant message action bar ---------- */
+function wireMessageActionBar(scope, assistantMsgId){
+  if(!scope || !assistantMsgId) return;
+  const bar = scope.querySelector(".msg-action-bar");
+  if(!bar || bar.dataset.bound === "1") return;
+  bar.dataset.bound = "1";
+
+  bar.querySelectorAll(".msg-action-btn").forEach(btn => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const act = btn.getAttribute("data-action");
+      if(act === "copy"){
+        const raw = scope.dataset.rawMarkdown || (scope.querySelector(".content")?.innerText || "");
+        try{
+          await navigator.clipboard.writeText(raw);
+          btn.classList.add("is-copied");
+          const label = btn.querySelector("span:not(.material-symbols-outlined)");
+          const prev = label ? label.textContent : null;
+          if(label) label.textContent = "복사됨";
+          if(window.Toast) window.Toast.success("응답을 복사했습니다.");
+          setTimeout(() => {
+            btn.classList.remove("is-copied");
+            if(label && prev !== null) label.textContent = prev;
+          }, 1500);
+        } catch(err){
+          if(window.Toast) window.Toast.error("복사에 실패했습니다.");
+        }
+        return;
+      }
+      if(act === "regen"){
+        let node = scope.previousElementSibling;
+        let userText = "";
+        while(node){
+          if(node.classList && node.classList.contains("user")){
+            const c = node.querySelector(".content");
+            userText = c ? (c.innerText || c.textContent || "") : "";
+            break;
+          }
+          node = node.previousElementSibling;
+        }
+        userText = userText.trim();
+        if(!userText){
+          if(window.Toast) window.Toast.warn("재생성할 질문을 찾지 못했습니다.");
+          return;
+        }
+        const input = el("userInput");
+        if(input){ input.value = userText; autosizeInput(); }
+        sendMessage();
+        return;
+      }
+      if(act === "up" || act === "down"){
+        try{
+          const res = await apiPost("/api/feedback", {
+            assistant_msg_id: assistantMsgId,
+            rating: act,
+            session_id: currentSessionId || null
+          });
+          const newRating = res && res.rating;
+          bar.querySelectorAll(".msg-action-btn[data-action='up'],.msg-action-btn[data-action='down']").forEach(b => {
+            const a = b.getAttribute("data-action");
+            if(a === newRating) b.classList.add("is-active");
+            else b.classList.remove("is-active");
+          });
+          if(window.Toast){
+            if(newRating === "up") window.Toast.success("좋은 응답으로 기록했습니다.");
+            else if(newRating === "down") window.Toast.info("개선이 필요한 응답으로 기록했습니다.");
+            else window.Toast.info("피드백을 취소했습니다.");
+          }
+        } catch(err){
+          if(window.Toast) window.Toast.error("피드백 저장에 실패했습니다.");
+        }
+        return;
+      }
+    });
+  });
+}
+
+/* ---------- welcome / empty state ---------- */
+function renderWelcomeScreen(){
+  const chat = el("chatArea");
+  if(!chat) return;
+
+  const suggestions = [
+    { icon: "monitoring",   text: "최근 3개월 동안 가장 많이 발생한 불량명 순위 5개",          hint: "DB 통계" },
+    { icon: "description",  text: "Wet Etch 공정에서 파티클 불량의 주요 원인과 가이드를 찾아줘", hint: "문서 검색" },
+    { icon: "auto_awesome", text: "어제 등록된 IFA 보고서 중 양산 관련된 내용을 요약해줘",      hint: "하이브리드" }
+  ];
+
+  const chipsHtml = suggestions.map(s => `
+    <button class="welcome-chip" data-suggestion="${escapeHtml(s.text)}" type="button" title="${escapeHtml(s.hint)}">
+      <span class="material-symbols-outlined">${s.icon}</span>
+      <span>${escapeHtml(s.text)}</span>
+    </button>
+  `).join("");
+
+  chat.innerHTML = `
+    <div class="welcome-screen">
+      <img src="/static/images/empty-chat.svg" alt=""/>
+      <h2>무엇을 분석해드릴까요?</h2>
+      <p>사내 보고서와 불량 통계 DB를 함께 활용해<br/>원인 파악 · 근거 인용 · 다음 액션 제안까지 한 번에 도와드립니다.</p>
+      <div class="welcome-chips">${chipsHtml}</div>
+    </div>
+  `;
+
+  chat.querySelectorAll(".welcome-chip").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const text = btn.getAttribute("data-suggestion") || "";
+      const input = el("userInput");
+      if(input){
+        input.value = text;
+        input.focus();
+        input.dispatchEvent(new Event("input"));
+      }
+    });
+  });
+}
+
+function markActiveSessionCard(sessionId){
+  document.querySelectorAll("#sessionList .session-card").forEach(card => {
+    if(card.dataset.sessionId === sessionId) card.classList.add("is-active");
+    else card.classList.remove("is-active");
+  });
+}
+
 async function loadSession(sessionId){
   currentSessionId = sessionId;
+  markActiveSessionCard(sessionId);
   el("chatArea").innerHTML = "";
 
   const data = await apiGet(`/api/sessions/${encodeURIComponent(sessionId)}`);
@@ -631,11 +1008,13 @@ async function loadSession(sessionId){
     }
     // 어시스턴트(LLM)의 과거 메시지일 경우 인텐트/액션 데이터 복구
     else if (m.role === "assistant") {
-      if (m.intent || (m.suggested_actions && m.suggested_actions.length > 0)) {
+      if (m.intent || (m.suggested_actions && m.suggested_actions.length > 0) || m.feedback) {
         extra = {
           intent: m.intent,
           suggested_actions: m.suggested_actions,
-          agent_steps: m.agent_steps
+          agent_steps: m.agent_steps,
+          feedback: m.feedback || null,
+          raw_markdown: m.content
         };
       }
     }
@@ -663,8 +1042,10 @@ async function loadSession(sessionId){
 
 function newSession(){
   currentSessionId = null;
+  markActiveSessionCard(null);
   el("chatArea").innerHTML = "";
   clearEvidencePanels();
+  if (typeof renderWelcomeScreen === "function") renderWelcomeScreen();
 
   // 완전히 새로운 대화를 시작할 때만 패널 닫기.
   if (typeof toggleEvidencePanel === "function") {
@@ -689,6 +1070,9 @@ function setSelectedAssistantMsg(msgId){
 /* ---------- chat messages ---------- */
 function appendMessage(role, content, metaText, msgId, extra = null){
   const chat = el("chatArea");
+  // First real message clears the welcome screen
+  const welcome = chat.querySelector(".welcome-screen");
+  if(welcome) welcome.remove();
   const div = document.createElement("div");
   
   div.className = role === "user" 
@@ -696,6 +1080,7 @@ function appendMessage(role, content, metaText, msgId, extra = null){
     : "msg assistant flex justify-start mb-8 w-full";
   
   if(msgId) div.dataset.msgId = msgId;
+  if(role === "assistant" && extra && extra.intent) div.dataset.intent = extra.intent;
 
   let extraHtml = "";
   let intentHtml = "";
@@ -712,20 +1097,17 @@ function appendMessage(role, content, metaText, msgId, extra = null){
     let agentColor = "text-secondary dark:text-[#94a3b8]";
 
     if(extra.intent) {
-      if(extra.intent === "DB_ANALYSIS") { agentName = "DB Stats Agent"; agentIcon = "monitoring"; agentColor = "text-primary dark:text-[#60a5fa]"; }
-      else if(extra.intent === "RAG_KNOWLEDGE") { agentName = "Document Search Agent"; agentIcon = "description"; agentColor = "text-primary dark:text-[#60a5fa]"; }
-      else if(extra.intent === "HYBRID_DB_RAG") { agentName = "Hybrid Analysis Agent"; agentIcon = "sync"; agentColor = "text-[#b45309] dark:text-[#fbbf24]"; }
-      
+      let badgeClass = "is-default";
+      if(extra.intent === "DB_ANALYSIS")        { agentName = "DB Stats Agent";        agentIcon = "monitoring";    badgeClass = "is-db"; }
+      else if(extra.intent === "RAG_KNOWLEDGE") { agentName = "Document Search Agent"; agentIcon = "description";   badgeClass = "is-rag"; }
+      else if(extra.intent === "HYBRID_DB_RAG") { agentName = "Hybrid Analysis Agent"; agentIcon = "auto_awesome";  badgeClass = "is-hybrid"; }
+
       intentHtml = `
-        <div class="flex items-center gap-3 mb-4">
-            <div class="w-8 h-8 rounded bg-surface-container-high dark:bg-[#1f2b4a] flex items-center justify-center">
-                <span class="material-symbols-outlined ${agentColor} text-sm">${agentIcon}</span>
-            </div>
-            <div>
-                <span class="text-xs font-bold font-headline ${agentColor}">${agentName}</span>
-                <span class="mx-2 text-[10px] text-outline-variant dark:text-[#475569]">•</span>
-                <span class="text-[10px] text-outline-variant dark:text-[#475569]">${escapeHtml(formatTimeForUI(metaText))}</span>
-            </div>
+        <div class="agent-badge ${badgeClass} mb-4">
+          <span class="agent-badge-icon"><span class="material-symbols-outlined">${agentIcon}</span></span>
+          <span class="agent-badge-name">${escapeHtml(agentName)}</span>
+          <span class="agent-badge-divider">·</span>
+          <span class="agent-badge-time">${escapeHtml(formatTimeForUI(metaText))}</span>
         </div>`;
     }
 
@@ -786,6 +1168,30 @@ function appendMessage(role, content, metaText, msgId, extra = null){
       `;
     }
 
+    // ─── 액션바 (응답 복사 + 👍/👎) ──────────────────────────────
+    const isPending = typeof msgId === "string" && msgId.startsWith("PENDING_");
+    let actionBarHtml = "";
+    if(msgId && !isPending){
+      const fb = extra.feedback || null;
+      actionBarHtml = `
+        <div class="msg-action-bar" data-msg-id="${escapeHtml(msgId)}">
+          <button class="msg-action-btn" data-action="copy" type="button" aria-label="응답 복사" title="응답 복사">
+            <span class="material-symbols-outlined">content_copy</span>
+            <span>복사</span>
+          </button>
+          <button class="msg-action-btn" data-action="regen" type="button" aria-label="재생성" title="동일 질문으로 재생성">
+            <span class="material-symbols-outlined">refresh</span>
+            <span>재생성</span>
+          </button>
+          <button class="msg-action-btn ${fb === 'up' ? 'is-active' : ''}" data-action="up" type="button" aria-label="좋아요" title="좋아요">
+            <span class="material-symbols-outlined">thumb_up</span>
+          </button>
+          <button class="msg-action-btn ${fb === 'down' ? 'is-active' : ''}" data-action="down" type="button" aria-label="별로예요" title="별로예요">
+            <span class="material-symbols-outlined">thumb_down</span>
+          </button>
+        </div>`;
+    }
+
     if(extra.suggested_actions && extra.suggested_actions.length > 0) {
       const chips = extra.suggested_actions.map(chip => {
         if (chip.disabled) return `<button class="px-4 py-2 bg-surface-container dark:bg-[#1f2b4a] text-outline dark:text-[#94a3b8] rounded-full text-[11px] font-semibold flex items-center gap-2 cursor-not-allowed opacity-60" disabled><span class="material-symbols-outlined text-sm">block</span> ${escapeHtml(chip.label)}</button>`;
@@ -797,13 +1203,32 @@ function appendMessage(role, content, metaText, msgId, extra = null){
 
   if (role === "user") {
     div.innerHTML = `
-      <div class="max-w-[85%] flex flex-col items-end">
-        <div class="user-bubble-inner bg-primary text-on-primary p-4 rounded-2xl rounded-tr-none shadow-sm flex flex-col gap-3 w-full">
+      <div class="max-w-[85%] flex flex-col items-end group/user">
+        <div class="user-bubble-inner bg-primary text-on-primary p-4 rounded-2xl rounded-tr-none shadow-sm flex flex-col gap-3 w-full relative">
+          <button class="user-edit-btn opacity-0 group-hover/user:opacity-100 absolute -top-2 -left-2 w-7 h-7 rounded-full bg-surface border border-outline-variant text-secondary hover:text-on-surface hover:border-rag shadow-sm flex items-center justify-center transition-all" type="button" title="이 질문 편집 / 재전송" aria-label="이 질문 편집">
+            <span class="material-symbols-outlined" style="font-size:14px;">edit</span>
+          </button>
           <div class="content text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(content)}</div>
           ${extraHtml}
         </div>
         <div class="text-[10px] text-outline-variant dark:text-[#94a3b8] mt-1">${escapeHtml(formatTimeForUI(metaText))}</div>
       </div>`;
+    const editBtn = div.querySelector(".user-edit-btn");
+    if(editBtn){
+      editBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const contentEl = div.querySelector(".content");
+        const text = contentEl ? (contentEl.innerText || contentEl.textContent || "") : "";
+        const input = el("userInput");
+        if(input){
+          input.value = text.trim();
+          autosizeInput();
+          input.focus();
+          input.setSelectionRange(input.value.length, input.value.length);
+          input.scrollIntoView({ behavior: "smooth", block: "end" });
+        }
+      });
+    }
   } else {
     div.innerHTML = `
       <div class="assistant-card w-full max-w-[90%] bg-white dark:bg-[#0f1a33] border border-surface-container dark:border-[#1f2b4a] rounded-2xl p-6 hover:shadow-md cursor-pointer group/ai-card">
@@ -813,9 +1238,14 @@ function appendMessage(role, content, metaText, msgId, extra = null){
             <div class="content markdown-body text-sm leading-relaxed text-on-surface dark:text-[#e7eefc]">
                 ${renderMessageContent(role, content)}
             </div>
+            ${actionBarHtml}
             ${chipsHtml}
         </div>
       </div>`;
+    if(msgId && !isPending){
+      const rawContent = (extra && extra.raw_markdown) ? extra.raw_markdown : content;
+      div.dataset.rawMarkdown = rawContent;
+    }
   }
 
   if(role === "assistant" && extra && extra.suggested_actions) {
@@ -837,6 +1267,10 @@ function appendMessage(role, content, metaText, msgId, extra = null){
       });
     });
   } 
+
+  if(role === "assistant" && msgId && !isPending){
+    wireMessageActionBar(div, msgId);
+  }
 
   if(role === "assistant" && msgId){
     div.addEventListener("click", async (e)=>{
@@ -1077,7 +1511,9 @@ function openDocFromCitation(docId, chunkId, quote){
   let d = (lastTopDocs || []).find(x => x.doc_id === docId && (x.chunk_id === chunkId));
   if(!d) d = (lastTopDocs || []).find(x => x.doc_id === docId);
   if(!d){
-    alert("현재 TopDocs에 없는 문서입니다. (다음 개선: doc_id로 재조회)");
+    (window.Toast
+      ? window.Toast.warn("현재 Top Docs에 없는 문서입니다.", { title: "원본 조회 불가" })
+      : alert("현재 TopDocs에 없는 문서입니다."));
     return;
   }
   openDocModal(d, quote);
@@ -1396,9 +1832,334 @@ function hideImgPreview(){
 }
 
 /* ---------- send message (sendMessage) ---------- */
+function setSendButtonState(state){
+  const btn = el("sendBtn");
+  if(!btn) return;
+  const icon = btn.querySelector(".material-symbols-outlined");
+  if(state === "sending"){
+    btn.classList.add("is-stop");
+    btn.disabled = false;
+    btn.setAttribute("aria-label", "응답 중단");
+    btn.title = "응답 중단";
+    if(icon) icon.textContent = "stop";
+  } else {
+    btn.classList.remove("is-stop");
+    btn.disabled = false;
+    btn.setAttribute("aria-label", "전송");
+    btn.title = "전송 (Enter)";
+    if(icon) icon.textContent = "send";
+  }
+}
+
+function abortActiveStream(){
+  if(activeStreamController){
+    try { activeStreamController.abort(); } catch(_){}
+    activeStreamController = null;
+  }
+}
+
+/* ---------- composer toolbar (intent mode + index multiselect) ---------- */
+const LS_MODE = "rs_forced_mode";
+const LS_INDEXES = "rs_selected_indexes";
+
+function loadComposerState(){
+  try {
+    const m = localStorage.getItem(LS_MODE);
+    if(m === "[DB_ANALYSIS]" || m === "[RAG_KNOWLEDGE]" || m === "") forcedMode = m;
+  } catch(_) {}
+  try {
+    const raw = localStorage.getItem(LS_INDEXES);
+    if(raw){
+      const arr = JSON.parse(raw);
+      if(Array.isArray(arr) && arr.length > 0) selectedIndexNames = arr;
+    }
+  } catch(_) {}
+}
+
+function persistMode(){
+  try { localStorage.setItem(LS_MODE, forcedMode || ""); } catch(_) {}
+}
+function persistIndexes(){
+  try {
+    if(selectedIndexNames && selectedIndexNames.length > 0){
+      localStorage.setItem(LS_INDEXES, JSON.stringify(selectedIndexNames));
+    } else {
+      localStorage.removeItem(LS_INDEXES);
+    }
+  } catch(_) {}
+}
+
+function getEffectiveIndexNames(){
+  if(selectedIndexNames && selectedIndexNames.length > 0) return selectedIndexNames;
+  try {
+    const userDefault = localStorage.getItem("rs_default_index");
+    if(userDefault) return [userDefault];
+  } catch(_) {}
+  const d = window.__BOOT__ && window.__BOOT__.defaultIndex;
+  return d ? [d] : [];
+}
+
+function updateModeChips(){
+  const map = { "": "modeAuto", "[DB_ANALYSIS]": "modeDb", "[RAG_KNOWLEDGE]": "modeRag" };
+  ["modeAuto","modeDb","modeRag"].forEach(id => {
+    const btn = el(id);
+    if(!btn) return;
+    btn.classList.toggle("is-active", map[forcedMode] === id);
+  });
+}
+
+function updateIndexLabel(){
+  const lbl = el("indexBtnLabel");
+  if(!lbl) return;
+  const defaultIdx = window.__BOOT__ && window.__BOOT__.defaultIndex;
+  if(!selectedIndexNames || selectedIndexNames.length === 0){
+    lbl.textContent = defaultIdx || "인덱스";
+  } else if(selectedIndexNames.length === 1){
+    lbl.textContent = selectedIndexNames[0];
+  } else {
+    lbl.textContent = `${selectedIndexNames[0]} 외 ${selectedIndexNames.length - 1}개`;
+  }
+}
+
+function renderIndexPopupList(){
+  const host = el("indexPopupList");
+  if(!host) return;
+  const opts = (window.__BOOT__ && window.__BOOT__.indexOptions) || [];
+  const defaultIdx = window.__BOOT__ && window.__BOOT__.defaultIndex;
+  if(!opts.length){
+    host.innerHTML = `<div class="composer-popup-row" style="opacity:0.6">사용 가능한 인덱스가 없습니다</div>`;
+    return;
+  }
+  const set = new Set(selectedIndexNames || []);
+  host.innerHTML = opts.map(name => `
+    <label class="composer-popup-row">
+      <input type="checkbox" data-idx="${escapeHtml(name)}" ${set.has(name) ? "checked" : ""}/>
+      <span class="row-name">${escapeHtml(name)}</span>
+      ${name === defaultIdx ? `<span class="row-default">default</span>` : ""}
+    </label>
+  `).join("");
+  host.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener("change", () => {
+      const checked = Array.from(host.querySelectorAll('input[type="checkbox"]:checked'))
+        .map(x => x.getAttribute("data-idx"));
+      selectedIndexNames = checked.length ? checked : null;
+      persistIndexes();
+      updateIndexLabel();
+    });
+  });
+}
+
+function openIndexPopup(){
+  const p = el("indexPopup");
+  if(!p) return;
+  renderIndexPopupList();
+  p.classList.remove("hidden");
+  const btn = el("indexBtn"); if(btn) btn.setAttribute("aria-expanded","true");
+  setTimeout(() => document.addEventListener("click", outsideIndexPopupHandler, true), 0);
+}
+function closeIndexPopup(){
+  const p = el("indexPopup");
+  if(!p) return;
+  p.classList.add("hidden");
+  const btn = el("indexBtn"); if(btn) btn.setAttribute("aria-expanded","false");
+  document.removeEventListener("click", outsideIndexPopupHandler, true);
+}
+function outsideIndexPopupHandler(e){
+  const p = el("indexPopup");
+  const btn = el("indexBtn");
+  if(!p || p.classList.contains("hidden")) return;
+  if(p.contains(e.target) || (btn && btn.contains(e.target))) return;
+  closeIndexPopup();
+}
+
+function setupComposerToolbar(){
+  loadComposerState();
+  updateModeChips();
+  updateIndexLabel();
+
+  [["modeAuto",""], ["modeDb","[DB_ANALYSIS]"], ["modeRag","[RAG_KNOWLEDGE]"]].forEach(([id, mode]) => {
+    const btn = el(id);
+    if(!btn) return;
+    btn.addEventListener("click", () => {
+      forcedMode = (forcedMode === mode && mode !== "") ? "" : mode;
+      persistMode();
+      updateModeChips();
+    });
+  });
+  const indexBtn = el("indexBtn");
+  if(indexBtn){
+    indexBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const p = el("indexPopup");
+      if(p && p.classList.contains("hidden")) openIndexPopup();
+      else closeIndexPopup();
+    });
+  }
+  const closeBtn = el("indexCloseBtn");
+  if(closeBtn) closeBtn.addEventListener("click", closeIndexPopup);
+  const resetBtn = el("indexResetBtn");
+  if(resetBtn) resetBtn.addEventListener("click", () => {
+    selectedIndexNames = null;
+    persistIndexes();
+    renderIndexPopupList();
+    updateIndexLabel();
+  });
+}
+
+/* ---------- input aids: slash / @ / ↑ history ---------- */
+const SLASH_COMMANDS = [
+  { cmd: "/help",  label: "도움말", desc: "키보드 단축키 모달 열기",     icon: "help" },
+  { cmd: "/clear", label: "지우기", desc: "현재 채팅 화면 비우기 (세션 유지)", icon: "delete_sweep" },
+  { cmd: "/new",   label: "새 세션", desc: "새 대화 시작",                icon: "add_circle" },
+];
+
+let _dictTermsCache = null;
+let _dictTermsFetching = null;
+function loadDictTerms(){
+  if(_dictTermsCache) return Promise.resolve(_dictTermsCache);
+  if(_dictTermsFetching) return _dictTermsFetching;
+  _dictTermsFetching = apiGet("/api/dictionary/terms")
+    .then(data => {
+      _dictTermsCache = Array.isArray(data && data.terms) ? data.terms : (Array.isArray(data) ? data : []);
+      return _dictTermsCache;
+    })
+    .catch(() => { _dictTermsCache = []; return _dictTermsCache; })
+    .finally(() => { _dictTermsFetching = null; });
+  return _dictTermsFetching;
+}
+
+let _aidActiveIndex = -1;
+let _aidRows = [];
+function showInputAidPopup(rows, onPick){
+  const pop = el("inputAidPopup");
+  if(!pop) return;
+  _aidRows = rows.slice(0, 8);
+  _aidActiveIndex = _aidRows.length ? 0 : -1;
+  if(!_aidRows.length){ hideInputAidPopup(); return; }
+  pop.innerHTML = _aidRows.map((r, i) => `
+    <div class="input-aid-row ${i === _aidActiveIndex ? 'is-active' : ''}" data-aid-idx="${i}">
+      <span class="aid-icon"><span class="material-symbols-outlined">${r.icon || "tag"}</span></span>
+      <span class="flex-1">
+        <div><span class="aid-name">${escapeHtml(r.name || r.cmd || "")}</span>
+          ${r.mono ? `<span class="aid-mono ml-2">${escapeHtml(r.mono)}</span>` : ""}
+        </div>
+        ${r.desc ? `<div class="aid-desc">${escapeHtml(r.desc)}</div>` : ""}
+      </span>
+    </div>
+  `).join("");
+  pop.classList.remove("hidden");
+  pop.querySelectorAll(".input-aid-row").forEach(rowEl => {
+    rowEl.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const idx = parseInt(rowEl.getAttribute("data-aid-idx") || "-1", 10);
+      if(idx >= 0 && onPick) onPick(_aidRows[idx]);
+      hideInputAidPopup();
+    });
+  });
+}
+function hideInputAidPopup(){
+  const pop = el("inputAidPopup");
+  if(pop) pop.classList.add("hidden");
+  _aidActiveIndex = -1;
+  _aidRows = [];
+}
+function moveAidActive(delta){
+  if(!_aidRows.length) return;
+  _aidActiveIndex = (_aidActiveIndex + delta + _aidRows.length) % _aidRows.length;
+  const pop = el("inputAidPopup");
+  if(!pop) return;
+  pop.querySelectorAll(".input-aid-row").forEach((r, i) => {
+    r.classList.toggle("is-active", i === _aidActiveIndex);
+  });
+}
+
+function handleSlashCommand(cmd){
+  if(cmd === "/help"){
+    const m = el("shortcutModal");
+    if(m){ m.classList.remove("hidden"); m.setAttribute("aria-hidden","false"); }
+  } else if(cmd === "/clear"){
+    el("chatArea").innerHTML = "";
+    if(typeof renderWelcomeScreen === "function") renderWelcomeScreen();
+  } else if(cmd === "/new"){
+    if(typeof newSession === "function") newSession();
+  }
+  const input = el("userInput");
+  if(input){ input.value = ""; autosizeInput(); }
+}
+
+function refreshInputAids(){
+  const input = el("userInput");
+  if(!input) return;
+  const val = input.value || "";
+  // slash command suggestions (input starts with "/")
+  if(/^\/\w*$/.test(val.trim()) && val.trim() === val){
+    const q = val.trim().toLowerCase();
+    const matches = SLASH_COMMANDS.filter(c => c.cmd.toLowerCase().startsWith(q));
+    if(matches.length){
+      showInputAidPopup(matches.map(c => ({
+        cmd: c.cmd, name: c.cmd, desc: c.desc, icon: c.icon, mono: c.label
+      })), (row) => handleSlashCommand(row.cmd));
+      return;
+    }
+  }
+  // @ term autocomplete: detect @<query> at caret position
+  const caret = input.selectionStart || val.length;
+  const before = val.slice(0, caret);
+  const m = before.match(/@([\w가-힣]{0,40})$/);
+  if(m){
+    const q = m[1].toLowerCase();
+    loadDictTerms().then(terms => {
+      if(input.selectionStart !== caret) return; // user moved on
+      const current = (input.value || "").slice(0, input.selectionStart || 0).match(/@([\w가-힣]{0,40})$/);
+      if(!current) { hideInputAidPopup(); return; }
+      const matches = terms
+        .filter(t => {
+          const n = (t.canonical_name || t.display_name || "").toLowerCase();
+          if(!n) return false;
+          if(!q) return true;
+          if(n.includes(q)) return true;
+          const aliases = Array.isArray(t.aliases) ? t.aliases : [];
+          return aliases.some(a => (a || "").toLowerCase().includes(q));
+        })
+        .slice(0, 8);
+      if(!matches.length){ hideInputAidPopup(); return; }
+      const rows = matches.map(t => ({
+        name: t.canonical_name || t.display_name || "",
+        desc: (t.description || "").slice(0, 80),
+        mono: t.term_type || "",
+        icon: "book_2",
+        insertText: t.canonical_name || t.display_name || ""
+      }));
+      showInputAidPopup(rows, (row) => {
+        const v = input.value || "";
+        const cur = (v.slice(0, input.selectionStart || 0)).match(/@([\w가-힣]{0,40})$/);
+        if(!cur) return;
+        const startIdx = (input.selectionStart || 0) - cur[0].length;
+        const newVal = v.slice(0, startIdx) + row.insertText + " " + v.slice(input.selectionStart || 0);
+        input.value = newVal;
+        const newCaret = startIdx + row.insertText.length + 1;
+        input.setSelectionRange(newCaret, newCaret);
+        autosizeInput();
+        input.focus();
+      });
+    });
+    return;
+  }
+  hideInputAidPopup();
+}
+
+function autosizeInput(){
+  const input = el("userInput");
+  if(!input) return;
+  input.style.height = "auto";
+  const max = 200;
+  input.style.height = Math.min(input.scrollHeight, max) + "px";
+}
+
 async function sendMessage(overrideActionTag = null, specificQuery = null){
-  let rawSendText = "";     
-  let displayUserText = ""; 
+  if(isSending) return;
+  let rawSendText = "";
+  let displayUserText = "";
 
   if (overrideActionTag) {
     const queryToUse = specificQuery || lastRealUserQuery;
@@ -1415,30 +2176,41 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
   } else {
     rawSendText = el("userInput").value.trim();
     if(!rawSendText) return;
+    // Apply forced routing tag if not already present
+    if(forcedMode && !rawSendText.startsWith("[DB_ANALYSIS]") && !rawSendText.startsWith("[RAG_KNOWLEDGE]")){
+      rawSendText = `${forcedMode} ${rawSendText}`;
+    }
     lastRealUserQuery = rawSendText;
     displayUserText = rawSendText;
     el("userInput").value = "";
+    autosizeInput();
   }
 
   appendMessage("user", displayUserText, null, null);
 
   const pendingId = "PENDING_" + Date.now();
   const loadingHtml = `
-    <div class="agent-status-wrapper flex items-center gap-2 text-sm text-secondary dark:text-[#94a3b8] font-medium px-2 py-2 mt-2">
-       <span class="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>
-       <span class="agent-status-text transition-opacity duration-300 opacity-100 tracking-wide">시스템 에이전트 연결 중...</span>
+    <div class="agent-status-wrapper inline-flex items-center gap-3 text-sm text-secondary dark:text-[#94a3b8] font-medium px-2 py-2 mt-2">
+       <span class="agent-badge is-default" style="padding:4px 12px 4px 4px;">
+         <span class="agent-badge-icon"><span class="material-symbols-outlined animate-spin" style="font-size:14px;">progress_activity</span></span>
+         <span class="agent-badge-name">분석 중</span>
+       </span>
+       <span class="agent-status-text streaming-caret transition-opacity duration-300 opacity-100 tracking-wide">시스템 에이전트 연결 중</span>
     </div>
   `;
   appendMessage("assistant", loadingHtml, null, pendingId);
 
-  el("sendBtn").disabled = true;
+  isSending = true;
+  setSendButtonState("sending");
   el("userInput").disabled = true;
+
+  activeStreamController = new AbortController();
 
   const payload = {
     session_id: currentSessionId,
     user_text: rawSendText,
-    index_names: [window.__BOOT__.defaultIndex],
-    top_k: 5,
+    index_names: getEffectiveIndexNames(),
+    top_k: (window.__BOOT__ && window.__BOOT__.defaultTopK) || 5,
     filters: null
   };
 
@@ -1446,7 +2218,8 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
     const response = await fetch("/api/chat_stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: activeStreamController.signal
     });
 
     const reader = response.body.getReader();
@@ -1531,15 +2304,48 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
     }
 
   } catch(e){
+    const aborted = (e && (e.name === "AbortError" || String(e).includes("aborted")));
     const pend = document.querySelector(`.msg.assistant[data-msg-id="${pendingId}"]`);
-    if(pend){
-      const contentDiv = pend.querySelector(".content") || pend;
-      contentDiv.innerHTML = `<div class="text-error p-4">ERROR: ${escapeHtml(String(e))}</div>`;
+    if(aborted){
+      if(pend) pend.remove();
+      if(window.Toast) window.Toast.info("응답을 중단했습니다.");
     } else {
-      appendMessage("assistant", "ERROR: " + String(e), new Date().toISOString(), null);
+      const retryId = "RETRY_" + Date.now();
+      const errBlock = `
+        <div class="rounded-xl border border-error/30 bg-error/5 text-error p-4 text-sm">
+          <div class="font-bold mb-1 flex items-center gap-1">
+            <span class="material-symbols-outlined" style="font-size:16px;">error</span>
+            응답 생성 중 오류가 발생했습니다
+          </div>
+          <div class="text-xs opacity-80 mb-2">${escapeHtml(String(e).slice(0, 280))}</div>
+          <button type="button" data-retry-id="${retryId}" class="msg-action-btn" style="border-color:currentColor;">
+            <span class="material-symbols-outlined">refresh</span><span>다시 시도</span>
+          </button>
+        </div>`;
+      if(pend){
+        const contentDiv = pend.querySelector(".content") || pend;
+        contentDiv.innerHTML = errBlock;
+      } else {
+        appendMessage("assistant", errBlock, new Date().toISOString(), null);
+      }
+      // wire retry
+      setTimeout(() => {
+        const btn = document.querySelector(`[data-retry-id="${retryId}"]`);
+        if(btn){
+          btn.addEventListener("click", () => {
+            const failedQuery = (lastRealUserQuery || "").trim();
+            if(!failedQuery) return;
+            // restore input + clear error block by re-sending
+            if(pend) pend.remove();
+            sendMessage(null, failedQuery);
+          });
+        }
+      }, 50);
     }
   } finally {
-    el("sendBtn").disabled = false;
+    activeStreamController = null;
+    isSending = false;
+    setSendButtonState("idle");
     el("userInput").disabled = false;
     el("userInput").focus();
   }
@@ -1579,14 +2385,143 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // 세션 및 전송
   el("newSession").onclick = newSession;
-  el("sendBtn").onclick = () => sendMessage();
+  el("sendBtn").onclick = () => {
+    if(isSending){ abortActiveStream(); return; }
+    sendMessage();
+  };
+  setSendButtonState("idle");
 
   el("userInput").addEventListener("keydown", (e)=>{
-    if(e.key === "Enter" && !e.shiftKey){
+    // IME composition (한글 조합) 중에는 Enter를 가로채지 않는다
+    if(e.isComposing || e.keyCode === 229) return;
+    // 입력 보조 팝업이 열려있을 때 ↑↓/Enter/Esc 처리
+    const aidPop = el("inputAidPopup");
+    const aidOpen = aidPop && !aidPop.classList.contains("hidden");
+    if(aidOpen){
+      if(e.key === "ArrowDown"){ e.preventDefault(); moveAidActive(1); return; }
+      if(e.key === "ArrowUp"){ e.preventDefault(); moveAidActive(-1); return; }
+      if(e.key === "Escape"){ e.preventDefault(); hideInputAidPopup(); return; }
+      if(e.key === "Enter" && !e.shiftKey){
+        // pick the active row
+        if(_aidActiveIndex >= 0 && _aidRows[_aidActiveIndex]){
+          e.preventDefault();
+          const row = aidPop.querySelector(`.input-aid-row[data-aid-idx="${_aidActiveIndex}"]`);
+          if(row){
+            // simulate mousedown handler
+            row.dispatchEvent(new MouseEvent("mousedown"));
+          }
+          return;
+        }
+      }
+    }
+    // ↑ 단축: 입력이 비어있을 때 이전 질문 호출
+    if(e.key === "ArrowUp" && !aidOpen){
+      const input = el("userInput");
+      if(input && !input.value && lastRealUserQuery){
+        e.preventDefault();
+        input.value = lastRealUserQuery;
+        autosizeInput();
+        input.setSelectionRange(input.value.length, input.value.length);
+        return;
+      }
+    }
+    if(e.key === "Enter"){
+      if(e.shiftKey || e.altKey) return;
       e.preventDefault();
       sendMessage();
     }
   });
+
+  el("userInput").addEventListener("input", () => {
+    autosizeInput();
+    refreshInputAids();
+  });
+  el("userInput").addEventListener("blur", () => {
+    setTimeout(hideInputAidPopup, 150);
+  });
+
+  setupComposerToolbar();
+
+  // ─── Global keyboard shortcuts ───────────────────────────────
+  const openShortcutModal = () => {
+    const m = el("shortcutModal");
+    if(!m) return;
+    m.classList.remove("hidden");
+    m.setAttribute("aria-hidden", "false");
+  };
+  const closeShortcutModal = () => {
+    const m = el("shortcutModal");
+    if(!m) return;
+    m.classList.add("hidden");
+    m.setAttribute("aria-hidden", "true");
+  };
+  const closeBtn = el("shortcutModalClose");
+  if(closeBtn) closeBtn.addEventListener("click", closeShortcutModal);
+  const backdrop = el("shortcutModalBackdrop");
+  if(backdrop) backdrop.addEventListener("click", closeShortcutModal);
+
+  document.addEventListener("keydown", (e) => {
+    const cmd = e.ctrlKey || e.metaKey;
+    // Esc: close modal / abort stream / close img preview
+    if(e.key === "Escape"){
+      const docModalOpen = el("docModal") && !el("docModal").classList.contains("hidden");
+      const shortcutModalOpen = el("shortcutModal") && !el("shortcutModal").classList.contains("hidden");
+      const imgPreviewOpen = el("imgPreview") && !el("imgPreview").classList.contains("hidden");
+      const indexPopupOpen = el("indexPopup") && !el("indexPopup").classList.contains("hidden");
+      if(indexPopupOpen){ closeIndexPopup(); return; }
+      if(shortcutModalOpen){ closeShortcutModal(); return; }
+      if(docModalOpen){ if(typeof closeModal === "function") closeModal(); return; }
+      if(imgPreviewOpen){
+        el("imgPreview").classList.add("hidden");
+        el("imgPreview").innerHTML = "";
+        return;
+      }
+      if(isSending){ abortActiveStream(); return; }
+      return;
+    }
+    if(!cmd) return;
+    // Ctrl/Cmd+K — focus session search
+    if(e.key.toLowerCase() === "k"){
+      e.preventDefault();
+      const inp = el("sessionSearchInput");
+      if(inp){ inp.focus(); inp.select(); }
+      return;
+    }
+    // Ctrl/Cmd+N — new session
+    if(e.key.toLowerCase() === "n"){
+      e.preventDefault();
+      if(typeof newSession === "function") newSession();
+      return;
+    }
+    // Ctrl/Cmd+/ — help modal
+    if(e.key === "/"){
+      e.preventDefault();
+      openShortcutModal();
+      return;
+    }
+    // Ctrl/Cmd+\ — sidebar toggle
+    if(e.key === "\\"){
+      e.preventDefault();
+      const sb = el("sidebar");
+      if(sb){
+        sb.classList.toggle("collapsed");
+        const tBtn = el("toggleSidebar");
+        if(tBtn) tBtn.querySelector("span").textContent = sb.classList.contains("collapsed") ? "side_navigation" : "menu_open";
+      }
+      return;
+    }
+  });
+
+  const sessionSearch = el("sessionSearchInput");
+  if(sessionSearch){
+    sessionSearch.addEventListener("input", applySessionFilter);
+    sessionSearch.addEventListener("keydown", (e) => {
+      if(e.key === "Escape"){
+        sessionSearch.value = "";
+        applySessionFilter();
+      }
+    });
+  }
 
   // 패널 조절기 초기화 (오류 방지를 위해 존재 여부 체크)
   if (typeof setupSidebarToggle === "function") setupSidebarToggle();

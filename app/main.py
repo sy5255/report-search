@@ -111,6 +111,18 @@ async def logout(request: Request):
     resp.delete_cookie(key="token")
     return resp
 
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    user = _require_user(request)
+    return templates.TemplateResponse("settings.html", {
+        "request": request,
+        "user_id": user,
+        "default_index": DEFAULT_INDEX_NAME,
+        "index_options": INDEX_OPTIONS,
+        "active_tab": "settings",
+    })
+
+
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request):
     user = _require_user(request)
@@ -191,6 +203,12 @@ async def api_get_session_messages(session_id: str, request: Request):
             continue
         search_log_by_user_msg_id[user_msg_id] = log
 
+    feedback_map = {}
+    try:
+        feedback_map = repo.get_feedback_map(session_id, user)
+    except Exception as e:
+        print(f"Feedback 로드 실패: {e}")
+
     for m in msgs:
         if m["role"] == "assistant":
             ast_id = m.get("msg_id")
@@ -198,6 +216,7 @@ async def api_get_session_messages(session_id: str, request: Request):
             m["intent"] = rag_info.get("intent")
             m["suggested_actions"] = rag_info.get("suggested_actions", [])
             m["agent_steps"] = rag_info.get("agent_steps", [])
+            m["feedback"] = feedback_map.get(ast_id)
 
     return {"messages": msgs, "search_logs_by_user_msg_id": search_log_by_user_msg_id}
 
@@ -938,6 +957,96 @@ async def api_archive_session(session_id: str, request: Request):
     user = _require_user(request)
     repo.archive_session(session_id, user)
     return {"ok": True}
+
+
+@app.post("/api/sessions/{session_id}/pin")
+async def api_pin_session(session_id: str, request: Request):
+    user = _require_user(request)
+    body = await request.json()
+    pinned = bool(body.get("pinned"))
+    ok = repo.set_session_pin(session_id, user, pinned)
+    if not ok:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"ok": True, "pinned": pinned}
+
+
+@app.post("/api/sessions/{session_id}/folder")
+async def api_folder_session(session_id: str, request: Request):
+    user = _require_user(request)
+    body = await request.json()
+    folder = body.get("folder")
+    ok = repo.set_session_folder(session_id, user, folder)
+    if not ok:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"ok": True, "folder": folder}
+
+
+@app.get("/api/sessions/{session_id}/export")
+async def api_export_session(session_id: str, request: Request, fmt: str = "md"):
+    user = _require_user(request)
+    msgs = repo.get_messages(session_id, user)
+    if not msgs:
+        raise HTTPException(status_code=404, detail="session empty or not found")
+    title = "Untitled"
+    try:
+        sessions = repo.list_sessions(user) or []
+        for s in sessions:
+            if s.get("session_id") == session_id:
+                title = s.get("title") or title
+                break
+    except Exception:
+        pass
+    if fmt == "md":
+        lines = [f"# {title}", "", f"_Exported from Intellectual Curator · {len(msgs)} messages_", ""]
+        for m in msgs:
+            role = m.get("role", "")
+            content = m.get("content", "") or ""
+            created = m.get("created_at", "")
+            label = "🧑 사용자" if role == "user" else "🤖 어시스턴트"
+            lines.append(f"## {label}  \n_{created}_\n")
+            lines.append(content.strip())
+            lines.append("\n---\n")
+        body = "\n".join(lines)
+        safe_title = "".join(c if c.isalnum() or c in "-_." else "_" for c in title)[:80] or "session"
+        headers = {
+            "Content-Disposition": f'attachment; filename="{safe_title}.md"',
+            "Content-Type": "text/markdown; charset=utf-8",
+        }
+        return Response(content=body, media_type="text/markdown; charset=utf-8", headers=headers)
+    raise HTTPException(status_code=400, detail="unsupported fmt")
+
+
+@app.patch("/api/sessions/{session_id}")
+async def api_patch_session(session_id: str, request: Request):
+    user = _require_user(request)
+    body = await request.json()
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title required")
+    ok = repo.update_session_title(session_id, user, title)
+    if not ok:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"ok": True, "title": title[:255]}
+
+
+@app.post("/api/feedback")
+async def api_post_feedback(request: Request):
+    user = _require_user(request)
+    body = await request.json()
+    assistant_msg_id = (body.get("assistant_msg_id") or "").strip()
+    rating = (body.get("rating") or "").strip()
+    comment = body.get("comment")
+    session_id = body.get("session_id")
+    if not assistant_msg_id or rating not in ("up", "down"):
+        raise HTTPException(status_code=400, detail="assistant_msg_id and rating(up|down) required")
+    result = repo.upsert_feedback(
+        assistant_msg_id=assistant_msg_id,
+        user_id=user,
+        rating=rating,
+        comment=comment,
+        session_id=session_id,
+    )
+    return {"ok": True, **result}
 
 
 @app.get("/api/sessions/{session_id}/latest-artifact")

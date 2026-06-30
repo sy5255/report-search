@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40" role="img" aria-label="Intellectual Curator">
+  <defs>
+    <linearGradient id="lg-mark" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0ea5b4"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+  </defs>
+  <!-- Soft glow plate -->
+  <rect x="2" y="2" width="36" height="36" rx="10" fill="url(#lg-mark)" opacity="0.12"/>
+  <!-- Folded paper / report mark -->
+  <path d="M11 8h13l5 5v19a2 2 0 0 1-2 2H11a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z"
+        fill="none" stroke="url(#lg-mark)" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M24 8v5h5" fill="none" stroke="url(#lg-mark)" stroke-width="2" stroke-linejoin="round"/>
+  <!-- Insight spark -->
+  <circle cx="20" cy="23" r="3" fill="url(#lg-mark)"/>
+  <path d="M20 17v2M20 27v2M14 23h2M24 23h2" stroke="url(#lg-mark)" stroke-width="1.6" stroke-linecap="round"/>
+</svg>

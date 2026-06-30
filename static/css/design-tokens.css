@@ -1,0 +1,192 @@
+/* =========================================================================
+   Design Tokens — Report-Search (Intellectual Curator)
+   Phase 0 design language. All colors, type, motion live here.
+   ========================================================================= */
+
+:root {
+  /* --- Brand accents (1:1 with agent identity) --- */
+  --accent-rag: #0ea5b4;
+  --accent-rag-strong: #047481;
+  --accent-rag-soft: rgba(14, 165, 180, 0.12);
+  --accent-rag-glow: rgba(14, 165, 180, 0.28);
+
+  --accent-db: #7c3aed;
+  --accent-db-strong: #5b21b6;
+  --accent-db-soft: rgba(124, 58, 237, 0.12);
+  --accent-db-glow: rgba(124, 58, 237, 0.28);
+
+  --accent-hybrid: linear-gradient(135deg, #0ea5b4 0%, #7c3aed 100%);
+  --accent-hybrid-soft: linear-gradient(135deg, rgba(14, 165, 180, 0.14) 0%, rgba(124, 58, 237, 0.14) 100%);
+
+  /* --- Neutral palette (paper feel, light mode) --- */
+  --color-primary: #1f2d4d;
+  --color-primary-container: #2a3a5e;
+  --color-on-primary: #f7f5f0;
+
+  --color-background: #f7f5f0;              /* warm off-white */
+  --color-surface: #ffffff;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f3efe5;
+  --color-surface-container: #ebe6d8;
+  --color-surface-container-high: #e2dbca;
+  --color-surface-container-highest: #d6cdb7;
+
+  --color-on-surface: #14171f;
+  --color-on-surface-soft: #4d5462;
+  --color-secondary: #5b6478;
+  --color-outline-variant: #d3cdbe;
+  --color-error: #b52b2b;
+
+  /* --- Typography --- */
+  --font-display: "Pretendard Variable", "Pretendard", "Inter", system-ui, sans-serif;
+  --font-body: "Pretendard Variable", "Pretendard", "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  --font-base: 14px;
+
+  /* --- Shadows --- */
+  --shadow-card: 0 1px 2px rgba(20, 23, 31, 0.04), 0 4px 16px rgba(20, 23, 31, 0.06);
+  --shadow-card-hover: 0 2px 4px rgba(20, 23, 31, 0.08), 0 12px 28px rgba(20, 23, 31, 0.12);
+  --shadow-paper: 0 1px 0 rgba(20, 23, 31, 0.05), 0 1px 2px rgba(20, 23, 31, 0.06), 0 8px 22px rgba(20, 23, 31, 0.08);
+  --shadow-glow-rag: 0 0 0 1px var(--accent-rag-soft), 0 8px 24px var(--accent-rag-glow);
+  --shadow-glow-db:  0 0 0 1px var(--accent-db-soft),  0 8px 24px var(--accent-db-glow);
+
+  /* --- Motion --- */
+  --ease-out-soft: cubic-bezier(.2, .8, .2, 1);
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 220ms;
+  --duration-slow: 360ms;
+
+  /* --- Background textures --- */
+  --texture-grid:
+    radial-gradient(circle at 1px 1px, rgba(20, 23, 31, 0.035) 1px, transparent 0);
+  --texture-grid-size: 24px 24px;
+  --bg-aurora:
+    radial-gradient(ellipse 900px 600px at 95% -10%, var(--accent-rag-soft), transparent 60%),
+    radial-gradient(ellipse 900px 600px at 5% 110%, var(--accent-db-soft), transparent 60%);
+}
+
+/* =========================================================================
+   Dark Mode
+   ========================================================================= */
+.dark {
+  --accent-rag: #2dd6c4;
+  --accent-rag-strong: #5fe9d8;
+  --accent-rag-soft: rgba(45, 214, 196, 0.16);
+  --accent-rag-glow: rgba(45, 214, 196, 0.30);
+
+  --accent-db: #a78bfa;
+  --accent-db-strong: #c4b5fd;
+  --accent-db-soft: rgba(167, 139, 250, 0.16);
+  --accent-db-glow: rgba(167, 139, 250, 0.30);
+
+  --accent-hybrid: linear-gradient(135deg, #2dd6c4 0%, #a78bfa 100%);
+  --accent-hybrid-soft: linear-gradient(135deg, rgba(45, 214, 196, 0.16) 0%, rgba(167, 139, 250, 0.16) 100%);
+
+  --color-primary: #cdd6f4;
+  --color-primary-container: #2a3756;
+  --color-on-primary: #0a0f1f;
+
+  --color-background: #0a0f1f;
+  --color-surface: #111728;
+  --color-surface-container-lowest: #0a0f1f;
+  --color-surface-container-low: #131a2c;
+  --color-surface-container: #1a2238;
+  --color-surface-container-high: #232c46;
+  --color-surface-container-highest: #2a3756;
+
+  --color-on-surface: #e7eaf2;
+  --color-on-surface-soft: #b3bcd1;
+  --color-secondary: #95a0bb;
+  --color-outline-variant: #2a3756;
+  --color-error: #f87171;
+
+  --shadow-card: 0 1px 2px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.32);
+  --shadow-card-hover: 0 2px 4px rgba(0,0,0,0.5), 0 12px 28px rgba(0,0,0,0.45);
+  --shadow-paper: 0 1px 0 rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.4), 0 8px 22px rgba(0,0,0,0.40);
+
+  --texture-grid:
+    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.035) 1px, transparent 0);
+  --bg-aurora:
+    radial-gradient(ellipse 900px 600px at 95% -10%, var(--accent-rag-soft), transparent 60%),
+    radial-gradient(ellipse 900px 600px at 5% 110%, var(--accent-db-soft), transparent 60%);
+}
+
+/* =========================================================================
+   Base typography & page chrome
+   ========================================================================= */
+html, body {
+  font-family: var(--font-body);
+  font-size: var(--font-base);
+  font-feature-settings: "ss01", "tnum";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--color-background);
+  background-image: var(--texture-grid), var(--bg-aurora);
+  background-size: var(--texture-grid-size), auto, auto;
+  background-attachment: fixed;
+  color: var(--color-on-surface);
+}
+
+.font-headline {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+code, kbd, pre, .mono { font-family: var(--font-mono); }
+
+/* =========================================================================
+   Focus ring (a11y)
+   ========================================================================= */
+*:focus-visible {
+  outline: 2px solid var(--accent-rag);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible {
+  outline-offset: 3px;
+}
+
+/* =========================================================================
+   Reduced motion
+   ========================================================================= */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+/* =========================================================================
+   Utility primitives (used by Phase 0+1 components)
+   ========================================================================= */
+
+/* Glass surface (header, sidebar top) */
+.glass {
+  background: color-mix(in srgb, var(--color-surface) 72%, transparent);
+  backdrop-filter: saturate(160%) blur(12px);
+  -webkit-backdrop-filter: saturate(160%) blur(12px);
+}
+
+/* Card lift on hover */
+.lift {
+  transition: transform var(--duration-fast) var(--ease-out-soft),
+              box-shadow var(--duration-fast) var(--ease-out-soft);
+}
+.lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-card-hover);
+}
+
+/* Subtle scroll fade for long lists */
+.scroll-fade-y {
+  mask-image: linear-gradient(to bottom, transparent 0, black 16px, black calc(100% - 16px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 16px, black calc(100% - 16px), transparent 100%);
+}
