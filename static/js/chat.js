@@ -1086,6 +1086,8 @@ function appendMessage(role, content, metaText, msgId, extra = null){
   let intentHtml = "";
   let chipsHtml = "";
   let stepsHtml = "";
+  let actionBarHtml = "";
+  const isPending = typeof msgId === "string" && msgId.startsWith("PENDING_");
 
   if(role === "user" && extra) {
     extraHtml = buildQueryInterpretationCard(extra); 
@@ -1169,8 +1171,7 @@ function appendMessage(role, content, metaText, msgId, extra = null){
     }
 
     // ─── 액션바 (응답 복사 + 👍/👎) ──────────────────────────────
-    const isPending = typeof msgId === "string" && msgId.startsWith("PENDING_");
-    let actionBarHtml = "";
+    actionBarHtml = "";
     if(msgId && !isPending){
       const fb = extra.feedback || null;
       actionBarHtml = `
