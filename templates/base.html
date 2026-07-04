@@ -124,10 +124,16 @@
             const themeBtn = document.getElementById('themeToggleGlobal');
             if (themeBtn) {
                 themeBtn.addEventListener('click', () => {
+                    // 전환 순간 트랜지션을 꺼서 전체가 한 번에 바뀌도록 (영역별 시간차 제거)
+                    htmlEl.classList.add('theme-no-transition');
                     htmlEl.classList.toggle('dark');
                     const isDark = htmlEl.classList.contains('dark');
                     localStorage.theme = isDark ? 'dark' : 'light';
                     if (themeIcon) themeIcon.textContent = isDark ? "dark_mode" : "light_mode";
+                    // 두 프레임 뒤 트랜지션 복원 (리페인트 완료 후)
+                    requestAnimationFrame(() => requestAnimationFrame(() => {
+                        htmlEl.classList.remove('theme-no-transition');
+                    }));
                 });
             }
 

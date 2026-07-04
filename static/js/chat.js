@@ -115,6 +115,38 @@ function splitInlineMarkdownBullets(text){
   return t;
 }
 
+// GFM 표가 앞 문단과 붙어 있으면 marked가 표로 인식하지 못해 깨진다.
+// 표 블록(헤더행 + |---| 구분행) 앞뒤에 빈 줄을 보장한다. (코드펜스 내부는 건드리지 않음)
+function ensureTableSpacing(text){
+  const lines = String(text || "").split("\n");
+  const out = [];
+  let inFence = false;
+  const isSep = (s) => s.includes("-") && /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(s);
+  const isRow = (s) => s.includes("|");
+  for(let i = 0; i < lines.length; i++){
+    const line = lines[i];
+    if(/^\s*```/.test(line)){ inFence = !inFence; out.push(line); continue; }
+    if(inFence){ out.push(line); continue; }
+
+    const next = (i + 1 < lines.length) ? lines[i + 1] : "";
+    if(isRow(line.trim()) && isSep(next.trim())){
+      // 헤더 앞 빈 줄 보장
+      if(out.length && out[out.length - 1].trim() !== "") out.push("");
+      out.push(line);          // header
+      out.push(lines[++i]);    // separator
+      // 이어지는 표 본문 행 복사
+      while(i + 1 < lines.length && lines[i + 1].includes("|") && lines[i + 1].trim() !== ""){
+        out.push(lines[++i]);
+      }
+      // 표 뒤 빈 줄 보장
+      if(i + 1 < lines.length && lines[i + 1].trim() !== "") out.push("");
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
 function normalizeMarkdownInput(text){
   let t = String(text || "").trim();
 
@@ -151,6 +183,9 @@ function normalizeMarkdownInput(text){
 
   // 한 줄에 붙은 bullet 강제 분리
   t = splitInlineMarkdownBullets(t);
+
+  // 표 블록 앞뒤 빈 줄 보장 (표 깨짐 방지)
+  t = ensureTableSpacing(t);
 
   // heading/table/list 앞뒤 여유 줄 확보
   t = t.replace(/\n{3,}/g, "\n\n").trim();
@@ -324,6 +359,11 @@ function enhanceRenderedMessage(scope){
   contentNodes.forEach(node => {
     autoLinkPlainUrls(node);
     addCodeCopyButtons(node);
+    // 마크다운 링크([t](url))는 marked가 target 없이 렌더 → 무조건 새 창에서 열리도록 강제
+    node.querySelectorAll("a[href]").forEach(a => {
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+    });
   });
   attachCitationHovers(scope);
 }
@@ -704,17 +744,14 @@ function renderSessions(sessions){
     div.innerHTML = `
       <div class="flex items-center justify-between gap-2 overflow-hidden">
         <div class="session-title text-xs font-bold text-on-surface truncate flex-1" title="더블클릭으로 이름 변경">${escapeHtml(s.title || "Untitled")}</div>
-        <button class="session-pin-btn icon-btn p-1 rounded hover:bg-surface-container-high shrink-0 ${s.pinned ? '' : 'opacity-0 group-hover:opacity-100'} ${s.pinned ? 'text-rag-strong' : 'text-secondary'}" title="${s.pinned ? '핀 해제' : '핀'}" aria-label="${s.pinned ? '핀 해제' : '핀'}">
-          <span class="material-symbols-outlined text-[14px]">${s.pinned ? 'push_pin' : 'keep'}</span>
-        </button>
         <button class="session-rename-btn icon-btn opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-surface-container-high text-secondary shrink-0" title="이름 변경" aria-label="이름 변경">
           <span class="material-symbols-outlined text-[14px]">edit</span>
         </button>
-        <button class="session-export-btn icon-btn opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-surface-container-high text-secondary shrink-0" title="Markdown 내보내기" aria-label="Markdown 내보내기">
-          <span class="material-symbols-outlined text-[14px]">download</span>
-        </button>
         <button class="session-delete-btn icon-btn danger opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-error/10 text-error shrink-0" title="Delete" aria-label="삭제">
           <span class="material-symbols-outlined text-[14px]">delete</span>
+        </button>
+        <button class="session-pin-btn icon-btn p-1 rounded hover:bg-surface-container-high shrink-0 ${s.pinned ? '' : 'opacity-0 group-hover:opacity-100'} ${s.pinned ? 'text-rag-strong' : 'text-secondary'}" title="${s.pinned ? '핀 해제' : '핀'}" aria-label="${s.pinned ? '핀 해제' : '핀'}">
+          <span class="material-symbols-outlined text-[14px]">${s.pinned ? 'push_pin' : 'keep'}</span>
         </button>
       </div>
       <div class="session-date text-[10px] text-secondary truncate">${escapeHtml(s.updated_at || "")}</div>
@@ -738,20 +775,6 @@ function renderSessions(sessions){
       renameBtn.addEventListener("click", (ev) => {
         ev.stopPropagation();
         enterSessionRenameMode(div, s);
-      });
-    }
-
-    const exportBtn = div.querySelector(".session-export-btn");
-    if(exportBtn){
-      exportBtn.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        const url = `/api/sessions/${encodeURIComponent(s.session_id)}/export?fmt=md`;
-        const a = document.createElement("a");
-        a.href = url;
-        a.rel = "noopener";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
       });
     }
 
@@ -988,9 +1011,10 @@ function renderWelcomeScreen(){
       const input = el("userInput");
       if(input){
         input.value = text;
-        input.focus();
-        input.dispatchEvent(new Event("input"));
+        autosizeInput();
       }
+      // 예시 프롬프트는 클릭 즉시 전송
+      sendMessage();
     });
   });
 }
@@ -2191,14 +2215,18 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
     }
     lastRealUserQuery = queryToUse;
   } else {
-    rawSendText = el("userInput").value.trim();
-    if(!rawSendText) return;
-    // Apply forced routing tag if not already present
-    if(forcedMode && !rawSendText.startsWith("[DB_ANALYSIS]") && !rawSendText.startsWith("[RAG_KNOWLEDGE]")){
-      rawSendText = `${forcedMode} ${rawSendText}`;
+    const typedText = el("userInput").value.trim();
+    if(!typedText) return;
+    // 화면 표시용: 강제 라우팅 태그는 숨긴다 (혹시 사용자가 직접 입력한 경우도 제거)
+    const cleanText = typedText.replace(/^\[(DB_ANALYSIS|RAG_KNOWLEDGE)\]\s*/, "").trim();
+    // 백엔드 전송용: 강제 라우팅 태그를 앞에 붙인다 (적절한 에이전트 라우팅에 필요)
+    if(forcedMode && !typedText.startsWith("[DB_ANALYSIS]") && !typedText.startsWith("[RAG_KNOWLEDGE]")){
+      rawSendText = `${forcedMode} ${cleanText}`;
+    } else {
+      rawSendText = typedText;
     }
-    lastRealUserQuery = rawSendText;
-    displayUserText = rawSendText;
+    lastRealUserQuery = cleanText;
+    displayUserText = cleanText;
     el("userInput").value = "";
     autosizeInput();
   }
@@ -2379,6 +2407,70 @@ function applyTopDocsN(){
   renderTopDocsFiltered();
 }
 
+/* ---------- announcements (login notice) ---------- */
+async function showAnnouncementsOnLoad(){
+  let items = [];
+  try {
+    const data = await apiGet("/api/announcements/active");
+    items = (data && data.items) || [];
+  } catch(_) { return; }
+
+  const now = Date.now();
+  // '일주일간 보지 않기'로 숨긴 공지는 제외 (단, important는 항상 표시)
+  const visible = items.filter(it => {
+    if(it.important) return true;
+    try {
+      const until = parseInt(localStorage.getItem("rs_ann_dismiss_" + it.id) || "0", 10);
+      return !(until && now < until);
+    } catch(_) { return true; }
+  });
+  if(!visible.length) return;
+  renderAnnouncementModal(visible);
+}
+
+function renderAnnouncementModal(items){
+  if(document.getElementById("annModal")) return;
+
+  const cards = items.map(it => `
+    <div class="ann-item" data-ann-id="${escapeHtml(it.id)}">
+      <div class="ann-item-head">
+        ${it.important ? '<span class="ann-badge">중요</span>' : ''}
+        <h3>${escapeHtml(it.title)}</h3>
+      </div>
+      <div class="ann-body">${escapeHtml(it.body).replace(/\n/g, "<br>")}</div>
+      ${it.important ? '' : `<button class="ann-dismiss-btn" data-ann-id="${escapeHtml(it.id)}" type="button">일주일간 보지 않기</button>`}
+    </div>
+  `).join("");
+
+  const modal = document.createElement("div");
+  modal.id = "annModal";
+  modal.className = "ann-modal";
+  modal.innerHTML = `
+    <div class="ann-backdrop"></div>
+    <div class="ann-panel" role="dialog" aria-modal="true" aria-label="공지사항">
+      <div class="ann-panel-head">
+        <span class="material-symbols-outlined">campaign</span>
+        <span class="ann-panel-title">공지사항</span>
+        <button class="ann-close" type="button" aria-label="닫기"><span class="material-symbols-outlined">close</span></button>
+      </div>
+      <div class="ann-scroll">${cards}</div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  const close = () => modal.remove();
+  modal.querySelector(".ann-close").addEventListener("click", close);
+  modal.querySelector(".ann-backdrop").addEventListener("click", close);
+  modal.querySelectorAll(".ann-dismiss-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-ann-id");
+      try { localStorage.setItem("rs_ann_dismiss_" + id, String(Date.now() + 7 * 24 * 60 * 60 * 1000)); } catch(_){}
+      const item = modal.querySelector(`.ann-item[data-ann-id="${CSS.escape(id)}"]`);
+      if(item) item.remove();
+      if(!modal.querySelector(".ann-item")) close();
+    });
+  });
+}
+
 /* ---------- init ---------- */
 document.addEventListener("DOMContentLoaded", async () => {
   if (typeof configureMarked === "function") configureMarked();
@@ -2549,4 +2641,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 대문(초기 로드): 사이드바를 접어 채팅을 중앙에 크게 보여줌.
   // 세션 선택 또는 첫 메시지 전송 시 setSidebarCollapsed(false)로 자동 펼쳐짐.
   setSidebarCollapsed(true);
+
+  // 로그인 후 공지 팝업
+  showAnnouncementsOnLoad();
 });

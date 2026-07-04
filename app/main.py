@@ -124,6 +124,16 @@ async def settings_page(request: Request):
     })
 
 
+@app.get("/admin/dictionary", response_class=HTMLResponse)
+async def admin_dictionary_page(request: Request):
+    user = _require_user(request)
+    return templates.TemplateResponse("admin_dictionary.html", {
+        "request": request,
+        "user_id": user,
+        "active_tab": "admin",
+    })
+
+
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request):
     user = _require_user(request)
@@ -640,6 +650,9 @@ CACHE_CHECK_INTERVAL = 86400
 # processed.json 파일 경로 설정
 PROCESSED_JSON_PATH = PARSE_ROOT / "_state" / "processed.json"
 
+# 로그인 후 표시할 공지사항 파일 (프로젝트 루트, 관리자가 직접 편집)
+ANNOUNCEMENTS_PATH = Path(__file__).resolve().parent.parent / "announcements.json"
+
 # 허용된 작성자 화이트리스트 (이름만 작성)
 ALLOWED_AUTHORS = ["성지아 <j.na@s.com>", "김지수 <s.go@s.com>", "고미연 <y.ko@s.com>", "김영인 <i.kim@s.com>", "진연수 <s.jin@s.com>", "유미래 <g.y@s.com>", "신현빈 <s.shin@s.com>", "서세린 <s.se@s.com>", "오슬미 <s.y@s.com>", "이자린 <k.lee@s.com>", "김장미 <m.kim@s.com>", "김소희 <j.kim@s.com>", "이나연 <h.oh@s.com>", "윤희서 <k.y@s.com>", "미인지 <s.mg@s.com>"]
 
@@ -982,41 +995,6 @@ async def api_folder_session(session_id: str, request: Request):
     return {"ok": True, "folder": folder}
 
 
-@app.get("/api/sessions/{session_id}/export")
-async def api_export_session(session_id: str, request: Request, fmt: str = "md"):
-    user = _require_user(request)
-    msgs = repo.get_messages(session_id, user)
-    if not msgs:
-        raise HTTPException(status_code=404, detail="session empty or not found")
-    title = "Untitled"
-    try:
-        sessions = repo.list_sessions(user) or []
-        for s in sessions:
-            if s.get("session_id") == session_id:
-                title = s.get("title") or title
-                break
-    except Exception:
-        pass
-    if fmt == "md":
-        lines = [f"# {title}", "", f"_Exported from Intellectual Curator · {len(msgs)} messages_", ""]
-        for m in msgs:
-            role = m.get("role", "")
-            content = m.get("content", "") or ""
-            created = m.get("created_at", "")
-            label = "🧑 사용자" if role == "user" else "🤖 어시스턴트"
-            lines.append(f"## {label}  \n_{created}_\n")
-            lines.append(content.strip())
-            lines.append("\n---\n")
-        body = "\n".join(lines)
-        safe_title = "".join(c if c.isalnum() or c in "-_." else "_" for c in title)[:80] or "session"
-        headers = {
-            "Content-Disposition": f'attachment; filename="{safe_title}.md"',
-            "Content-Type": "text/markdown; charset=utf-8",
-        }
-        return Response(content=body, media_type="text/markdown; charset=utf-8", headers=headers)
-    raise HTTPException(status_code=400, detail="unsupported fmt")
-
-
 @app.patch("/api/sessions/{session_id}")
 async def api_patch_session(session_id: str, request: Request):
     user = _require_user(request)
@@ -1048,6 +1026,49 @@ async def api_post_feedback(request: Request):
         session_id=session_id,
     )
     return {"ok": True, **result}
+
+
+@app.get("/api/announcements/active")
+async def api_active_announcements(request: Request):
+    """로그인 후 표시할 활성 공지 목록.
+    announcements.json(프로젝트 루트)을 관리자가 편집한다.
+    - 전역 enabled=false 이면 전체 숨김.
+    - 각 item은 enabled=true 이고 오늘이 [start_date, end_date] 범위여야 노출.
+    - important=true 이면 프론트에서 '일주일간 보지 않기'를 무시하고 강제 표시.
+    """
+    _require_user(request)
+    try:
+        if not ANNOUNCEMENTS_PATH.exists():
+            return {"items": []}
+        with open(ANNOUNCEMENTS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"[Announcements] 읽기 실패: {e}")
+        return {"items": []}
+
+    if not data.get("enabled", True):
+        return {"items": []}
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    out = []
+    for it in (data.get("items") or []):
+        if not it.get("enabled", True):
+            continue
+        start = (it.get("start_date") or "").strip()
+        end = (it.get("end_date") or "").strip()
+        if start and today < start:
+            continue
+        if end and today > end:
+            continue
+        out.append({
+            "id": str(it.get("id") or ""),
+            "title": it.get("title") or "",
+            "body": it.get("body") or "",
+            "important": bool(it.get("important", False)),
+            "start_date": start,
+            "end_date": end,
+        })
+    return {"items": out}
 
 
 @app.get("/api/sessions/{session_id}/latest-artifact")

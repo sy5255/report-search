@@ -83,22 +83,22 @@
   --accent-hybrid: linear-gradient(135deg, #2dd6c4 0%, #a78bfa 100%);
   --accent-hybrid-soft: linear-gradient(135deg, rgba(45, 214, 196, 0.16) 0%, rgba(167, 139, 250, 0.16) 100%);
 
-  --color-primary: #cdd6f4;
-  --color-primary-container: #2a3756;
-  --color-on-primary: #0a0f1f;
+  --color-primary: #cdd8f4;
+  --color-primary-container: #2b3a5e;
+  --color-on-primary: #0b1120;
 
-  --color-background: #0a0f1f;
-  --color-surface: #111728;
-  --color-surface-container-lowest: #0a0f1f;
-  --color-surface-container-low: #131a2c;
-  --color-surface-container: #1a2238;
-  --color-surface-container-high: #232c46;
-  --color-surface-container-highest: #2a3756;
+  --color-background: #0b1120;              /* slate-blue navy, matches light hue family */
+  --color-surface: #121a2c;
+  --color-surface-container-lowest: #0b1120;
+  --color-surface-container-low: #151d31;
+  --color-surface-container: #1c2740;
+  --color-surface-container-high: #26324e;
+  --color-surface-container-highest: #2f3d5c;
 
-  --color-on-surface: #e7eaf2;
-  --color-on-surface-soft: #b3bcd1;
-  --color-secondary: #95a0bb;
-  --color-outline-variant: #2a3756;
+  --color-on-surface: #e8ecf6;
+  --color-on-surface-soft: #b4bed4;
+  --color-secondary: #93a0bd;
+  --color-outline-variant: #2b3a57;
   --color-error: #f87171;
 
   --shadow-card: 0 1px 2px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.32);
@@ -151,6 +151,17 @@ button:focus-visible,
 a:focus-visible,
 [role="button"]:focus-visible {
   outline-offset: 3px;
+}
+
+/* =========================================================================
+   Theme switch: suppress transitions so the whole page repaints at once
+   (prevents the staggered, area-by-area color change on dark/light toggle)
+   ========================================================================= */
+.theme-no-transition,
+.theme-no-transition *,
+.theme-no-transition *::before,
+.theme-no-transition *::after {
+  transition: none !important;
 }
 
 /* =========================================================================
