@@ -158,11 +158,13 @@ body.dragging { user-select: none; }
   min-width: 64px !important;
 }
 
-/* 글자 텍스트들 완전 숨김 */
+/* 접힘 상태: 세션 목록/검색/새 대화 버튼까지 모두 숨기고 열림(≡) 버튼만 남김 */
 #sidebar.collapsed .sidebar-text,
 #sidebar.collapsed .session-title,
 #sidebar.collapsed .session-date,
-#sidebar.collapsed .session-delete-btn {
+#sidebar.collapsed .session-card,
+#sidebar.collapsed #sessionSearchWrap,
+#sidebar.collapsed #newSession {
   display: none !important;
 }
 
@@ -411,11 +413,13 @@ body.dragging { user-select: none; }
   min-width: 64px !important;
 }
 
-/* 글자 텍스트들 완전 숨김 */
+/* 접힘 상태: 세션 목록/검색/새 대화 버튼까지 모두 숨기고 열림(≡) 버튼만 남김 */
 #sidebar.collapsed .sidebar-text,
 #sidebar.collapsed .session-title,
 #sidebar.collapsed .session-date,
-#sidebar.collapsed .session-delete-btn {
+#sidebar.collapsed .session-card,
+#sidebar.collapsed #sessionSearchWrap,
+#sidebar.collapsed #newSession {
   display: none !important;
 }
 

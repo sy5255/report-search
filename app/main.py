@@ -120,6 +120,7 @@ async def settings_page(request: Request):
         "default_index": DEFAULT_INDEX_NAME,
         "index_options": INDEX_OPTIONS,
         "active_tab": "settings",
+        "version": VERSION,
     })
 
 

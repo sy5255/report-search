@@ -498,11 +498,21 @@ function toggleTheme(){
 }
 
 /* ---------- sidebar ---------- */
+function setSidebarCollapsed(collapsed){
+  const sb = el("sidebar");
+  if(!sb) return;
+  sb.classList.toggle("collapsed", !!collapsed);
+  const btn = el("toggleSidebar");
+  const icon = btn && btn.querySelector("span");
+  // 접힘 = 펼치기(side_navigation) 아이콘, 펼침 = 접기(menu_open) 아이콘
+  if(icon) icon.textContent = collapsed ? "side_navigation" : "menu_open";
+}
 function setupSidebarToggle(){
-  el("toggleSidebar").onclick = () => {
+  const btn = el("toggleSidebar");
+  if(!btn) return;
+  btn.onclick = () => {
     const sb = el("sidebar");
-    sb.classList.toggle("collapsed");
-    el("toggleSidebar").textContent = sb.classList.contains("collapsed") ? "»" : "«";
+    setSidebarCollapsed(!(sb && sb.classList.contains("collapsed")));
   };
 }
 
@@ -810,6 +820,7 @@ function enterSessionRenameMode(card, session){
   input.select();
 
   let finished = false;
+  let committing = false;
   const restore = (newText) => {
     if(finished) return;
     finished = true;
@@ -828,6 +839,10 @@ function enterSessionRenameMode(card, session){
   };
 
   const commit = async () => {
+    // Enter 키다운과 (input 제거로 유발되는) blur가 각각 commit을 호출해
+    // 두 번 실행되던 것을 방지 — 성공/실패 토스트 동시 발생 버그 차단.
+    if(finished || committing) return;
+    committing = true;
     const newTitle = (input.value || "").trim();
     if(!newTitle || newTitle === oldText){
       restore(oldText);
@@ -989,6 +1004,7 @@ function markActiveSessionCard(sessionId){
 
 async function loadSession(sessionId){
   currentSessionId = sessionId;
+  if(typeof setSidebarCollapsed === "function") setSidebarCollapsed(false);
   markActiveSessionCard(sessionId);
   el("chatArea").innerHTML = "";
 
@@ -2187,6 +2203,9 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
     autosizeInput();
   }
 
+  // 실제 전송이 확정된 시점에 사이드바 자동 펼침 (빈 입력 조기 반환 이후)
+  if(typeof setSidebarCollapsed === "function") setSidebarCollapsed(false);
+
   appendMessage("user", displayUserText, null, null);
 
   const pendingId = "PENDING_" + Date.now();
@@ -2366,16 +2385,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // ❌ 테마 초기화, 테마 토글, 로그아웃 로직 완벽히 삭제함 (base.html에서 전역 처리)
 
-  // 사이드바 토글
-  const sidebarBtn = el("toggleSidebar");
-  if(sidebarBtn) {
-      sidebarBtn.onclick = () => {
-          const sidebar = el("sidebar");
-          sidebar.classList.toggle("collapsed");
-          // 접혔을 때는 '펼치기(side_navigation)' 아이콘, 펴졌을 때는 '접기(menu_open)' 아이콘
-          sidebarBtn.querySelector('span').textContent = sidebar.classList.contains("collapsed") ? "side_navigation" : "menu_open";
-      };
-  }
+  // 사이드바 토글은 setupSidebarToggle()에서 일괄 처리 (setSidebarCollapsed 기반)
 
   // 모달 제어
   el("docModalClose").onclick = closeModal;
@@ -2535,4 +2545,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await refreshSessions();
   newSession();
+
+  // 대문(초기 로드): 사이드바를 접어 채팅을 중앙에 크게 보여줌.
+  // 세션 선택 또는 첫 메시지 전송 시 setSidebarCollapsed(false)로 자동 펼쳐짐.
+  setSidebarCollapsed(true);
 });
