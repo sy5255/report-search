@@ -21,20 +21,20 @@
   /* --- Neutral palette (paper feel, light mode) --- */
   --color-primary: #1f2d4d;
   --color-primary-container: #2a3a5e;
-  --color-on-primary: #f7f5f0;
+  --color-on-primary: #f5f7fa;
 
-  --color-background: #f7f5f0;              /* warm off-white */
+  --color-background: #f4f6fa;              /* cool slate-blue off-white */
   --color-surface: #ffffff;
   --color-surface-container-lowest: #ffffff;
-  --color-surface-container-low: #f3efe5;
-  --color-surface-container: #ebe6d8;
-  --color-surface-container-high: #e2dbca;
-  --color-surface-container-highest: #d6cdb7;
+  --color-surface-container-low: #eef1f7;
+  --color-surface-container: #e6eaf2;
+  --color-surface-container-high: #dce2ed;
+  --color-surface-container-highest: #ced7e6;
 
   --color-on-surface: #14171f;
   --color-on-surface-soft: #4d5462;
   --color-secondary: #5b6478;
-  --color-outline-variant: #d3cdbe;
+  --color-outline-variant: #d3dae6;
   --color-error: #b52b2b;
 
   /* --- Typography --- */
