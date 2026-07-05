@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}Settings · Intellectual Curator{% endblock %}
+
+{% block content %}
+<main class="flex-1 overflow-y-auto scrolled-content">
+  <div class="max-w-3xl mx-auto px-8 py-10">
+    <header class="mb-8">
+      <h1 class="font-headline font-bold text-2xl mb-1">설정</h1>
+      <p class="text-sm text-secondary">개인 환경 설정. 브라우저별로 저장됩니다.</p>
+    </header>
+
+    <section class="space-y-8">
+      <!-- 폰트 크기 -->
+      <div class="bg-surface border border-outline-variant rounded-2xl p-6">
+        <h2 class="font-headline font-bold text-base mb-1">글자 크기</h2>
+        <p class="text-xs text-secondary mb-4">채팅 답변 · 문서 뷰어 등 모든 본문 글자에 적용됩니다.</p>
+        <div class="flex gap-2" role="radiogroup" aria-label="글자 크기">
+          <button class="settings-chip" data-font="13px" role="radio" type="button"><span class="text-[12px]">작게</span></button>
+          <button class="settings-chip" data-font="14px" role="radio" type="button"><span class="text-[14px]">보통</span></button>
+          <button class="settings-chip" data-font="16px" role="radio" type="button"><span class="text-[16px]">크게</span></button>
+        </div>
+      </div>
+
+      <!-- 기본 분석 모드 -->
+      <div class="bg-surface border border-outline-variant rounded-2xl p-6">
+        <h2 class="font-headline font-bold text-base mb-1">기본 분석 모드</h2>
+        <p class="text-xs text-secondary mb-4">새 질문을 보낼 때 자동으로 붙는 강제 라우팅 태그입니다.</p>
+        <div class="flex gap-2 flex-wrap" role="radiogroup" aria-label="분석 모드">
+          <button class="settings-chip" data-mode="" role="radio" type="button">
+            <span class="material-symbols-outlined">auto_awesome</span><span>자동</span>
+          </button>
+          <button class="settings-chip" data-mode="[DB_ANALYSIS]" role="radio" type="button">
+            <span class="material-symbols-outlined">monitoring</span><span>DB 분석</span>
+          </button>
+          <button class="settings-chip" data-mode="[RAG_KNOWLEDGE]" role="radio" type="button">
+            <span class="material-symbols-outlined">description</span><span>문서 검색</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 기본 인덱스 -->
+      <div class="bg-surface border border-outline-variant rounded-2xl p-6">
+        <h2 class="font-headline font-bold text-base mb-1">기본 인덱스</h2>
+        <p class="text-xs text-secondary mb-4">새 채팅에서 별도 선택 없이 사용할 인덱스를 골라주세요.</p>
+        <div id="defaultIndexList" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+        <div class="mt-4 flex justify-end">
+          <button id="resetDefaultIndex" type="button" class="text-xs text-secondary hover:text-on-surface underline">기본값으로</button>
+        </div>
+      </div>
+
+      <!-- 단축키 안내 -->
+      <div class="bg-surface border border-outline-variant rounded-2xl p-6">
+        <h2 class="font-headline font-bold text-base mb-2">키보드 단축키</h2>
+        <div class="grid grid-cols-1 gap-2 text-sm">
+          <div class="shortcut-row"><span>새 세션</span><kbd>Ctrl</kbd><kbd>N</kbd></div>
+          <div class="shortcut-row"><span>세션 검색</span><kbd>Ctrl</kbd><kbd>K</kbd></div>
+          <div class="shortcut-row"><span>사이드바 토글</span><kbd>Ctrl</kbd><kbd>\</kbd></div>
+          <div class="shortcut-row"><span>응답 중단 / 모달 닫기</span><kbd>Esc</kbd></div>
+          <div class="shortcut-row"><span>도움말</span><kbd>Ctrl</kbd><kbd>/</kbd></div>
+        </div>
+      </div>
+
+      <!-- 정보 -->
+      <div class="bg-surface border border-outline-variant rounded-2xl p-6">
+        <h2 class="font-headline font-bold text-base mb-1">정보</h2>
+        <div class="flex items-center justify-between text-sm">
+          <span class="text-secondary">Intellectual Curator</span>
+          <span class="font-mono text-xs uppercase tracking-wider text-secondary px-2 py-1 rounded-md border border-outline-variant">v{{ version }}</span>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<style>
+.settings-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--color-outline-variant);
+  background: var(--color-surface-container-low);
+  color: var(--color-on-surface-soft);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--duration-fast), border-color var(--duration-fast), color var(--duration-fast);
+}
+.settings-chip .material-symbols-outlined { font-size: 16px; }
+.settings-chip.is-active {
+  background: var(--accent-hybrid);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 2px 6px var(--accent-rag-glow);
+}
+.settings-chip:not(.is-active):hover {
+  border-color: var(--accent-rag);
+  color: var(--accent-rag-strong);
+}
+.settings-index-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-outline-variant);
+  border-radius: 12px;
+  background: var(--color-surface-container-low);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  transition: border-color var(--duration-fast), background var(--duration-fast);
+}
+.settings-index-row.is-active {
+  border-color: var(--accent-rag);
+  background: var(--accent-rag-soft);
+}
+.settings-index-row input { accent-color: var(--accent-rag); }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  const LS_FONT = "rs_font_size";
+  const LS_MODE = "rs_forced_mode";
+  const LS_DEFAULT_INDEX = "rs_default_index";
+
+  const indexOptions = {{ index_options | tojson }};
+  const defaultIndex = {{ default_index | tojson }};
+
+  function setFontSize(val){
+    document.documentElement.style.setProperty("--font-base", val);
+  }
+
+  // ─── 폰트 크기 ───
+  const current = localStorage.getItem(LS_FONT) || "14px";
+  setFontSize(current);
+  document.querySelectorAll('[data-font]').forEach(btn => {
+    if(btn.dataset.font === current) btn.classList.add("is-active");
+    btn.addEventListener("click", () => {
+      document.querySelectorAll('[data-font]').forEach(b => b.classList.remove("is-active"));
+      btn.classList.add("is-active");
+      localStorage.setItem(LS_FONT, btn.dataset.font);
+      setFontSize(btn.dataset.font);
+      if(window.Toast) window.Toast.success("글자 크기를 적용했습니다.");
+    });
+  });
+
+  // ─── 기본 분석 모드 ───
+  const mode = localStorage.getItem(LS_MODE) || "";
+  document.querySelectorAll('[data-mode]').forEach(btn => {
+    if(btn.dataset.mode === mode) btn.classList.add("is-active");
+    btn.addEventListener("click", () => {
+      document.querySelectorAll('[data-mode]').forEach(b => b.classList.remove("is-active"));
+      btn.classList.add("is-active");
+      localStorage.setItem(LS_MODE, btn.dataset.mode);
+      if(window.Toast) window.Toast.success("기본 분석 모드를 저장했습니다.");
+    });
+  });
+
+  // ─── 기본 인덱스 ───
+  const list = document.getElementById("defaultIndexList");
+  const cur = localStorage.getItem(LS_DEFAULT_INDEX) || defaultIndex;
+  function renderIdx(){
+    list.innerHTML = "";
+    indexOptions.forEach(name => {
+      const row = document.createElement("label");
+      row.className = "settings-index-row" + (cur === name ? " is-active" : "");
+      row.innerHTML = `
+        <input type="radio" name="defidx" value="${name}" ${cur === name ? "checked" : ""}/>
+        <span>${name}</span>
+        ${name === defaultIndex ? `<span class="ml-auto text-[9px] uppercase font-bold bg-rag/15 text-rag-strong px-1.5 py-0.5 rounded">default</span>` : ""}
+      `;
+      list.appendChild(row);
+    });
+    list.querySelectorAll('input[name="defidx"]').forEach(inp => {
+      inp.addEventListener("change", () => {
+        localStorage.setItem(LS_DEFAULT_INDEX, inp.value);
+        renderIdx();
+        if(window.Toast) window.Toast.success("기본 인덱스를 변경했습니다.");
+      });
+    });
+  }
+  renderIdx();
+
+  const resetBtn = document.getElementById("resetDefaultIndex");
+  if(resetBtn){
+    resetBtn.addEventListener("click", () => {
+      localStorage.removeItem(LS_DEFAULT_INDEX);
+      window.location.reload();
+    });
+  }
+})();
+</script>
+{% endblock %}

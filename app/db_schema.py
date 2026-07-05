@@ -23,6 +23,15 @@ def ensure_tables():
         except Exception:
             pass
 
+        try:
+            cur.execute("ALTER TABLE chat_sessions ADD COLUMN pinned TINYINT(1) NOT NULL DEFAULT 0;")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE chat_sessions ADD COLUMN folder VARCHAR(64) NULL;")
+        except Exception:
+            pass
+
         cur.execute("""
         CREATE TABLE IF NOT EXISTS chat_messages (
             msg_id VARCHAR(36) PRIMARY KEY,
@@ -81,6 +90,24 @@ def ensure_tables():
             INDEX idx_user_id (user_id),
             INDEX idx_user_msg_id (user_msg_id),
             INDEX idx_created_at (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """)
+
+        # 응답 품질 피드백 (Phase 1: 👍/👎)
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS chat_message_feedback (
+            feedback_id VARCHAR(36) PRIMARY KEY,
+            assistant_msg_id VARCHAR(36) NOT NULL,
+            session_id VARCHAR(36) NULL,
+            user_id VARCHAR(128) NOT NULL,
+            rating ENUM('up','down') NOT NULL,
+            comment TEXT NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            UNIQUE KEY uq_msg_user (assistant_msg_id, user_id),
+            INDEX idx_session_id (session_id),
+            INDEX idx_user_id (user_id),
+            INDEX idx_rating (rating)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """)
 

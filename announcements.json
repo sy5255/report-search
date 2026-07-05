@@ -1,0 +1,23 @@
+{
+  "enabled": true,
+  "items": [
+    {
+      "id": "2026-07-welcome",
+      "title": "새로워진 Intellectual Curator",
+      "body": "채팅 UI와 세션 관리 기능이 개선되었습니다. 좌측 상단 ≡ 버튼으로 대화 목록을 열고 닫을 수 있습니다.",
+      "start_date": "2026-07-01",
+      "end_date": "2026-07-31",
+      "important": false,
+      "enabled": true
+    },
+    {
+      "id": "sample-important",
+      "title": "(예시) 긴급 점검 안내",
+      "body": "important=true 로 설정하면 '일주일간 보지 않기'를 눌러도 강제로 다시 표시됩니다. enabled=false 로 두면 노출되지 않습니다.",
+      "start_date": "",
+      "end_date": "",
+      "important": true,
+      "enabled": false
+    }
+  ]
+}

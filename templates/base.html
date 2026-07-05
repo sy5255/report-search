@@ -5,44 +5,11 @@
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>{% block title %}Intellectual Curator{% endblock %}</title>
     
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@700;800&display=swap" rel="stylesheet"/>
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable-dynamic-subset.min.css"/>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet"/>
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-    
-    <style>
-        /* 💡 테마 색상 변수 정의 (다크 모드 완벽 대응) */
-        :root {
-            --color-primary: #1e293b;
-            --color-primary-container: #343f52;
-            --color-on-primary: #f6f7ff;
-            --color-background: #f7f9fb;
-            --color-surface: #ffffff;
-            --color-surface-container-lowest: #ffffff;
-            --color-surface-container-low: #f2f4f6;
-            --color-surface-container: #eceef0;
-            --color-surface-container-high: #e6e8ea;
-            --color-surface-container-highest: #e0e3e5;
-            --color-on-surface: #191c1e;
-            --color-secondary: #505f76;
-            --color-outline-variant: #c4c6cd;
-            --color-error: #b52b2b;
-        }
-        .dark {
-            --color-primary: #60a5fa; /* 다크 모드 포인트 블루 */
-            --color-primary-container: #1e3a8a;
-            --color-on-primary: #ffffff;
-            --color-background: #0b1220; /* 다크 모드 배경 */
-            --color-surface: #0f172a;
-            --color-surface-container-lowest: #0b1220;
-            --color-surface-container-low: #1e293b;
-            --color-surface-container: #334155;
-            --color-surface-container-high: #475569;
-            --color-surface-container-highest: #64748b;
-            --color-on-surface: #f8fafc; /* 다크 모드 밝은 텍스트 */
-            --color-secondary: #94a3b8;
-            --color-outline-variant: #475569;
-            --color-error: #ef4444;
-        }
-    </style>
+
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/design-tokens.css') }}"/>
 
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <script>
@@ -62,11 +29,21 @@
                         "surface-container-high": "var(--color-surface-container-high)",
                         "surface-container-highest": "var(--color-surface-container-highest)",
                         "on-surface": "var(--color-on-surface)",
+                        "on-surface-soft": "var(--color-on-surface-soft)",
                         "secondary": "var(--color-secondary)",
                         "outline-variant": "var(--color-outline-variant)",
-                        "error": "var(--color-error)"
+                        "error": "var(--color-error)",
+                        /* Agent identity accents */
+                        "rag": "var(--accent-rag)",
+                        "rag-strong": "var(--accent-rag-strong)",
+                        "db-accent": "var(--accent-db)",
+                        "db-strong": "var(--accent-db-strong)"
                     },
-                    fontFamily: { "headline": ["Manrope", "sans-serif"], "body": ["Inter", "sans-serif"] }
+                    fontFamily: {
+                        "headline": ["Pretendard Variable", "Pretendard", "Inter", "sans-serif"],
+                        "body": ["Pretendard Variable", "Pretendard", "Inter", "sans-serif"],
+                        "mono": ["JetBrains Mono", "SFMono-Regular", "Menlo", "Consolas", "monospace"]
+                    }
                 }
             }
         }
@@ -75,18 +52,21 @@
     <link rel="stylesheet" href="{{ url_for('static', path='/css/chat.css') }}">
     <style>
         .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
-        .scrolled-content::-webkit-scrollbar { width: 4px; }
+        .scrolled-content::-webkit-scrollbar { width: 4px; height: 4px; }
+        .scrolled-content::-webkit-scrollbar-track { background: transparent; }
         .scrolled-content::-webkit-scrollbar-thumb { background: var(--color-outline-variant); border-radius: 10px; }
     </style>
     {% block extra_head %}{% endblock %}
 </head>
 <body class="bg-background text-on-surface font-body h-screen flex flex-col overflow-hidden">
 
-    <header class="bg-surface border-b border-surface-container flex items-center justify-between px-6 h-16 w-full shrink-0 z-50">
+    <header class="glass border-b border-surface-container flex items-center justify-between px-6 h-16 w-full shrink-0 z-50">
         <div class="flex items-center gap-8">
-            <div class="flex items-center gap-2">
-                <span class="material-symbols-outlined text-primary">book_4</span>
-                <h1 class="text-xl font-bold tracking-tight font-headline">Intellectual Curator</h1>
+            <div class="flex items-center gap-2.5">
+                <img src="{{ url_for('static', path='/images/logo.svg') }}" alt="" width="32" height="32" class="shrink-0"/>
+                <div class="flex items-baseline gap-2">
+                    <h1 class="text-xl font-bold tracking-tight font-headline">Intellectual Curator</h1>
+                </div>
             </div>
             <nav class="hidden md:flex items-center gap-6">
                 <a href="/chat" class="text-sm font-medium transition-colors {% if active_tab == 'knowledge_base' %} border-b-2 border-primary text-on-surface pb-1 {% else %} text-secondary hover:text-on-surface {% endif %}">Knowledge Base</a>
@@ -97,7 +77,10 @@
         </div>
         
         <div class="flex items-center gap-4">
-            <button id="themeToggleGlobal" class="p-2 rounded-full hover:bg-surface-container transition-colors">
+            <a href="/settings" class="p-2 rounded-full hover:bg-surface-container transition-colors text-secondary {% if active_tab == 'settings' %}text-on-surface{% endif %}" aria-label="설정" title="설정">
+                <span class="material-symbols-outlined">settings</span>
+            </a>
+            <button id="themeToggleGlobal" class="p-2 rounded-full hover:bg-surface-container transition-colors" aria-label="라이트/다크 모드 전환" title="테마 전환">
                 <span class="material-symbols-outlined text-secondary" id="themeIcon">light_mode</span>
             </button>
             <button id="logoutGlobal" class="px-3 py-1.5 rounded-full bg-error/10 text-error text-xs font-bold hover:bg-error/20 transition-colors">Logout</button>
@@ -110,6 +93,16 @@
     <div class="flex flex-1 overflow-hidden">
         {% block content %}{% endblock %}
     </div>
+
+    <script>
+      // 사용자 폰트 크기 즉시 적용 (FOUC 방지)
+      try {
+        var f = localStorage.getItem("rs_font_size");
+        if (f) document.documentElement.style.setProperty("--font-base", f);
+      } catch(_){}
+    </script>
+
+    <script src="{{ url_for('static', path='/js/toast.js') }}"></script>
 
     {% block scripts %}{% endblock %}
 
@@ -131,10 +124,16 @@
             const themeBtn = document.getElementById('themeToggleGlobal');
             if (themeBtn) {
                 themeBtn.addEventListener('click', () => {
+                    // 전환 순간 트랜지션을 꺼서 전체가 한 번에 바뀌도록 (영역별 시간차 제거)
+                    htmlEl.classList.add('theme-no-transition');
                     htmlEl.classList.toggle('dark');
                     const isDark = htmlEl.classList.contains('dark');
                     localStorage.theme = isDark ? 'dark' : 'light';
                     if (themeIcon) themeIcon.textContent = isDark ? "dark_mode" : "light_mode";
+                    // 두 프레임 뒤 트랜지션 복원 (리페인트 완료 후)
+                    requestAnimationFrame(() => requestAnimationFrame(() => {
+                        htmlEl.classList.remove('theme-no-transition');
+                    }));
                 });
             }
 
@@ -142,7 +141,10 @@
             const logoutBtn = document.getElementById('logoutGlobal');
             if (logoutBtn) {
                 logoutBtn.addEventListener('click', async () => {
-                    if (!confirm("로그아웃 하시겠습니까?")) return;
+                    const ok = window.Toast
+                      ? await window.Toast.confirm("로그아웃 하시겠습니까?", { okText: "로그아웃", destructive: true })
+                      : confirm("로그아웃 하시겠습니까?");
+                    if (!ok) return;
                     try {
                         // main.py에 정의된 정확한 경로(/logout)로 POST 요청
                         await fetch('/logout', { method: 'POST' });

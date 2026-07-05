@@ -111,6 +111,29 @@ async def logout(request: Request):
     resp.delete_cookie(key="token")
     return resp
 
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    user = _require_user(request)
+    return templates.TemplateResponse("settings.html", {
+        "request": request,
+        "user_id": user,
+        "default_index": DEFAULT_INDEX_NAME,
+        "index_options": INDEX_OPTIONS,
+        "active_tab": "settings",
+        "version": VERSION,
+    })
+
+
+@app.get("/admin/dictionary", response_class=HTMLResponse)
+async def admin_dictionary_page(request: Request):
+    user = _require_user(request)
+    return templates.TemplateResponse("admin_dictionary.html", {
+        "request": request,
+        "user_id": user,
+        "active_tab": "admin",
+    })
+
+
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request):
     user = _require_user(request)
@@ -191,6 +214,12 @@ async def api_get_session_messages(session_id: str, request: Request):
             continue
         search_log_by_user_msg_id[user_msg_id] = log
 
+    feedback_map = {}
+    try:
+        feedback_map = repo.get_feedback_map(session_id, user)
+    except Exception as e:
+        print(f"Feedback 로드 실패: {e}")
+
     for m in msgs:
         if m["role"] == "assistant":
             ast_id = m.get("msg_id")
@@ -198,6 +227,7 @@ async def api_get_session_messages(session_id: str, request: Request):
             m["intent"] = rag_info.get("intent")
             m["suggested_actions"] = rag_info.get("suggested_actions", [])
             m["agent_steps"] = rag_info.get("agent_steps", [])
+            m["feedback"] = feedback_map.get(ast_id)
 
     return {"messages": msgs, "search_logs_by_user_msg_id": search_log_by_user_msg_id}
 
@@ -620,6 +650,9 @@ CACHE_CHECK_INTERVAL = 86400
 # processed.json 파일 경로 설정
 PROCESSED_JSON_PATH = PARSE_ROOT / "_state" / "processed.json"
 
+# 로그인 후 표시할 공지사항 파일 (프로젝트 루트, 관리자가 직접 편집)
+ANNOUNCEMENTS_PATH = Path(__file__).resolve().parent.parent / "announcements.json"
+
 # 허용된 작성자 화이트리스트 (이름만 작성)
 ALLOWED_AUTHORS = ["성지아 <j.na@s.com>", "김지수 <s.go@s.com>", "고미연 <y.ko@s.com>", "김영인 <i.kim@s.com>", "진연수 <s.jin@s.com>", "유미래 <g.y@s.com>", "신현빈 <s.shin@s.com>", "서세린 <s.se@s.com>", "오슬미 <s.y@s.com>", "이자린 <k.lee@s.com>", "김장미 <m.kim@s.com>", "김소희 <j.kim@s.com>", "이나연 <h.oh@s.com>", "윤희서 <k.y@s.com>", "미인지 <s.mg@s.com>"]
 
@@ -938,6 +971,104 @@ async def api_archive_session(session_id: str, request: Request):
     user = _require_user(request)
     repo.archive_session(session_id, user)
     return {"ok": True}
+
+
+@app.post("/api/sessions/{session_id}/pin")
+async def api_pin_session(session_id: str, request: Request):
+    user = _require_user(request)
+    body = await request.json()
+    pinned = bool(body.get("pinned"))
+    ok = repo.set_session_pin(session_id, user, pinned)
+    if not ok:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"ok": True, "pinned": pinned}
+
+
+@app.post("/api/sessions/{session_id}/folder")
+async def api_folder_session(session_id: str, request: Request):
+    user = _require_user(request)
+    body = await request.json()
+    folder = body.get("folder")
+    ok = repo.set_session_folder(session_id, user, folder)
+    if not ok:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"ok": True, "folder": folder}
+
+
+@app.patch("/api/sessions/{session_id}")
+async def api_patch_session(session_id: str, request: Request):
+    user = _require_user(request)
+    body = await request.json()
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title required")
+    ok = repo.update_session_title(session_id, user, title)
+    if not ok:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"ok": True, "title": title[:255]}
+
+
+@app.post("/api/feedback")
+async def api_post_feedback(request: Request):
+    user = _require_user(request)
+    body = await request.json()
+    assistant_msg_id = (body.get("assistant_msg_id") or "").strip()
+    rating = (body.get("rating") or "").strip()
+    comment = body.get("comment")
+    session_id = body.get("session_id")
+    if not assistant_msg_id or rating not in ("up", "down"):
+        raise HTTPException(status_code=400, detail="assistant_msg_id and rating(up|down) required")
+    result = repo.upsert_feedback(
+        assistant_msg_id=assistant_msg_id,
+        user_id=user,
+        rating=rating,
+        comment=comment,
+        session_id=session_id,
+    )
+    return {"ok": True, **result}
+
+
+@app.get("/api/announcements/active")
+async def api_active_announcements(request: Request):
+    """로그인 후 표시할 활성 공지 목록.
+    announcements.json(프로젝트 루트)을 관리자가 편집한다.
+    - 전역 enabled=false 이면 전체 숨김.
+    - 각 item은 enabled=true 이고 오늘이 [start_date, end_date] 범위여야 노출.
+    - important=true 이면 프론트에서 '일주일간 보지 않기'를 무시하고 강제 표시.
+    """
+    _require_user(request)
+    try:
+        if not ANNOUNCEMENTS_PATH.exists():
+            return {"items": []}
+        with open(ANNOUNCEMENTS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"[Announcements] 읽기 실패: {e}")
+        return {"items": []}
+
+    if not data.get("enabled", True):
+        return {"items": []}
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    out = []
+    for it in (data.get("items") or []):
+        if not it.get("enabled", True):
+            continue
+        start = (it.get("start_date") or "").strip()
+        end = (it.get("end_date") or "").strip()
+        if start and today < start:
+            continue
+        if end and today > end:
+            continue
+        out.append({
+            "id": str(it.get("id") or ""),
+            "title": it.get("title") or "",
+            "body": it.get("body") or "",
+            "important": bool(it.get("important", False)),
+            "start_date": start,
+            "end_date": end,
+        })
+    return {"items": out}
 
 
 @app.get("/api/sessions/{session_id}/latest-artifact")

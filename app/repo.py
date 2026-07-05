@@ -47,11 +47,47 @@ def list_sessions(user_id: str):
     cur = conn.cursor(dictionary=True)
     try:
         cur.execute(
-            "SELECT session_id, title, updated_at FROM chat_sessions "
-            "WHERE user_id=%s AND archived=0 ORDER BY updated_at DESC",
+            "SELECT session_id, title, updated_at, "
+            "COALESCE(pinned, 0) AS pinned, folder "
+            "FROM chat_sessions "
+            "WHERE user_id=%s AND archived=0 "
+            "ORDER BY pinned DESC, updated_at DESC",
             (user_id,)
         )
         return cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+
+
+def set_session_pin(session_id: str, user_id: str, pinned: bool) -> bool:
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "UPDATE chat_sessions SET pinned=%s WHERE session_id=%s AND user_id=%s",
+            (1 if pinned else 0, session_id, user_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        cur.close()
+        conn.close()
+
+
+def set_session_folder(session_id: str, user_id: str, folder: str | None) -> bool:
+    folder = (folder or "").strip() or None
+    if folder:
+        folder = folder[:64]
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "UPDATE chat_sessions SET folder=%s WHERE session_id=%s AND user_id=%s",
+            (folder, session_id, user_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
     finally:
         cur.close()
         conn.close()
@@ -417,3 +453,85 @@ def get_artifacts_for_session(session_id: str, user_id: str):
     finally:
         cur.close()
         conn.close()
+
+def upsert_feedback(assistant_msg_id: str, user_id: str, rating: str, comment: str | None = None, session_id: str | None = None) -> dict:
+    """좋아요/싫어요 토글 (같은 rating이면 취소, 다르면 갱신).
+    반환: {"rating": "up"|"down"|None}
+    """
+    if rating not in ("up", "down"):
+        raise ValueError("rating must be up or down")
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            "SELECT feedback_id, rating FROM chat_message_feedback "
+            "WHERE assistant_msg_id=%s AND user_id=%s",
+            (assistant_msg_id, user_id),
+        )
+        existing = cur.fetchone()
+        now = _now_dt()
+        if existing and existing["rating"] == rating:
+            cur.execute(
+                "DELETE FROM chat_message_feedback WHERE feedback_id=%s",
+                (existing["feedback_id"],),
+            )
+            conn.commit()
+            return {"rating": None}
+        if existing:
+            cur.execute(
+                "UPDATE chat_message_feedback SET rating=%s, comment=%s, updated_at=%s "
+                "WHERE feedback_id=%s",
+                (rating, comment, now, existing["feedback_id"]),
+            )
+            conn.commit()
+            return {"rating": rating}
+        cur.execute(
+            "INSERT INTO chat_message_feedback "
+            "(feedback_id, assistant_msg_id, session_id, user_id, rating, comment, created_at, updated_at) "
+            "VALUES(%s,%s,%s,%s,%s,%s,%s,%s)",
+            (str(uuid.uuid4()), assistant_msg_id, session_id, user_id, rating, comment, now, now),
+        )
+        conn.commit()
+        return {"rating": rating}
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_feedback_map(session_id: str, user_id: str) -> dict:
+    """세션의 모든 어시스턴트 메시지에 대한 사용자 피드백을 {msg_id: "up"|"down"}으로 반환."""
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            "SELECT assistant_msg_id, rating FROM chat_message_feedback "
+            "WHERE session_id=%s AND user_id=%s",
+            (session_id, user_id),
+        )
+        return {r["assistant_msg_id"]: r["rating"] for r in (cur.fetchall() or [])}
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+def update_session_title(session_id: str, user_id: str, title: str) -> bool:
+    title = (title or "").strip()
+    if not title:
+        return False
+    title = title[:255]
+    now = _now_dt()
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "UPDATE chat_sessions SET title=%s, updated_at=%s "
+            "WHERE session_id=%s AND user_id=%s",
+            (title, now, session_id, user_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        cur.close()
+        conn.close()
+

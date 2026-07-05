@@ -91,7 +91,13 @@
                     <h2 id="viewerTitle" class="text-sm font-bold font-manrope text-on-surface truncate pr-4">문서를 선택해주세요</h2>
                 </div>
                 <div class="flex gap-2 shrink-0">
-                    <button id="expandBtn" class="p-2 rounded-lg hover:bg-surface-container-high text-secondary transition-colors" title="크게 보기">
+                    <button id="bookmarkBtn" class="p-2 rounded-lg hover:bg-surface-container-high text-secondary transition-colors hidden" title="즐겨찾기" aria-label="즐겨찾기">
+                        <span class="material-symbols-outlined text-[18px]">star</span>
+                    </button>
+                    <button id="downloadMdBtn" class="p-2 rounded-lg hover:bg-surface-container-high text-secondary transition-colors hidden" title="Markdown 다운로드" aria-label="Markdown 다운로드">
+                        <span class="material-symbols-outlined text-[18px]">download</span>
+                    </button>
+                    <button id="expandBtn" class="p-2 rounded-lg hover:bg-surface-container-high text-secondary transition-colors" title="크게 보기" aria-label="크게 보기">
                         <span class="material-symbols-outlined text-[18px]">open_in_full</span>
                     </button>
                 </div>
@@ -159,7 +165,7 @@
         <div class="bg-surface-container-lowest w-[500px] rounded-2xl p-8 shadow-2xl border border-outline/20">
             <div class="flex justify-between items-center mb-6">
                 <h3 id="termModalTitle" class="text-xl font-bold font-manrope text-on-surface">Suggest Term / Alias</h3>
-                <button onclick="closeTermModal()" class="text-secondary hover:text-error transition-colors">
+                <button onclick="closeTermModal()" class="text-secondary hover:text-error transition-colors" aria-label="모달 닫기" title="닫기">
                     <span class="material-symbols-outlined">close</span>
                 </button>
             </div>

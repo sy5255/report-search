@@ -162,7 +162,7 @@
                     </div>
 
                     <div class="flex justify-end gap-3 pt-8 border-t border-surface-container mt-6">
-                        <button type="button" onclick="alert('반려 기능은 추후 연동됩니다.')" class="px-6 py-3 text-sm font-bold text-error hover:bg-error/5 rounded-xl transition-colors border border-transparent hover:border-error/20">
+                        <button type="button" onclick="window.Toast ? window.Toast.info('반려 기능은 추후 연동됩니다.') : alert('반려 기능은 추후 연동됩니다.')" class="px-6 py-3 text-sm font-bold text-error hover:bg-error/5 rounded-xl transition-colors border border-transparent hover:border-error/20">
                             Reject (반려)
                         </button>
                         <button type="submit" class="px-8 py-3 text-sm font-extrabold bg-primary text-on-primary rounded-xl hover:opacity-90 shadow-lg shadow-primary/20 transition-all flex items-center gap-2">
@@ -234,12 +234,16 @@
                     body: JSON.stringify(payload)
                 });
                 if(!res.ok) throw new Error("승인 처리 실패");
-                alert("✅ 성공적으로 승인 및 RAG 인덱스 업데이트가 예약되었습니다.");
+                (window.Toast
+                  ? window.Toast.success("RAG 인덱스 업데이트가 예약되었습니다.", { title: "용어 승인 완료" })
+                  : alert("✅ 성공적으로 승인 및 RAG 인덱스 업데이트가 예약되었습니다."));
                 document.getElementById("emptyState").classList.remove("hidden");
                 document.getElementById("formState").classList.add("hidden");
                 loadPendingQueue(false);
             } catch(err) {
-                alert("승인 중 에러가 발생했습니다.");
+                (window.Toast
+                  ? window.Toast.error(err.message || "승인 처리 실패", { title: "승인 실패" })
+                  : alert("승인 중 에러가 발생했습니다."));
             }
         });
     });
