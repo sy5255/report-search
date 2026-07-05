@@ -209,8 +209,8 @@ function renderMarkdownSafe(mdText){
     });
   }
 
-  // 인용구 변환: [1], [2]를 citation-pill로 교체
-  rendered = rendered.replace(/\[(\d+)\]/g, '<span class="citation-pill" onclick="openDocFromCitationIndex($1)">$1</span>');
+  // 인용구 [n] → pill 변환은 DOM 렌더 후 convertCitationPills()에서 수행
+  // (문자열 정규식 전역 치환은 표/코드 안의 무관한 [3]까지 오변환하는 버그가 있었음)
 
   return rendered;
 }
@@ -352,6 +352,52 @@ function addCodeCopyButtons(container){
   });
 }
 
+function convertCitationPills(container){
+  // [n] 텍스트를 citation pill로 변환 (DOM 기반).
+  // 조건: 유효한 citation 번호(1..N)일 때만, 표/코드/링크 내부는 제외 → 오변환 방지.
+  if(!container) return;
+  const total = (lastCitations && Array.isArray(lastCitations.answer)) ? lastCitations.answer.length : 0;
+  if(!total) return;
+
+  const SKIP_TAGS = ["A", "CODE", "PRE", "SCRIPT", "STYLE", "BUTTON", "TABLE", "THEAD", "TBODY", "TH", "TD", "SUMMARY", "KBD"];
+  const re = /\[(\d{1,2})\]/g;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+  const targets = [];
+  let node;
+  while((node = walker.nextNode())){
+    let p = node.parentElement, skip = false;
+    while(p && p !== container){
+      if(SKIP_TAGS.includes(p.tagName)){ skip = true; break; }
+      p = p.parentElement;
+    }
+    if(skip) continue;
+    re.lastIndex = 0;
+    if(node.nodeValue && re.test(node.nodeValue)) targets.push(node);
+  }
+
+  targets.forEach(textNode => {
+    const text = textNode.nodeValue || "";
+    const frag = document.createDocumentFragment();
+    let last = 0, changed = false, m;
+    re.lastIndex = 0;
+    while((m = re.exec(text))){
+      const n = parseInt(m[1], 10);
+      if(n < 1 || n > total) continue; // 무효 번호는 텍스트 그대로 유지
+      frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+      const pill = document.createElement("span");
+      pill.className = "citation-pill";
+      pill.textContent = String(n);
+      pill.addEventListener("click", () => window.openDocFromCitationIndex(String(n)));
+      frag.appendChild(pill);
+      last = m.index + m[0].length;
+      changed = true;
+    }
+    if(!changed) return;
+    frag.appendChild(document.createTextNode(text.slice(last)));
+    if(textNode.parentNode) textNode.parentNode.replaceChild(frag, textNode);
+  });
+}
+
 function enhanceRenderedMessage(scope){
   if(!scope) return;
 
@@ -364,6 +410,7 @@ function enhanceRenderedMessage(scope){
       a.target = "_blank";
       a.rel = "noopener noreferrer";
     });
+    convertCitationPills(node);
   });
   attachCitationHovers(scope);
 }
@@ -1127,6 +1174,7 @@ function appendMessage(role, content, metaText, msgId, extra = null){
   let chipsHtml = "";
   let stepsHtml = "";
   let actionBarHtml = "";
+  let verifyHtml = "";
   const isPending = typeof msgId === "string" && msgId.startsWith("PENDING_");
 
   if(role === "user" && extra) {
@@ -1151,6 +1199,22 @@ function appendMessage(role, content, metaText, msgId, extra = null){
           <span class="agent-badge-divider">·</span>
           <span class="agent-badge-time">${escapeHtml(formatTimeForUI(metaText))}</span>
         </div>`;
+    }
+
+    // 💡 검증 배지: claim 근거 지원율 + DB 수치 에코 체크 결과
+    if(extra.verification){
+      const v = extra.verification;
+      const parts = [];
+      if(typeof v.claims_total === "number" && v.claims_total > 0){
+        const ok = v.claims_supported || 0;
+        const cls = ok === v.claims_total ? "is-good" : (ok > 0 ? "is-mid" : "is-bad");
+        parts.push(`<span class="verify-badge ${cls}" title="답변 속 주장 중 근거 문서로 뒷받침된 비율">근거 ${ok}/${v.claims_total}</span>`);
+      }
+      if(v.numeric_ok === false){
+        const nums = (v.unmatched || []).join(", ");
+        parts.push(`<span class="verify-badge is-bad" title="답변 속 일부 수치가 DB 조회 결과에서 확인되지 않았습니다: ${escapeHtml(nums)}">⚠ 수치 확인 필요</span>`);
+      }
+      if(parts.length) verifyHtml = `<div class="verify-badges mb-3">${parts.join("")}</div>`;
     }
 
     // 💡 [개편] 계층형 개별 토글 UI 적용 (숫자 뱃지 + 양끝 정렬)
@@ -1275,6 +1339,7 @@ function appendMessage(role, content, metaText, msgId, extra = null){
       <div class="assistant-card w-full max-w-[90%] bg-white dark:bg-[#0f1a33] border border-surface-container dark:border-[#1f2b4a] rounded-2xl p-6 hover:shadow-md cursor-pointer group/ai-card">
         ${intentHtml}
         <div class="pl-11">
+            ${verifyHtml}
             ${stepsHtml}
             <div class="content markdown-body text-sm leading-relaxed text-on-surface dark:text-[#e7eefc]">
                 ${renderMessageContent(role, content)}
@@ -1348,6 +1413,9 @@ async function loadEvidenceByAssistantMsgId(assistantMsgId){
     if(art.citations){
       lastCitations = art.citations;
       renderCitations(lastCitations);
+      // 히스토리 로드 시점엔 citation 개수를 몰라 [n]이 평문으로 남아 있음 → 지금 pill로 변환
+      const msgNode = document.querySelector(`.msg.assistant[data-msg-id="${CSS.escape(assistantMsgId)}"]`);
+      if(msgNode) enhanceRenderedMessage(msgNode);
     }
   } catch(e){
   }
@@ -1512,19 +1580,26 @@ function renderCitations(citations){
     const sentence = (a.sentence || "").trim();
     const cites = a.citations || [];
 
+    // 💡 claim 지원 상태 아이콘 (✓ 근거 확인 / ◐ 부분 / ⚠ 근거 없음)
+    const support = (a.support || "").toLowerCase();
+    let supIcon = "";
+    if(support === "supported")        supIcon = `<span class="cite-support is-good" title="근거 문서로 명확히 뒷받침됨">✓</span>`;
+    else if(support === "unsupported") supIcon = `<span class="cite-support is-bad" title="근거 문서에서 확인되지 않은 주장입니다">⚠</span>`;
+    else if(support)                   supIcon = `<span class="cite-support is-mid" title="부분적으로만 뒷받침됨">◐</span>`;
+
     const div = document.createElement("div");
     // 💡 [색상 수정] 다크 모드 배경색 직접 주입
     div.className = "bg-white dark:bg-[#0f1a33] dark:text-[#e7eefc] p-3 border border-surface-container dark:border-[#1f2b4a] rounded-lg mb-3 shadow-sm";
     div.innerHTML = `
-      <div class="text-[12px] leading-relaxed mb-2"><span class="font-bold text-primary dark:text-[#60a5fa]">${idx+1}.</span> ${escapeHtml(sentence)}</div>
-      <button class="cite-btn px-2 py-1 bg-surface-container dark:bg-[#1f2b4a] hover:bg-surface-container-high dark:hover:bg-[#334155] rounded text-[10px] font-semibold">근거 문서 보기</button>
+      <div class="text-[12px] leading-relaxed mb-2"><span class="font-bold text-primary dark:text-[#60a5fa]">${idx+1}.</span> ${supIcon} ${escapeHtml(sentence)}</div>
+      ${cites.length ? `<button class="cite-btn px-2 py-1 bg-surface-container dark:bg-[#1f2b4a] hover:bg-surface-container-high dark:hover:bg-[#334155] rounded text-[10px] font-semibold">근거 문서 보기</button>` : `<div class="text-[10px] text-error/80">연결된 근거 문서 없음</div>`}
       <div class="cite-list hidden mt-3 space-y-2 border-t border-surface-container dark:border-[#1f2b4a] pt-2"></div>
     `;
 
     const btn = div.querySelector(".cite-btn");
     const list = div.querySelector(".cite-list");
 
-    btn.onclick = () => {
+    if(btn) btn.onclick = () => {
       if(list.classList.contains("hidden")){
         list.classList.remove("hidden");
         list.innerHTML = "";
@@ -2335,17 +2410,20 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
         const extraData = {
           intent: finalRes.intent,
           suggested_actions: finalRes.suggested_actions,
-          agent_steps: finalRes.agent_steps
+          agent_steps: finalRes.agent_steps,
+          verification: finalRes.verification || null
         };
+
+        // 인용 pill 변환(convertCitationPills)이 렌더 시점에 citation 개수를 참조하므로
+        // appendMessage보다 먼저 세팅해야 한다.
+        currentEvidenceAssistantMsgId = finalRes.assistant_msg_id || null;
+        lastTopDocs = finalRes.top_docs || [];
+        lastCitations = finalRes.citations || {answer:[], final:finalRes.assistant_text};
 
         appendMessage("assistant", finalRes.assistant_text, new Date().toISOString(), finalRes.assistant_msg_id || null, extraData);
         setSelectedAssistantMsg(finalRes.assistant_msg_id || "");
 
-        currentEvidenceAssistantMsgId = finalRes.assistant_msg_id || null;
-        lastTopDocs = finalRes.top_docs || [];
         renderTopDocsFiltered();
-
-        lastCitations = finalRes.citations || {answer:[], final:finalRes.assistant_text};
         renderCitations(lastCitations);
 
         await refreshSessions();

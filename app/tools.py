@@ -85,7 +85,8 @@ def execute_tool(func_name: str, args: dict) -> Tuple[str, list]:
             extracted_docs = []
             for hit in hits:
                 src = hit.get("_source", {})
-                content = src.get("merge_title_content", "")[:1500]
+                # citation 검증 evidence(2500자)와 동일 길이로 절단 — LLM이 본 것과 검증 대상 불일치 방지
+                content = src.get("merge_title_content", "")[:2500]
                 extracted_docs.append(f"[Title: {src.get('title')}] {content}")
                
             result_str = f"(검색 의도: {intent}, 쿼리: {search_query})\n\n" + "\n---\n".join(extracted_docs)

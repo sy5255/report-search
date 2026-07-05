@@ -451,7 +451,8 @@ async def api_chat_stream(request: Request):
                 "expansion_terms": query_norm.get("expansion_terms") or {},
                 "intent": final_data.get("intent"),
                 "suggested_actions": final_data.get("suggested_actions", []),
-                "agent_steps": final_data.get("steps", [])
+                "agent_steps": final_data.get("steps", []),
+                "verification": final_data.get("verification", {})
             }
             yield json.dumps({"type": "final", "data": final_res_payload}, ensure_ascii=False) + "\n"
 

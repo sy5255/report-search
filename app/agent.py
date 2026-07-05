@@ -1,10 +1,13 @@
 import json
+import re
 import datetime
 from app.llm_client import (
     _make_client,
     _build_citation_prompt,
     _call_json,
     _normalize_claims_to_answer_list,
+    validate_citations,
+    llm_answer_with_citations,
     CITATION_MAX_TOKENS
 )
 from app.tools import TOOLS_SCHEMA, execute_tool
@@ -176,6 +179,54 @@ def _get_suggested_actions(intent: str, db_used: bool = False) -> list:
         return []
 
 # =====================================================================
+# 🧠 3.5. 검증 유틸 (숫자 에코 체크 · 근거 게이트 템플릿)
+# =====================================================================
+_NUM_RE = re.compile(r"\d[\d,\.]*")
+
+def _extract_numbers(text: str) -> set:
+    """2자리 이상 숫자만 추출 (콤마 제거, 노이즈 축소)."""
+    out = set()
+    for m in _NUM_RE.finditer(text or ""):
+        s = m.group(0).replace(",", "").rstrip(".")
+        digits = re.sub(r"\D", "", s)
+        if len(digits) >= 2:
+            out.add(s)
+    return out
+
+
+def _numeric_echo_check(final_answer: str, db_tool_results: list, allowed_extra: set) -> dict:
+    """DB 답변 속 숫자가 실제 도구 결과에 존재하는지 결정적으로 검사.
+    SQL <details> 블록과 코드펜스는 제외. 사용자 질문 속 숫자는 허용."""
+    ans = re.sub(r"<details>.*?</details>", " ", final_answer or "", flags=re.S | re.I)
+    ans = re.sub(r"```.*?```", " ", ans, flags=re.S)
+    ans_nums = _extract_numbers(ans)
+    src_nums = set(allowed_extra or set())
+    for t in db_tool_results or []:
+        src_nums |= _extract_numbers(t)
+    unmatched = sorted(n for n in ans_nums if n not in src_nums)
+    return {"numeric_ok": not unmatched, "unmatched": unmatched[:10]}
+
+
+NO_EVIDENCE_ANSWER = (
+    "### 🔍 사내 문서에서 근거를 찾지 못했습니다\n\n"
+    "> **📌 안내**\n"
+    "질문과 관련된 사내 기술 문서를 검색했지만, 신뢰할 수 있는 근거 문서를 확보하지 못했습니다.\n"
+    "추측으로 답변을 지어내지 않도록 답변 생성을 중단했습니다.\n\n"
+    "#### 이렇게 해보세요\n"
+    "- 핵심 키워드를 바꾸거나 줄여서 다시 질문해 주세요.\n"
+    "- 특정 공정/불량명이라면 표준 용어(약어 대신 정식 명칭)로 시도해 주세요.\n"
+    "- 통계성 질문이라면 아래 버튼으로 DB 통계 Agent를 호출해 보세요."
+)
+
+RAG_SYNTHESIS_STYLE_RULES = (
+    "모든 답변은 100% 한국어로 작성하세요. "
+    "문서 요약 시 마크다운 표(| 기호)를 사용하지 말고, 아래 인용구(>) 기반 카드형 포맷을 사용하세요:\n"
+    "### 💡 [주제] 분석 내용\n"
+    "> **📌 주요 내용**\n"
+    "#### (상세 내용 작성)"
+)
+
+# =====================================================================
 # 🧠 4. 메인 에이전트 루프 (실시간 스트리밍 및 시행착오 데이터 분리 전송)
 # =====================================================================
 def _dedupe_and_filter_hits(hits: list[dict], excluded_indexes: set) -> list[dict]:
@@ -249,7 +300,8 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
 
     MAX_STEPS = 10
     all_collected_hits = []
-    used_db = False 
+    used_db = False
+    db_tool_results = []
 
     for step in range(MAX_STEPS):
         response = client.chat.completions.create(
@@ -297,7 +349,11 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                 yield yield_step(thought=parsed_thought, tech_detail=tech_detail)
 
                 tool_result_str, hits = execute_tool(func_name, args)
-                
+
+                # 숫자 에코 체크용으로 DB 도구 결과 원문 보관
+                if func_name == "query_database":
+                    db_tool_results.append(tool_result_str)
+
                 # 💡 결과 0건 시 시행착오(자가교정) 피드백도 기록
                 if func_name == "query_database" and ("[]" in tool_result_str or "0건" in tool_result_str):
                     tool_result_str += "\n[시스템 알림]: 검색 결과가 0건입니다. 방금 넣은 모듈, 라인 등의 조건을 지우고 불량명 LIKE 검색 위주로 쿼리를 재작성하여 다시 도구를 호출해 보세요."
@@ -309,16 +365,57 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
             continue
         
         else:
-            yield yield_step("✅ 분석 완료! 답변 생성 및 인용구(Citation) 매핑 중...")
-            
             final_answer = ai_message.content or ""
-            
+
             citations_json = {"answer": [], "final": final_answer, "claims": []}
             top_docs_ui = []
+            rag_chunks = []
             if all_collected_hits:
                 hits_visible = _dedupe_and_filter_hits(all_collected_hits, excluded_indexes)
                 top_docs_ui = [_to_ui_doc_from_hit(h) for h in hits_visible[:ui_top_k]]
-                rag_chunks = [_to_ui_doc_from_hit(h) for h in hits_visible[:6]]
+                rag_chunks = [_to_ui_doc_from_hit(h) for h in hits_visible[:12]]
+
+            # 💡 [근거 게이트] RAG 모드인데 확보된 근거 문서가 없으면 자유 생성을 차단하고 정직 응답
+            if intent == "RAG_KNOWLEDGE" and not rag_chunks:
+                yield yield_step("⚠️ 근거 문서를 확보하지 못해 답변 생성을 중단합니다. (할루시네이션 방지)")
+                final_answer = NO_EVIDENCE_ANSWER
+                final_result = {
+                    "intent": intent,
+                    "final_answer": final_answer,
+                    "suggested_actions": _get_suggested_actions(intent, db_used=used_db),
+                    "citations": {"answer": [], "final": final_answer, "claims": []},
+                    "top_docs": [],
+                    "steps": execution_steps,
+                    "verification": {"grounded": False},
+                }
+                yield json.dumps({"type": "final", "data": final_result}, ensure_ascii=False) + "\n"
+                return
+
+            if intent == "RAG_KNOWLEDGE" and rag_chunks:
+                # 💡 [생성 분리] 최종 답변을 evidence-only 합성으로 교체 (근거 없는 서술 차단)
+                yield yield_step("✅ 근거 확보 완료! 근거 기반 답변 합성 및 인용구 검증 중...")
+                try:
+                    synth = llm_answer_with_citations(
+                        user_id=user_id,
+                        user_question=user_query,
+                        rag_chunks=rag_chunks,
+                        previous_messages=previous_messages,
+                        style_rules=RAG_SYNTHESIS_STYLE_RULES,
+                        client=client,
+                    )
+                    if (synth.get("answer_markdown") or "").strip():
+                        final_answer = synth["answer_markdown"]
+                    citations_json = {
+                        "answer": synth.get("answer") or [],
+                        "final": final_answer,
+                        "claims": synth.get("claims") or [],
+                    }
+                except Exception as e:
+                    print(f"  ❌ 근거 기반 합성 실패, 루프 답변으로 폴백: {e}")
+
+            elif rag_chunks:
+                # 기존 경로 (HYBRID 등): 사후 인용구 매핑 + 코드 검증
+                yield yield_step("✅ 분석 완료! 답변 생성 및 인용구(Citation) 매핑 중...")
                 try:
                     citation_messages = _build_citation_prompt(
                         user_question=user_query,
@@ -326,10 +423,25 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                         rag_chunks=rag_chunks,
                     )
                     citation_res = _call_json(client, citation_messages, CITATION_MAX_TOKENS, 0.0)
-                    claims = citation_res.get("claims") or []
+                    claims = validate_citations(citation_res.get("claims") or [], rag_chunks)
                     citations_json = {"answer": _normalize_claims_to_answer_list(claims), "final": final_answer, "claims": claims}
                 except Exception as e:
                     print(f"  ❌ 인용구 생성 실패: {e}")
+            else:
+                yield yield_step("✅ 분석 완료! 답변을 생성했습니다.")
+
+            # 💡 [검증 요약] 숫자 에코 체크(DB) + claim 지원율
+            verification = {"grounded": True}
+            if used_db and db_tool_results:
+                verification.update(_numeric_echo_check(
+                    final_answer=final_answer,
+                    db_tool_results=db_tool_results,
+                    allowed_extra=_extract_numbers(user_query),
+                ))
+            claim_list = citations_json.get("answer") or []
+            if claim_list:
+                verification["claims_supported"] = sum(1 for c in claim_list if c.get("support") == "supported")
+                verification["claims_total"] = len(claim_list)
 
             # 💡 [4. 최종 완료 로그 및 데이터 반환]
             final_result = {
@@ -338,7 +450,8 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                 "suggested_actions": _get_suggested_actions(intent, db_used=used_db),
                 "citations": citations_json,
                 "top_docs": top_docs_ui,
-                "steps": execution_steps
+                "steps": execution_steps,
+                "verification": verification,
             }
             yield json.dumps({"type": "final", "data": final_result}, ensure_ascii=False) + "\n"
             return
