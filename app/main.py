@@ -40,6 +40,18 @@ app = FastAPI(title="RAG Search Web", version=VERSION)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+
+@app.on_event("startup")
+async def _kg_startup():
+    """Knowledge Graph 테이블 보장 + 백그라운드 빌드 (기동 시 1회 + 24h 주기).
+    실패해도 서버 기동은 막지 않는다."""
+    try:
+        from app.kg_builder import ensure_kg_tables, start_background_rebuild
+        ensure_kg_tables()
+        start_background_rebuild()
+    except Exception as e:
+        print(f"[KG] 초기화 스킵 (그래프 기능 비활성): {e}")
+
 MAX_HISTORY_MESSAGES = 6  # 최근 6개 메시지 = 대략 최근 3턴
 RETRIEVE_TOP_K_DEFAULT = 12
 EXCLUDED_TOPDOC_INDEXES = {"rp-term-ver1"}
@@ -452,7 +464,8 @@ async def api_chat_stream(request: Request):
                 "intent": final_data.get("intent"),
                 "suggested_actions": final_data.get("suggested_actions", []),
                 "agent_steps": final_data.get("steps", []),
-                "verification": final_data.get("verification", {})
+                "verification": final_data.get("verification", {}),
+                "related_docs": final_data.get("related_docs", [])
             }
             yield json.dumps({"type": "final", "data": final_res_payload}, ensure_ascii=False) + "\n"
 
@@ -860,6 +873,27 @@ async def api_active_announcements(request: Request):
             "end_date": end,
         })
     return {"items": out}
+
+
+# =========================
+# API: Knowledge Graph 연관 조회
+# =========================
+@app.get("/api/kg/related")
+async def api_kg_related(request: Request, report_index: str = Query(""), doc_id: str = Query("")):
+    """report_index 또는 doc_id 기준으로 연결된 문서/보고서를 반환."""
+    _require_user(request)
+    if not report_index and not doc_id:
+        raise HTTPException(status_code=400, detail="report_index or doc_id required")
+    from app.kg_repo import get_related
+    return get_related(report_index=report_index.strip(), doc_id=doc_id.strip())
+
+
+@app.get("/api/kg/term/{term_id}")
+async def api_kg_term(term_id: int, request: Request):
+    """용어 기준 연관 문서/보고서 수 + 상위 문서 + 동시출현 용어."""
+    _require_user(request)
+    from app.kg_repo import get_term_overview
+    return get_term_overview(term_id)
 
 
 @app.get("/api/sessions/{session_id}/latest-artifact")

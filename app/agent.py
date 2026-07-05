@@ -222,6 +222,29 @@ def _intent_label(intent: str) -> str:
     return INTENT_LABELS.get(intent, intent)
 
 
+_REPORT_INDEX_JSON_RE = re.compile(r'"report_index"\s*:\s*"?(\d+)')
+
+def _extract_report_indexes(tool_result_str: str, cap: int = 20) -> set:
+    """DB 도구 결과(JSON 문자열)에서 report_index 값 수집 (KG 관련 문서 조인용)."""
+    out = set()
+    try:
+        rows = json.loads(tool_result_str)
+        if isinstance(rows, list):
+            for r in rows:
+                if isinstance(r, dict) and r.get("report_index") not in (None, ""):
+                    out.add(str(r["report_index"]))
+                    if len(out) >= cap:
+                        return out
+            return out
+    except Exception:
+        pass
+    for m in _REPORT_INDEX_JSON_RE.finditer(tool_result_str or ""):
+        out.add(m.group(1))
+        if len(out) >= cap:
+            break
+    return out
+
+
 NO_EVIDENCE_ANSWER = (
     "### 🔍 사내 문서에서 근거를 찾지 못했습니다\n\n"
     "> **📌 안내**\n"
@@ -317,6 +340,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
     all_collected_hits = []
     used_db = False
     db_tool_results = []
+    collected_report_indexes = set()
 
     for step in range(MAX_STEPS):
         response = client.chat.completions.create(
@@ -365,9 +389,10 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
 
                 tool_result_str, hits = execute_tool(func_name, args)
 
-                # 숫자 에코 체크용으로 DB 도구 결과 원문 보관
+                # 숫자 에코 체크용으로 DB 도구 결과 원문 보관 + KG 조인용 report_index 수집
                 if func_name == "query_database":
                     db_tool_results.append(tool_result_str)
+                    collected_report_indexes.update(_extract_report_indexes(tool_result_str))
 
                 # 💡 결과 0건 시 시행착오(자가교정) 피드백도 기록
                 if func_name == "query_database" and ("[]" in tool_result_str or "0건" in tool_result_str):
@@ -445,6 +470,21 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
             else:
                 yield yield_step("✅ 분석이 끝났어요! 답변을 정리했어요.")
 
+            # 💡 [KG 자동 조인] DB 결과의 report_index로 연결된 원본 보고서 문서 첨부
+            related_docs = []
+            if collected_report_indexes:
+                try:
+                    from app.kg_repo import get_docs_for_reports
+                    related_docs = get_docs_for_reports(sorted(collected_report_indexes), limit=5)
+                except Exception as e:
+                    print(f"[KG] 관련 문서 조회 스킵: {e}")
+                if related_docs:
+                    yield yield_step(f"🔗 이 통계와 연결된 원본 보고서 문서 {len(related_docs)}건을 찾았어요")
+                    existing_doc_ids = {d.get("doc_id") for d in top_docs_ui}
+                    for d in related_docs:
+                        if d["doc_id"] not in existing_doc_ids:
+                            top_docs_ui.append(d)
+
             # 💡 [검증 요약] 숫자 에코 체크(DB) + claim 지원율
             verification = {"grounded": True}
             if used_db and db_tool_results:
@@ -465,6 +505,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                 "suggested_actions": _get_suggested_actions(intent, db_used=used_db),
                 "citations": citations_json,
                 "top_docs": top_docs_ui,
+                "related_docs": related_docs,
                 "steps": execution_steps,
                 "verification": verification,
             }

@@ -1297,12 +1297,18 @@ function appendMessage(role, content, metaText, msgId, extra = null){
         </div>`;
     }
 
-    if(extra.suggested_actions && extra.suggested_actions.length > 0) {
-      const chips = extra.suggested_actions.map(chip => {
+    // 🔗 KG: DB 통계와 연결된 원본 보고서 문서 칩
+    let kgChipHtml = "";
+    if(extra.related_docs && extra.related_docs.length){
+      kgChipHtml = `<button class="kg-related-chip px-4 py-2 border border-rag/50 text-rag-strong dark:text-rag hover:bg-rag/10 rounded-full text-[11px] font-semibold flex items-center gap-2 hover:-translate-y-0.5" type="button" title="이 통계와 연결된 원본 보고서 문서를 우측 패널에서 보기"><span class="material-symbols-outlined text-sm">link</span> 연결된 보고서 문서 ${extra.related_docs.length}건 보기</button>`;
+    }
+
+    if((extra.suggested_actions && extra.suggested_actions.length > 0) || kgChipHtml) {
+      const chips = (extra.suggested_actions || []).map(chip => {
         if (chip.disabled) return `<button class="px-4 py-2 bg-surface-container dark:bg-[#1f2b4a] text-outline dark:text-[#94a3b8] rounded-full text-[11px] font-semibold flex items-center gap-2 cursor-not-allowed opacity-60" disabled><span class="material-symbols-outlined text-sm">block</span> ${escapeHtml(chip.label)}</button>`;
         return `<button class="action-chip px-4 py-2 border border-outline-variant dark:border-[#475569] hover:bg-surface-container dark:hover:bg-[#1f2b4a] dark:text-[#e7eefc] rounded-full text-[11px] font-semibold flex items-center gap-2 hover:-translate-y-0.5" data-action="${escapeHtml(chip.action)}"><span class="material-symbols-outlined text-sm">bolt</span> ${escapeHtml(chip.label)}</button>`;
       }).join("");
-      chipsHtml = `<div class="pt-4 mt-4 border-t border-surface-container dark:border-[#1f2b4a] flex flex-wrap items-center gap-3">${chips}</div>`;
+      chipsHtml = `<div class="pt-4 mt-4 border-t border-surface-container dark:border-[#1f2b4a] flex flex-wrap items-center gap-3">${kgChipHtml}${chips}</div>`;
     }
   }
 
@@ -1373,6 +1379,18 @@ function appendMessage(role, content, metaText, msgId, extra = null){
       });
     });
   } 
+
+  if(role === "assistant"){
+    const kgBtn = div.querySelector(".kg-related-chip");
+    if(kgBtn){
+      kgBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        // 연결 문서는 백엔드가 top_docs에 병합해 내려줌 → 우측 패널 열고 표시
+        toggleEvidencePanel(true);
+        renderTopDocsFiltered();
+      });
+    }
+  }
 
   if(role === "assistant" && msgId && !isPending){
     wireMessageActionBar(div, msgId);
@@ -2411,7 +2429,8 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
           intent: finalRes.intent,
           suggested_actions: finalRes.suggested_actions,
           agent_steps: finalRes.agent_steps,
-          verification: finalRes.verification || null
+          verification: finalRes.verification || null,
+          related_docs: finalRes.related_docs || []
         };
 
         // 인용 pill 변환(convertCitationPills)이 렌더 시점에 citation 개수를 참조하므로
