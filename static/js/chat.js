@@ -2284,8 +2284,8 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
       displayUserText = "🔄 조건을 넓혀서 다시 검색 중...";
     } else {
       rawSendText = overrideActionTag + " " + queryToUse;
-      if (overrideActionTag === "[DB_ANALYSIS]") displayUserText = "📊 DB 통계 Agent 호출 중...";
-      else if (overrideActionTag === "[RAG_KNOWLEDGE]") displayUserText = "📖 문서 검색 Agent 호출 중...";
+      if (overrideActionTag === "[DB_ANALYSIS]") displayUserText = "📊 같은 질문을 DB 통계로 확인하고 있어요...";
+      else if (overrideActionTag === "[RAG_KNOWLEDGE]") displayUserText = "📖 같은 질문을 사내 문서에서 찾아보고 있어요...";
       else displayUserText = "🔄 다시 검색 중...";
     }
     lastRealUserQuery = queryToUse;
@@ -2318,7 +2318,7 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
          <span class="agent-badge-icon"><span class="material-symbols-outlined animate-spin" style="font-size:14px;">progress_activity</span></span>
          <span class="agent-badge-name">분석 중</span>
        </span>
-       <span class="agent-status-text streaming-caret transition-opacity duration-300 opacity-100 tracking-wide">시스템 에이전트 연결 중</span>
+       <span class="agent-status-text streaming-caret transition-opacity duration-300 opacity-100 tracking-wide">답변 준비를 시작하고 있어요...</span>
     </div>
   `;
   appendMessage("assistant", loadingHtml, null, pendingId);

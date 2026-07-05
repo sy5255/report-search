@@ -76,7 +76,10 @@ def _get_specialist_prompt(intent: str, current_date: str) -> str:
     - 당신은 사내 불량 분석을 수행하는 '{intent.replace('_', ' ')} Agent'입니다.
     - 오늘 날짜는 {current_date} 입니다.
     - ⭐️ 모든 답변은 반드시 100% 한국어로만 작성하세요!
-    - ⭐️ 도구를 호출하기 전, 반드시 당신이 왜 이 도구를 쓰는지 비즈니스 언어로 1줄 요약하여 'Thought: [생각]' 형태로 메시지 본문에 먼저 출력하세요. (절대 Thought 영역에 SQL이나 코드를 노출하지 마세요)
+    - ⭐️ 도구를 호출하기 전, 반드시 당신이 지금 무엇을 하는지 'Thought: [생각]' 형태로 1줄 먼저 출력하세요.
+      Thought는 화면에 그대로 표시되므로, 전문 용어(쿼리, 인텐트, 라우팅, RAG 등) 없이 누구나 이해할 수 있는
+      쉽고 친근한 한국어 문장으로 쓰세요. (좋은 예: "최근 3개월 불량 발생 건수를 집계하고 있어요")
+      절대 Thought 영역에 SQL이나 코드, 영문 시스템 용어를 노출하지 마세요.
     """
     
     # 📌 DB 전문가 스키마 (SQL 강제 접기 포함)
@@ -160,7 +163,7 @@ def _get_specialist_prompt(intent: str, current_date: str) -> str:
 def _get_suggested_actions(intent: str, db_used: bool = False) -> list:
     if intent == "DB_ANALYSIS":
         actions = [
-            {"label": "📖 문서 검색 Agent 호출하기", "action": "[RAG_KNOWLEDGE]"}
+            {"label": "📖 관련 사내 문서도 찾아보기", "action": "[RAG_KNOWLEDGE]"}
         ]
         # DB 쿼리가 실행되었을 때만 '재검색' 기능 활성화
         if db_used:
@@ -171,7 +174,7 @@ def _get_suggested_actions(intent: str, db_used: bool = False) -> list:
 
     elif intent == "RAG_KNOWLEDGE":
         return [
-            {"label": "📊 DB 통계 Agent 호출하기", "action": "[DB_ANALYSIS]"}
+            {"label": "📊 DB 통계로도 확인해보기", "action": "[DB_ANALYSIS]"}
         ]
     elif intent == "HYBRID_DB_RAG":
         return []
@@ -207,6 +210,18 @@ def _numeric_echo_check(final_answer: str, db_tool_results: list, allowed_extra:
     return {"numeric_ok": not unmatched, "unmatched": unmatched[:10]}
 
 
+# 스트리밍 진행 멘트용 인텐트 한글 라벨 (유저에게 노출되는 문구)
+INTENT_LABELS = {
+    "DB_ANALYSIS": "DB 통계 분석",
+    "RAG_KNOWLEDGE": "사내 문서 검색",
+    "HYBRID_DB_RAG": "통계 + 문서 통합 분석",
+    "GENERAL_CHAT": "일반 대화",
+}
+
+def _intent_label(intent: str) -> str:
+    return INTENT_LABELS.get(intent, intent)
+
+
 NO_EVIDENCE_ANSWER = (
     "### 🔍 사내 문서에서 근거를 찾지 못했습니다\n\n"
     "> **📌 안내**\n"
@@ -215,7 +230,7 @@ NO_EVIDENCE_ANSWER = (
     "#### 이렇게 해보세요\n"
     "- 핵심 키워드를 바꾸거나 줄여서 다시 질문해 주세요.\n"
     "- 특정 공정/불량명이라면 표준 용어(약어 대신 정식 명칭)로 시도해 주세요.\n"
-    "- 통계성 질문이라면 아래 버튼으로 DB 통계 Agent를 호출해 보세요."
+    "- 발생 건수·순위 같은 통계 질문이라면 아래 버튼으로 DB 통계 조회를 이용해 보세요."
 )
 
 RAG_SYNTHESIS_STYLE_RULES = (
@@ -278,11 +293,11 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
     # [1. 강제 인텐트 적용 및 로그 바구니 생성]
     if forced_intent:
         intent = forced_intent.replace("[", "").replace("]","").strip()
-        yield yield_step(f"🎯 유저 요청으로 Agent 강제 전환: {intent}")
+        yield yield_step(f"🎯 요청하신 대로 '{_intent_label(intent)}' 방식으로 진행할게요")
     else:
-        yield yield_step("🔍 질문 의도 파악 및 라우팅 진행 중...")
+        yield yield_step("🔍 질문을 읽고 어떤 방식으로 답변할지 정하고 있어요...")
         intent = _call_intent_router(client, user_query)
-        yield yield_step(f"🎯 판단된 인텐트: {intent}")
+        yield yield_step(f"🎯 '{_intent_label(intent)}' 방식으로 답변을 준비할게요")
 
     system_prompt = _get_specialist_prompt(intent, current_date)
     
@@ -330,8 +345,8 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                 
                 # LLM이 Thought를 안 뱉었을 때의 기본값 설정
                 if not parsed_thought:
-                    if func_name == "query_database": parsed_thought = f"📊 DB 통계 데이터를 조회하고 있습니다..."
-                    elif func_name == "search_documents": parsed_thought = f"📖 사내 기술 문서를 검색하고 있습니다..."
+                    if func_name == "query_database": parsed_thought = "📊 DB에서 통계 데이터를 찾아보고 있어요..."
+                    elif func_name == "search_documents": parsed_thought = "📖 사내 기술 문서를 찾아보고 있어요..."
 
                 # 💡 파라미터 파싱 및 SQL 추출 (Technical Detail 구성)
                 try:
@@ -357,7 +372,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                 # 💡 결과 0건 시 시행착오(자가교정) 피드백도 기록
                 if func_name == "query_database" and ("[]" in tool_result_str or "0건" in tool_result_str):
                     tool_result_str += "\n[시스템 알림]: 검색 결과가 0건입니다. 방금 넣은 모듈, 라인 등의 조건을 지우고 불량명 LIKE 검색 위주로 쿼리를 재작성하여 다시 도구를 호출해 보세요."
-                    yield yield_step(thought="⚠️ 검색 결과가 0건입니다. 조건을 넓혀 재검색을 시도합니다.")
+                    yield yield_step(thought="⚠️ 조건에 맞는 결과가 없어요. 검색 범위를 넓혀서 다시 찾아볼게요.")
                 
                 if hits:
                     all_collected_hits.extend(hits)
@@ -377,7 +392,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
 
             # 💡 [근거 게이트] RAG 모드인데 확보된 근거 문서가 없으면 자유 생성을 차단하고 정직 응답
             if intent == "RAG_KNOWLEDGE" and not rag_chunks:
-                yield yield_step("⚠️ 근거 문서를 확보하지 못해 답변 생성을 중단합니다. (할루시네이션 방지)")
+                yield yield_step("⚠️ 참고할 사내 문서를 찾지 못했어요. 추측으로 답하지 않고 안내 메시지를 드릴게요.")
                 final_answer = NO_EVIDENCE_ANSWER
                 final_result = {
                     "intent": intent,
@@ -393,7 +408,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
 
             if intent == "RAG_KNOWLEDGE" and rag_chunks:
                 # 💡 [생성 분리] 최종 답변을 evidence-only 합성으로 교체 (근거 없는 서술 차단)
-                yield yield_step("✅ 근거 확보 완료! 근거 기반 답변 합성 및 인용구 검증 중...")
+                yield yield_step("✅ 참고 문서를 찾았어요! 문서 내용만 바탕으로 답변을 정리하고 있어요...")
                 try:
                     synth = llm_answer_with_citations(
                         user_id=user_id,
@@ -415,7 +430,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
 
             elif rag_chunks:
                 # 기존 경로 (HYBRID 등): 사후 인용구 매핑 + 코드 검증
-                yield yield_step("✅ 분석 완료! 답변 생성 및 인용구(Citation) 매핑 중...")
+                yield yield_step("✅ 분석이 끝났어요! 답변에 참고 문서를 연결하고 있어요...")
                 try:
                     citation_messages = _build_citation_prompt(
                         user_question=user_query,
@@ -428,7 +443,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                 except Exception as e:
                     print(f"  ❌ 인용구 생성 실패: {e}")
             else:
-                yield yield_step("✅ 분석 완료! 답변을 생성했습니다.")
+                yield yield_step("✅ 분석이 끝났어요! 답변을 정리했어요.")
 
             # 💡 [검증 요약] 숫자 에코 체크(DB) + claim 지원율
             verification = {"grounded": True}
@@ -457,7 +472,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
             return
             
     # 에이전트 루프 초과 시
-    yield yield_step("❌ 에이전트 처리 단계를 초과하여 종료되었습니다.")
+    yield yield_step("❌ 분석 과정이 너무 길어져서 여기서 멈췄어요. 질문을 조금 더 구체적으로 해주시면 도움이 돼요.")
     timeout_result = {
         "intent": intent,
         "final_answer": "에이전트 처리 단계를 초과했습니다.",

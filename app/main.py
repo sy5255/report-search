@@ -285,7 +285,7 @@ async def api_chat_stream(request: Request):
 
     # 💡 스트리밍 제너레이터 함수
     async def generate_response():
-        yield json.dumps({"type": "step", "message": "🔄 질의어 문맥 분석 및 정규화 진행 중..."}, ensure_ascii=False) + "\n"
+        yield json.dumps({"type": "step", "message": "🔄 질문을 이해하고 검색에 맞게 다듬고 있어요..."}, ensure_ascii=False) + "\n"
 
         rewritten_query = user_text
         try:
@@ -336,7 +336,7 @@ async def api_chat_stream(request: Request):
             previous_messages.insert(0, {"role": "system", "content": system_prompt})
             
             term_keys = ", ".join(unique_terms.keys())
-            glossary_step_log = f"📚 사내 용어 사전 지식 적용 완료 ({term_keys})"
+            glossary_step_log = f"📚 사내 용어 사전에서 관련 용어의 뜻을 확인했어요 ({term_keys})"
 
         retrieval_query = (query_norm.get("expanded_query") or rewritten_query).strip() or rewritten_query
 
