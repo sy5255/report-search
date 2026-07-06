@@ -188,6 +188,7 @@ async def trace_page(request: Request):
         "request": request,
         "user_id": user,
         "active_tab": "trace",
+        "is_admin": user in ADMIN_USER_IDS,
     })
 
 
@@ -900,6 +901,35 @@ async def api_eval_goldenset(request: Request):
     _require_user(request)
     from app.eval_repo import get_goldenset_latest
     return get_goldenset_latest()
+
+
+@app.get("/api/eval/goldenset/runs")
+async def api_eval_goldenset_runs(request: Request, limit: int = Query(50)):
+    _require_user(request)
+    from app.eval_repo import list_goldenset_runs
+    return list_goldenset_runs(limit=limit)
+
+
+@app.get("/api/eval/goldenset/runs/{run_id}")
+async def api_eval_goldenset_run(run_id: str, request: Request):
+    _require_user(request)
+    from app.eval_repo import get_goldenset_run
+    data = get_goldenset_run(run_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="run not found")
+    return data
+
+
+@app.delete("/api/eval/goldenset/runs/{run_id}")
+async def api_delete_goldenset_run(run_id: str, request: Request):
+    user = _require_user(request)
+    if user not in ADMIN_USER_IDS:
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+    from app.eval_repo import delete_goldenset_run
+    ok = delete_goldenset_run(run_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="run not found")
+    return {"ok": True}
 
 
 # =========================

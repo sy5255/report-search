@@ -178,46 +178,168 @@
   }
 
   /* ── 골든셋 평가 ─────────────────────────────────── */
+  const GS_PALETTE = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)"];
+  let gsRuns = [];          // 최신순
+  let gsLabelColor = {};    // label → color (고정 순서)
+  let gsSelectedRunId = null;
+
+  function gsColorForLabel(label){
+    const key = label || "(no label)";
+    if(!(key in gsLabelColor)){
+      gsLabelColor[key] = GS_PALETTE[Object.keys(gsLabelColor).length % GS_PALETTE.length];
+    }
+    return gsLabelColor[key];
+  }
+
   async function loadGoldenset(){
     let data;
     try {
-      const r = await fetch("/api/eval/goldenset", { credentials: "include" });
+      const r = await fetch("/api/eval/goldenset/runs?limit=60", { credentials: "include" });
       data = await r.json();
     } catch(e){
-      $("gsTiles").innerHTML = `<div class="empty-note" style="grid-column:1/-1">골든셋 결과를 불러오지 못했습니다</div>`;
+      $("gsTiles").innerHTML = `<div class="empty-note" style="grid-column:1/-1">골든셋 이력을 불러오지 못했습니다</div>`;
       return;
     }
-    const L = data.latest;
-    if(!L){
+    gsRuns = data.runs || [];
+    if(!gsRuns.length){
       $("gsTiles").innerHTML = `<div class="empty-note" style="grid-column:1/-1">아직 평가 실행이 없습니다. 서버에서 <span class="mono">python -m app.goldenset_runner</span> 를 실행하세요.</div>`;
-      const t = $("gsTable"); if(t) t.innerHTML = "";
+      ["gsTrend","gsRuns","gsTable"].forEach(id => { const el = $(id); if(el) el.innerHTML = ""; });
+      const lg = $("gsTrendLegend"); if(lg) lg.innerHTML = "";
       return;
     }
+    // 라벨 색 고정 순서 배정(오래된 순서 기준으로 안정적)
+    gsLabelColor = {};
+    [...gsRuns].reverse().forEach(r => gsColorForLabel(r.label || ""));
+
+    renderGsTrend();
+    renderGsRunList();
+    // 기본 선택: 최신 run
+    selectRun(gsRuns[0].run_id);
+  }
+
+  function renderGsTrend(){
+    const box = $("gsTrend");
+    if(!box) return;
+    const chron = [...gsRuns].reverse(); // 오래된→최신
+    const H = 150, barMax = Math.max(0.001, ...chron.map(r => r.hit_at_5 || 0));
+
+    // 골든셋 변경 지점(직전과 hash 다름)
+    const changed = chron.map((r, i) => i > 0 && r.goldenset_hash && r.goldenset_hash !== chron[i-1].goldenset_hash);
+
+    const wrap = document.createElement("div");
+    wrap.className = "vbar-chart";
+    wrap.style.height = H + "px";
+    wrap.style.position = "relative";
+    chron.forEach((r, i) => {
+      const col = document.createElement("div");
+      col.className = "vbar-col";
+      col.style.position = "relative";
+      col.style.cursor = "pointer";
+      const h5 = r.hit_at_5 || 0;
+      const bar = document.createElement("div");
+      bar.className = "vbar";
+      bar.style.background = gsColorForLabel(r.label || "");
+      bar.style.height = `${Math.max(2, (h5 / barMax) * 100)}%`;
+      if(r.run_id === gsSelectedRunId) bar.style.outline = "2px solid var(--color-on-surface)";
+      col.appendChild(bar);
+      // MRR 점 (0~1 → 높이비율)
+      if(r.mrr != null){
+        const dot = document.createElement("div");
+        dot.style.cssText = `position:absolute;left:50%;transform:translate(-50%,50%);width:5px;height:5px;border-radius:50%;background:var(--color-on-surface);bottom:${Math.min(100,(r.mrr*100))}%;`;
+        col.appendChild(dot);
+      }
+      // 골든셋 변경 마커
+      if(changed[i]){
+        const dm = document.createElement("div");
+        dm.textContent = "◆";
+        dm.title = "골든셋 문항이 변경된 지점";
+        dm.style.cssText = "position:absolute;top:-14px;left:50%;transform:translateX(-50%);font-size:9px;color:var(--chart-3);";
+        col.appendChild(dm);
+      }
+      bindTip(col, `<b>${esc(String(r.created_at).slice(0,16))}</b><br>라벨: ${esc(r.label||"—")} · 인덱스: ${esc(r.index_name||"—")}<br>hit@5 ${pct(r.hit_at_5)} · MRR ${r.mrr ?? "—"} · 문항 ${num(r.total)}${changed[i] ? "<br>◆ 골든셋 변경됨" : ""}`);
+      col.addEventListener("click", () => selectRun(r.run_id));
+      wrap.appendChild(col);
+    });
+    box.innerHTML = "";
+    box.appendChild(wrap);
+
+    // 범례: 라벨별 색 + MRR점 + 변경마커
+    const lg = $("gsTrendLegend");
+    if(lg){
+      const labelDots = Object.keys(gsLabelColor).map(k =>
+        `<span><span class="dot" style="background:${gsColorForLabel(k)}"></span>${esc(k)}</span>`).join("");
+      lg.innerHTML = `${labelDots}<span><span class="dot" style="background:var(--color-on-surface)"></span>MRR(점)</span><span style="color:var(--chart-3)">◆ 골든셋 변경</span>`;
+    }
+  }
+
+  function renderGsRunList(){
+    const box = $("gsRuns");
+    if(!box) return;
+    const admin = (typeof window !== "undefined" && window.__IS_ADMIN__ === true);
+    const rows = gsRuns.map(r => `
+      <tr data-run="${esc(r.run_id)}" class="gs-run-row ${r.run_id === gsSelectedRunId ? "is-sel" : ""}">
+        <td>${esc(String(r.created_at).slice(0,16))}</td>
+        <td><span class="gs-label-chip" style="border-color:${gsColorForLabel(r.label||"")};color:${gsColorForLabel(r.label||"")}">${esc(r.label||"—")}</span></td>
+        <td class="mono" style="font-size:10px">${esc(r.index_name||"—")}</td>
+        <td>${num(r.total)}</td>
+        <td>${pct(r.hit_at_5)}</td>
+        <td>${r.mrr ?? "—"}</td>
+        <td>${pct(r.intent_accuracy)}</td>
+        <td>${admin ? `<button class="gs-del" data-run="${esc(r.run_id)}" title="이 실행 삭제">🗑</button>` : ""}</td>
+      </tr>`).join("");
+    box.innerHTML = `<div class="gs-table"><table>
+      <thead><tr><th>실행 시각</th><th>라벨</th><th>인덱스</th><th>문항</th><th>hit@5</th><th>MRR</th><th>인텐트</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+
+    box.querySelectorAll(".gs-run-row").forEach(tr => {
+      tr.addEventListener("click", (e) => {
+        if(e.target.closest(".gs-del")) return;
+        selectRun(tr.getAttribute("data-run"));
+      });
+    });
+    box.querySelectorAll(".gs-del").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const id = btn.getAttribute("data-run");
+        const ok = window.Toast
+          ? await window.Toast.confirm("이 평가 실행을 삭제할까요? 되돌릴 수 없습니다.", { okText: "삭제", destructive: true })
+          : confirm("이 평가 실행을 삭제할까요?");
+        if(!ok) return;
+        try {
+          const r = await fetch(`/api/eval/goldenset/runs/${encodeURIComponent(id)}`, { method: "DELETE", credentials: "include" });
+          if(!r.ok) throw new Error(String(r.status));
+          if(window.Toast) window.Toast.success("삭제했습니다.");
+          if(gsSelectedRunId === id) gsSelectedRunId = null;
+          loadGoldenset();
+        } catch(err){
+          if(window.Toast) window.Toast.error("삭제에 실패했습니다. (관리자만 삭제 가능)");
+        }
+      });
+    });
+  }
+
+  function renderGsTiles(L){
     $("gsTiles").innerHTML = [
-      statTile("문항 수", num(L.total), `마지막 실행 ${esc(String(L.created_at).slice(0,16))}`),
+      statTile("문항 수", num(L.total), `${esc(L.label||"—")} · ${esc(String(L.created_at).slice(0,16))}`),
       statTile("검색 hit@5", pct(L.hit_at_5), L.scored_retrieval ? `채점 ${num(L.scored_retrieval)}문항` : "정답 문서 미지정"),
       statTile("검색 MRR", L.mrr ?? "—", "정답 문서 평균 역순위"),
       statTile("검색 hit@1 / @10", `${pct(L.hit_at_1)} / ${pct(L.hit_at_10)}`, "1위 / 10위 내 적중"),
       statTile("인텐트 정확도", pct(L.intent_accuracy), L.scored_intent ? `채점 ${num(L.scored_intent)}문항` : "기대 인텐트 미지정"),
       statTile("용어 감지율", pct(L.term_detect_rate), L.scored_terms ? `채점 ${num(L.scored_terms)}문항` : "기대 용어 미지정"),
     ].join("");
+  }
 
-    const items = data.items || [];
+  function renderGsItems(items){
     const box = $("gsTable");
     if(!box) return;
-    if(!items.length){ box.innerHTML = `<div class="empty-note">문항 상세가 없습니다</div>`; return; }
-    const mark = (scored, ok, naText, okText, badText) =>
-      !scored ? `<span class="gs-mark na">${naText}</span>`
-              : ok ? `<span class="gs-mark ok">${okText}</span>`
-                   : `<span class="gs-mark bad">${badText}</span>`;
+    if(!items || !items.length){ box.innerHTML = `<div class="empty-note">문항 상세가 없습니다</div>`; return; }
+    const mark = (ok, okText, badText) => ok ? `<span class="gs-mark ok">${okText}</span>` : `<span class="gs-mark bad">${badText}</span>`;
     const rows = items.map(it => {
-      const retok = it.scored_retrieval && it.hit5;
       const retCell = it.scored_retrieval
-        ? (it.found_rank ? mark(true, it.hit5, "", `rank ${it.found_rank}`, `rank ${it.found_rank}`)
-                         : `<span class="gs-mark bad">MISS</span>`)
+        ? (it.found_rank ? mark(it.hit5, `rank ${it.found_rank}`, `rank ${it.found_rank}`) : `<span class="gs-mark bad">MISS</span>`)
         : `<span class="gs-mark na">—</span>`;
       const intCell = it.scored_intent
-        ? mark(true, it.intent_ok, "", "정답", `${esc(it.router_intent||"?")}`)
+        ? mark(it.intent_ok, "정답", `${esc(it.router_intent||"?")}`)
         : `<span class="gs-mark na">—</span>`;
       const termCell = it.scored_terms ? pct(it.term_rate) : "—";
       return `<tr>
@@ -231,6 +353,25 @@
     box.innerHTML = `<div class="gs-table"><table>
       <thead><tr><th>질문</th><th>검색(found-rank)</th><th>인텐트(기대→실측)</th><th>용어</th><th>감지된 용어</th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
+  }
+
+  async function selectRun(runId){
+    gsSelectedRunId = runId;
+    document.querySelectorAll(".gs-run-row").forEach(tr => tr.classList.toggle("is-sel", tr.getAttribute("data-run") === runId));
+    renderGsTrend();
+    const meta = gsRuns.find(r => r.run_id === runId);
+    if(meta) renderGsTiles(meta);
+    const lbl = $("gsTableRunLabel");
+    if(lbl && meta) lbl.textContent = `· ${String(meta.created_at).slice(0,16)} (${meta.label || "라벨 없음"})`;
+    const box = $("gsTable");
+    if(box) box.innerHTML = `<div class="empty-note">불러오는 중...</div>`;
+    try {
+      const r = await fetch(`/api/eval/goldenset/runs/${encodeURIComponent(runId)}`, { credentials: "include" });
+      const detail = await r.json();
+      renderGsItems(detail.items || []);
+    } catch(e){
+      if(box) box.innerHTML = `<div class="empty-note">문항 상세를 불러오지 못했습니다</div>`;
+    }
   }
 
   /* ── KG 그래프 탐색기 ─────────────────────────────── */

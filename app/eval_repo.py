@@ -204,6 +204,81 @@ def get_goldenset_latest(trend_n: int = 12) -> dict:
     return out
 
 
+def list_goldenset_runs(limit: int = 50) -> dict:
+    """평가 run 이력 목록 (최신순). 그래프/테이블용."""
+    limit = max(1, min(int(limit or 50), 200))
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        try:
+            rows = _q(cur, """
+                SELECT run_id, created_at, total, index_name, label, goldenset_hash, goldenset_size,
+                       hit_at_1, hit_at_5, hit_at_10, mrr, intent_accuracy, term_detect_rate,
+                       scored_retrieval, scored_intent, scored_terms
+                FROM eval_goldenset_runs ORDER BY created_at DESC LIMIT %s
+            """, (limit,))
+        except Exception as e:
+            print(f"[Eval] run 목록 조회 실패(테이블 없음일 수 있음): {e}")
+            return {"runs": []}
+        runs = []
+        for r in rows:
+            runs.append({
+                "run_id": r["run_id"], "created_at": str(r["created_at"]),
+                "total": int(r["total"] or 0),
+                "index_name": r.get("index_name") or "", "label": r.get("label") or "",
+                "goldenset_hash": r.get("goldenset_hash") or "", "goldenset_size": int(r.get("goldenset_size") or 0),
+                "hit_at_1": r["hit_at_1"], "hit_at_5": r["hit_at_5"], "hit_at_10": r["hit_at_10"],
+                "mrr": r["mrr"], "intent_accuracy": r["intent_accuracy"], "term_detect_rate": r["term_detect_rate"],
+                "scored_retrieval": int(r["scored_retrieval"] or 0),
+                "scored_intent": int(r["scored_intent"] or 0),
+                "scored_terms": int(r["scored_terms"] or 0),
+            })
+        return {"runs": runs}
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_goldenset_run(run_id: str) -> dict:
+    """단건 run 상세(summary + 문항별 items)."""
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        rows = _q(cur, "SELECT * FROM eval_goldenset_runs WHERE run_id=%s", (run_id,))
+        if not rows:
+            return {}
+        r = rows[0]
+        payload = r.get("summary_json")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = {}
+        payload = payload or {}
+        return {
+            "run_id": r["run_id"], "created_at": str(r["created_at"]),
+            "index_name": r.get("index_name") or "", "label": r.get("label") or "",
+            "goldenset_hash": r.get("goldenset_hash") or "", "goldenset_size": int(r.get("goldenset_size") or 0),
+            "summary": payload.get("summary") or {},
+            "items": payload.get("items") or [],
+        }
+    finally:
+        cur.close()
+        conn.close()
+
+
+def delete_goldenset_run(run_id: str) -> bool:
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM eval_goldenset_runs WHERE run_id=%s", (run_id,))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        cur.close()
+        conn.close()
+
+
 def get_kg_stats() -> dict:
     out = {
         "built": None,

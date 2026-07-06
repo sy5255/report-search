@@ -9,6 +9,7 @@ import os
 import sys
 import json
 import uuid
+import hashlib
 from pathlib import Path
 from datetime import datetime
 
@@ -103,6 +104,13 @@ def aggregate(item_results: list) -> dict:
 # =====================================================================
 # 실행 (DB/ES 필요)
 # =====================================================================
+def goldenset_fingerprint(items: list) -> tuple:
+    """enabled 문항 질문 집합의 지문(hash, size). 골든셋 변경 지점 식별용."""
+    qs = sorted((it.get("question") or "").strip() for it in items)
+    h = hashlib.sha1("\n".join(qs).encode("utf-8")).hexdigest()[:12]
+    return h, len(items)
+
+
 def load_goldenset() -> list:
     if not GOLDENSET_PATH.exists():
         print(f"[Goldenset] {GOLDENSET_PATH} 파일이 없습니다.")
@@ -124,6 +132,10 @@ def ensure_eval_tables():
             run_id VARCHAR(36) PRIMARY KEY,
             created_at DATETIME NOT NULL,
             total INT NOT NULL DEFAULT 0,
+            index_name VARCHAR(128) NULL,
+            label VARCHAR(64) NULL,
+            goldenset_hash VARCHAR(16) NULL,
+            goldenset_size INT NOT NULL DEFAULT 0,
             hit_at_1 FLOAT NULL, hit_at_5 FLOAT NULL, hit_at_10 FLOAT NULL, mrr FLOAT NULL,
             intent_accuracy FLOAT NULL, term_detect_rate FLOAT NULL,
             scored_retrieval INT NOT NULL DEFAULT 0,
@@ -133,16 +145,27 @@ def ensure_eval_tables():
             INDEX idx_created_at (created_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """)
+        # 기존 테이블 마이그레이션 (컬럼 없으면 추가)
+        for ddl in [
+            "ALTER TABLE eval_goldenset_runs ADD COLUMN index_name VARCHAR(128) NULL",
+            "ALTER TABLE eval_goldenset_runs ADD COLUMN label VARCHAR(64) NULL",
+            "ALTER TABLE eval_goldenset_runs ADD COLUMN goldenset_hash VARCHAR(16) NULL",
+            "ALTER TABLE eval_goldenset_runs ADD COLUMN goldenset_size INT NOT NULL DEFAULT 0",
+        ]:
+            try:
+                cur.execute(ddl)
+            except Exception:
+                pass
         conn.commit()
     finally:
         cur.close()
         conn.close()
 
 
-def _retrieved_doc_ids(query: str, k: int) -> tuple:
+def _retrieved_doc_ids(query: str, k: int, index_name: str) -> tuple:
     """(doc_id 순위 리스트, 상위 제목 리스트)"""
     try:
-        resp = rag_retrieve_rrf(DEFAULT_INDEX_NAME, query, top_k=k)
+        resp = rag_retrieve_rrf(index_name, query, top_k=k)
         hits = (resp.get("hits", {}) or {}).get("hits", []) or []
     except Exception as e:
         print(f"[Goldenset] 검색 실패: {e}")
@@ -155,12 +178,15 @@ def _retrieved_doc_ids(query: str, k: int) -> tuple:
     return ids, titles
 
 
-def run(user_id: str = "goldenset_eval", k: int = 10, do_intent: bool = True) -> dict:
+def run(user_id: str = "goldenset_eval", k: int = 10, do_intent: bool = True,
+        index_name: str | None = None, label: str = "") -> dict:
     ensure_eval_tables()
+    index_name = index_name or DEFAULT_INDEX_NAME
     items = load_goldenset()
     if not items:
         print("[Goldenset] 평가할 문항이 없습니다. goldenset.json에 enabled=true 문항을 추가하세요.")
         return {}
+    gs_hash, gs_size = goldenset_fingerprint(items)
 
     client = None
     if do_intent and any((it.get("expected_intent") or "").strip() for it in items):
@@ -183,7 +209,7 @@ def run(user_id: str = "goldenset_eval", k: int = 10, do_intent: bool = True) ->
 
         retrieved_ids, top_titles = ([], [])
         if it.get("expected_doc_ids"):
-            retrieved_ids, top_titles = _retrieved_doc_ids(retrieval_query, k)
+            retrieved_ids, top_titles = _retrieved_doc_ids(retrieval_query, k, index_name)
 
         router_intent = None
         if client is not None and (it.get("expected_intent") or "").strip():
@@ -208,19 +234,24 @@ def run(user_id: str = "goldenset_eval", k: int = 10, do_intent: bool = True) ->
         cur = conn.cursor()
         cur.execute("""
             INSERT INTO eval_goldenset_runs
-            (run_id, created_at, total, hit_at_1, hit_at_5, hit_at_10, mrr,
+            (run_id, created_at, total, index_name, label, goldenset_hash, goldenset_size,
+             hit_at_1, hit_at_5, hit_at_10, mrr,
              intent_accuracy, term_detect_rate, scored_retrieval, scored_intent, scored_terms, summary_json)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        """, (run_id, now, summary["total"], summary["hit_at_1"], summary["hit_at_5"],
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (run_id, now, summary["total"], index_name, (label or "")[:64], gs_hash, gs_size,
+              summary["hit_at_1"], summary["hit_at_5"],
               summary["hit_at_10"], summary["mrr"], summary["intent_accuracy"], summary["term_detect_rate"],
               summary["scored_retrieval"], summary["scored_intent"], summary["scored_terms"],
-              json.dumps({"summary": summary, "items": item_results}, ensure_ascii=False)))
+              json.dumps({"summary": summary, "items": item_results,
+                          "index_name": index_name, "label": label,
+                          "goldenset_hash": gs_hash, "goldenset_size": gs_size}, ensure_ascii=False)))
         conn.commit()
         cur.close()
         conn.close()
     except Exception as e:
         print(f"[Goldenset] 결과 저장 실패(콘솔 리포트만 출력): {e}")
 
+    print(f"\n실행 정보          : index={index_name} · label={label or '(없음)'} · 골든셋 {gs_hash}({gs_size}문항)")
     _print_report(summary, item_results)
     return {"run_id": run_id, "summary": summary}
 
@@ -259,11 +290,18 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     user = "goldenset_eval"
     k = 10
+    index_name = None
+    label = ""
     do_intent = "--no-intent" not in args
-    if "--user" in args:
-        try: user = args[args.index("--user") + 1]
-        except Exception: pass
+
+    def _argval(flag):
+        try: return args[args.index(flag) + 1]
+        except Exception: return None
+
+    if "--user" in args: user = _argval("--user") or user
+    if "--index" in args: index_name = _argval("--index")
+    if "--label" in args: label = _argval("--label") or ""
     if "--k" in args:
-        try: k = max(1, min(50, int(args[args.index("--k") + 1])))
+        try: k = max(1, min(50, int(_argval("--k"))))
         except Exception: pass
-    run(user_id=user, k=k, do_intent=do_intent)
+    run(user_id=user, k=k, do_intent=do_intent, index_name=index_name, label=label)

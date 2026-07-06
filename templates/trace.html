@@ -144,6 +144,13 @@
   .gs-mark.ok { color: var(--status-good); background: color-mix(in srgb, var(--status-good) 14%, transparent); }
   .gs-mark.bad { color: var(--status-bad); background: color-mix(in srgb, var(--status-bad) 12%, transparent); }
   .gs-mark.na { color: var(--color-secondary); background: var(--color-surface-container); }
+  .gs-run-row { cursor: pointer; }
+  .gs-run-row:hover td { background: var(--color-surface-container-low); }
+  .gs-run-row.is-sel td { background: color-mix(in srgb, var(--chart-1) 10%, transparent); }
+  .gs-label-chip { font-size: 10px; font-weight: 700; padding: 1px 8px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+  .gs-del { font-size: 12px; padding: 2px 6px; border-radius: 6px; opacity: 0.6; }
+  .gs-del:hover { opacity: 1; background: color-mix(in srgb, var(--status-bad) 12%, transparent); }
+  #gsTableRunLabel { font-size: 11px; }
 
   /* 문서 뷰어 모달 */
   .kg-doc-modal { position: fixed; inset: 0; z-index: 6000; display: flex; align-items: center; justify-content: center; }
@@ -222,7 +229,18 @@
     </header>
     <section id="gsTiles" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4"></section>
     <section class="chart-card mb-4">
-      <div class="chart-title">문항별 결과</div>
+      <div class="chart-title">평가 이력 추이</div>
+      <div class="chart-desc">막대=검색 hit@5, 점=MRR. 막대 색은 라벨(구성)별로 구분됩니다. ◆ 마커는 골든셋 문항이 직전 실행과 달라진 지점입니다. 막대에 마우스를 올리면 상세가 보이고, 아래 목록에서 실행을 선택할 수 있습니다.</div>
+      <div id="gsTrendLegend" class="legend"></div>
+      <div id="gsTrend"></div>
+    </section>
+    <section class="chart-card mb-4">
+      <div class="chart-title">실행 이력</div>
+      <div class="chart-desc">행을 클릭하면 그 실행의 문항별 결과가 아래에 표시됩니다.</div>
+      <div id="gsRuns"></div>
+    </section>
+    <section class="chart-card mb-4">
+      <div class="chart-title">문항별 결과 <span id="gsTableRunLabel" class="text-secondary" style="font-weight:500"></span></div>
       <div class="chart-desc">검색 실패(⚠)·인텐트 오분류가 개선 우선순위입니다. found-rank는 기대 문서가 검색 결과 몇 위에서 처음 나왔는지입니다.</div>
       <div id="gsTable"></div>
     </section>
@@ -297,6 +315,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script>window.__IS_ADMIN__ = {{ 'true' if is_admin else 'false' }};</script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="{{ url_for('static', path='/js/trace.js') }}"></script>
 {% endblock %}
