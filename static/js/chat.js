@@ -2370,38 +2370,46 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
     const pendNode = document.querySelector(`.msg.assistant[data-msg-id="${pendingId}"]`);
     const statusTextNode = pendNode ? pendNode.querySelector(".agent-status-text") : null;
     let finalRes = null;
+    let buf = "";
+
+    const processLine = (line) => {
+      const t = (line || "").trim();
+      if(!t) return;
+      try {
+        const parsed = JSON.parse(t);
+        if (parsed.type === "step") {
+          // 💡 객체형(data.thought)과 메시지형(message) step 모두 안전 처리
+          const displayThought = (parsed.data && parsed.data.thought) || parsed.message || "로딩 중...";
+          if (statusTextNode && statusTextNode.textContent !== displayThought) {
+            statusTextNode.style.opacity = '0';
+            setTimeout(() => {
+              statusTextNode.textContent = displayThought;
+              statusTextNode.style.opacity = '1';
+            }, 150);
+          }
+        } else if (parsed.type === "final") {
+          finalRes = parsed.data;
+        }
+      } catch (e) {
+        console.error("Chunk parse error:", e);
+      }
+    };
 
     while (!done) {
       const { value, done: readerDone } = await reader.read();
       done = readerDone;
       if (value) {
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n").filter(line => line.trim() !== "");
-        
-        for (const line of lines) {
-          try {
-            const parsed = JSON.parse(line);
-            
-            if (parsed.type === "step") {
-              // 💡 객체로 변경된 데이터에서 'thought'만 추출하여 라이브 로딩 텍스트로 사용
-              const displayThought = parsed.data.thought || parsed.message || "로딩 중...";
-              
-              if (statusTextNode && statusTextNode.textContent !== displayThought) {
-                statusTextNode.style.opacity = '0';
-                setTimeout(() => {
-                  statusTextNode.textContent = displayThought;
-                  statusTextNode.style.opacity = '1';
-                }, 150);
-              }
-            } else if (parsed.type === "final") {
-              finalRes = parsed.data;
-            }
-          } catch (e) {
-             console.error("Chunk parse error:", e);
-          }
-        }
+        // ⚠️ NDJSON 한 줄(특히 대용량 final)이 여러 read() 조각으로 쪼개져 도착할 수 있으므로
+        // 반드시 라인 버퍼로 이어붙인 뒤 완전한 줄만 파싱한다. (잘린 조각을 그대로 parse하면
+        // final을 통째로 잃어 답변이 빈 화면으로 남는 버그가 있었음)
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop(); // 마지막 불완전 조각은 다음 read와 이어붙임
+        for (const line of lines) processLine(line);
       }
     }
+    buf += decoder.decode(); // 디코더 잔여 바이트 flush
+    if (buf.trim()) processLine(buf); // 개행 없이 끝난 마지막 라인 처리
 
     if (pendNode) pendNode.remove(); 
     
@@ -2446,6 +2454,20 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
         renderCitations(lastCitations);
 
         await refreshSessions();
+    } else {
+      // 2차 방어: 스트림은 끝났지만 final을 못 받은 경우 — 답변은 이미 DB에 저장돼 있으므로
+      // 빈 화면 대신 저장된 메시지를 다시 불러와 자동 복구한다 (수동 F5와 동일 효과).
+      console.error("[chat] final chunk missing — recovering from persisted messages");
+      await refreshSessions();
+      if (currentSessionId) {
+        await loadSession(currentSessionId);
+        if (window.Toast) window.Toast.warn("연결이 불안정해 생성된 답변을 다시 불러왔어요.");
+      } else {
+        appendMessage("assistant",
+          `<div class="rounded-xl border border-error/30 bg-error/5 text-error p-4 text-sm">
+             응답을 받는 중 연결이 끊겼습니다. 좌측 대화 목록에서 방금 대화를 선택하면 생성된 답변을 확인할 수 있어요.
+           </div>`, new Date().toISOString(), null);
+      }
     }
 
   } catch(e){
