@@ -506,6 +506,120 @@ def maybe_rebuild() -> bool:
         _BUILD_LOCK.release()
 
 
+# =====================================================================
+# 상태 점검 리포트 (--report): 빌드 없이 현재 그래프 상태 + 샘플 정합 재검증
+# =====================================================================
+def _recheck_pair(doc: dict, report_index: str, source: str,
+                  lots_by_report: dict, edm_tokens_by_report: dict) -> bool:
+    """샘플 연결쌍의 근거가 문서에 실제 존재하는지 재검증 (precision 스팟 체크)."""
+    text = f"{doc.get('title') or ''}\n{(doc.get('raw_content') or '')[:DOC_TEXT_MATCH_LIMIT]}"
+
+    if source in ("lot", "lot_wf"):
+        lots = lots_by_report.get(str(report_index)) or []
+        if not lots:
+            return False
+        tokens = set()
+        for m in DOC_TOKEN_RE.finditer(text):
+            norm = _norm_token(m.group(0))
+            if len(norm) >= LOT_MIN_NORM_LEN:
+                tokens.add(norm)
+        return any(_norm_token(l) in tokens for l in lots)
+
+    if source == "edm_token":
+        doc_tokens = set()
+        for link in (doc.get("report_links") or []):
+            doc_tokens.update(EDM_ID_TOKEN_RE.findall(str(link or "")))
+        return bool(doc_tokens & (edm_tokens_by_report.get(str(report_index)) or set()))
+
+    return False
+
+
+def print_report(sample_n: int = 10):
+    from app.eval_repo import get_kg_stats
+
+    stats = get_kg_stats()
+    built = stats.get("built")
+
+    print("=" * 60)
+    print("[KG Report] Knowledge Graph 상태 점검")
+    print("=" * 60)
+
+    if not built or not built.get("last_built_at"):
+        print("아직 빌드된 그래프가 없습니다. 먼저 실행하세요: python -m app.kg_builder --force")
+        return
+
+    print(f"마지막 빌드      : {built['last_built_at']}")
+    print(f"색인 문서        : {built['docs_indexed']:,}개 / 색인 DB 행: {built['reports_indexed']:,}개")
+    e = stats["edges"]
+    print(f"엣지             : 문서↔보고서 {e['doc_report']:,} · 문서↔용어 {e['doc_term']:,} · "
+          f"보고서↔용어 {e['report_term']:,} · 용어동시출현 {e['term_edge']:,}")
+    c = stats["coverage"]
+    fmt_pct = lambda v: f"{v*100:.1f}%" if v is not None else "-"
+    print(f"커버리지         : 문서→보고서 {fmt_pct(c['docs_linked_report_pct'])} · "
+          f"문서→용어 {fmt_pct(c['docs_with_terms_pct'])}")
+
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        print("-" * 60)
+        print("연결 소스 분포 (신뢰도: lot_wf > lot > edm_token):")
+        cur.execute("SELECT source, COUNT(*) c, ROUND(AVG(confidence),2) conf FROM kg_doc_report GROUP BY source ORDER BY c DESC")
+        for r in cur.fetchall() or []:
+            print(f"  - {r['source']:<10}: {int(r['c']):>7,}건 (avg conf {r['conf']})")
+
+        print("-" * 60)
+        print("과연결 상위 문서 (한 문서가 지나치게 많은 report에 물리면 오탐 의심):")
+        cur.execute("SELECT doc_id, COUNT(*) c FROM kg_doc_report GROUP BY doc_id ORDER BY c DESC LIMIT 10")
+        for r in cur.fetchall() or []:
+            print(f"  - {int(r['c']):>4}건  {r['doc_id'][:70]}")
+
+        # ── 무작위 샘플 정합 재검증 ──
+        print("-" * 60)
+        print(f"무작위 연결 샘플 {sample_n}쌍 정합 재검증:")
+        cur.execute(f"SELECT doc_id, report_index, source, confidence FROM kg_doc_report ORDER BY RAND() LIMIT {int(sample_n)}")
+        samples = cur.fetchall() or []
+        if not samples:
+            print("  (연결 엣지가 없습니다)")
+            return
+
+        ridxs = sorted({str(s["report_index"]) for s in samples})
+        placeholders = ",".join(["%s"] * len(ridxs))
+        lots_by_report, edm_tokens_by_report = {}, {}
+        try:
+            cur.execute(f"SELECT DISTINCT report_index, Lot_ID, 보고서링크 FROM v_ai_defect_search "
+                        f"WHERE report_index IN ({placeholders})", tuple(ridxs))
+            for r in cur.fetchall() or []:
+                key = str(r["report_index"])
+                if r.get("Lot_ID"):
+                    lots_by_report.setdefault(key, []).append(str(r["Lot_ID"]))
+                for tok in EDM_ID_TOKEN_RE.findall(str(r.get("보고서링크") or "")):
+                    edm_tokens_by_report.setdefault(key, set()).add(tok)
+        except Exception as ex:
+            print(f"  (DB 뷰 조회 실패로 재검증 불가: {ex})")
+            return
+
+        docs_map = {d["doc_id"]: d for d in (get_local_archive_docs() or [])}
+        ok = 0
+        for s in samples:
+            doc = docs_map.get(s["doc_id"])
+            if doc is None:
+                verdict = "?"
+                note = "(문서 캐시에 없음)"
+            else:
+                good = _recheck_pair(doc, str(s["report_index"]), s["source"], lots_by_report, edm_tokens_by_report)
+                verdict = "O" if good else "X"
+                ok += 1 if good else 0
+                title = (doc.get("title") or s["doc_id"])[:40]
+                note = f"{title}"
+            print(f"  [{verdict}] report {s['report_index']:<8} {s['source']:<9} conf {s['confidence']:.2f}  {note}")
+
+        print("-" * 60)
+        print(f"샘플 정합률: {ok}/{len(samples)}  (X가 2개 이상이면 MAX_REPORTS_PER_LOT/LOT_MIN_NORM_LEN 튜닝 권장)")
+    finally:
+        cur.close()
+        conn.close()
+
+
 def start_background_rebuild():
     """서버 기동 시 호출: 즉시 1회 시도 후 1시간 간격으로 24h 신선도 검사."""
     def loop():
@@ -516,9 +630,16 @@ def start_background_rebuild():
 
 
 if __name__ == "__main__":
-    force = "--force" in sys.argv
-    if force:
+    if "--report" in sys.argv:
+        n = 10
+        if "--sample" in sys.argv:
+            try:
+                n = max(1, min(100, int(sys.argv[sys.argv.index("--sample") + 1])))
+            except Exception:
+                pass
+        print_report(sample_n=n)
+    elif "--force" in sys.argv:
         build_graph(force=True)
     else:
         if not maybe_rebuild():
-            print("[KG] 최신 상태입니다. 강제 재빌드는 --force 옵션을 사용하세요.")
+            print("[KG] 최신 상태입니다. 강제 재빌드는 --force, 상태 점검은 --report 옵션을 사용하세요.")
