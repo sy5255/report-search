@@ -1291,3 +1291,20 @@ mark.archive-highlight {
 .fb-comment-actions .fb-cancel:hover { background: var(--color-surface-container); }
 .fb-comment-actions .fb-submit { color: var(--color-on-primary); background: var(--color-primary); }
 .fb-comment-actions .fb-submit:hover { opacity: 0.9; }
+
+/* 근거 패널 접힘 시 우측 가장자리 세로 레일 (다시 펼치기) */
+#evidenceRail {
+  position: fixed; right: 0; top: 50%; transform: translateY(-50%); z-index: 40;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 12px 6px; border-radius: 12px 0 0 12px;
+  background: var(--color-surface); color: var(--color-primary);
+  border: 1px solid var(--color-outline-variant); border-right: none;
+  box-shadow: var(--shadow-card);
+  cursor: pointer; transition: background var(--duration-fast) var(--ease-out-soft);
+}
+#evidenceRail:hover { background: var(--color-surface-container); }
+.dark #evidenceRail { color: var(--color-on-surface); }
+#evidenceRail .evidence-rail-count {
+  writing-mode: vertical-rl; text-orientation: mixed;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.02em; color: var(--color-secondary);
+}

@@ -20,18 +20,42 @@ let lastRealUserQuery = "";
 function el(id){ return document.getElementById(id); }
 
 // 문서 검색 결과 유무에 따라 우측 패널을 열고 닫는 함수
-function toggleEvidencePanel(hasDocs) {
+let evidenceHasDocs = false;
+let evidenceCollapsed = false;  // 기본값 펼침. 사용자가 현재 답변에서 접었을 때만 true.
+
+function _applyEvidenceState(){
   const rightPanel = el("rightPanel");
   const resizer2 = el("resizer2");
-  if (!rightPanel) return;
+  const rail = el("evidenceRail");
+  if(!rightPanel) return;
 
-  if (hasDocs) {
-    rightPanel.classList.remove("hidden");
-    if(resizer2) resizer2.classList.remove("hidden");
-  } else {
-    rightPanel.classList.add("hidden");
-    if(resizer2) resizer2.classList.add("hidden");
+  const open = evidenceHasDocs && !evidenceCollapsed;
+  const railOnly = evidenceHasDocs && evidenceCollapsed;
+
+  rightPanel.classList.toggle("hidden", !open);
+  if(resizer2) resizer2.classList.toggle("hidden", !open);
+  if(rail){
+    rail.classList.toggle("hidden", !railOnly);
+    const cnt = el("evidenceRailCount");
+    if(cnt) cnt.textContent = (Array.isArray(lastTopDocs) && lastTopDocs.length) ? `근거 ${lastTopDocs.length}` : "근거";
   }
+}
+
+// hasDocs=true 인 새 답변마다 패널을 '펼침'으로 리셋(기본값 펼침).
+function toggleEvidencePanel(hasDocs){
+  evidenceHasDocs = !!hasDocs;
+  if(hasDocs) evidenceCollapsed = false;
+  _applyEvidenceState();
+}
+
+function collapseEvidencePanel(){
+  evidenceCollapsed = true;
+  _applyEvidenceState();
+}
+
+function expandEvidencePanel(){
+  evidenceCollapsed = false;
+  _applyEvidenceState();
 }
 
 async function _apiFetch(method, url, body){
@@ -2805,8 +2829,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   
   if(el("resizer1")) setupVerticalResizer("resizer1", "#sidebar", ".main");
   // 우측 패널 선택자를 기존 ".right"에서 Tailwind가 적용된 "#rightPanel"로 수정!
-  if(el("resizer2")) setupVerticalResizer("resizer2", ".main", "#rightPanel"); 
-  if(el("hresizer1")) setupHorizontalResizer("hresizer1", '.panel[data-panel="topdocs"]', '.panel[data-panel="citations"]');
+  if(el("resizer2")) setupVerticalResizer("resizer2", ".main", "#rightPanel");
+  // Top Documents / Sentence Citations는 균등 50/50 + 각자 스크롤 (가로 리사이저 제거)
+
+  // 근거 패널 접기/펴기
+  if(el("evidenceCollapse")) el("evidenceCollapse").addEventListener("click", collapseEvidencePanel);
+  if(el("evidenceRail")) el("evidenceRail").addEventListener("click", expandEvidencePanel);
 
   await refreshSessions();
   newSession();
