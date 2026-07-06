@@ -258,7 +258,10 @@ def build_doc_term_edges(docs: list, term_entries: list) -> list:
             if key:
                 owner_lookup[key] = t["term_id"]
 
-    out = []
+    # ⚠️ doc_id는 md 파일명이라 서로 다른 폴더의 문서가 같은 doc_id를 가질 수 있다
+    # (같은 제목의 메일 등). PK(doc_id, term_id) 충돌을 막기 위해 corpus 전체에서
+    # (doc_id, term_id) 단위로 병합 집계한다 (freq 합산, sample은 최초값 유지).
+    agg = {}  # (doc_id, term_id) -> [freq, sample_alias]
     for d in docs:
         doc_id = d.get("doc_id")
         if not doc_id:
@@ -281,8 +284,13 @@ def build_doc_term_edges(docs: list, term_entries: list) -> list:
             counts[owner_tid] = [1, (d.get("mail_from") or "")[:255]]
 
         for tid, (freq, sample) in counts.items():
-            out.append((doc_id, tid, freq, sample))
-    return out
+            key = (doc_id, tid)
+            if key in agg:
+                agg[key][0] += freq
+            else:
+                agg[key] = [freq, sample]
+
+    return [(doc_id, tid, freq, sample) for (doc_id, tid), (freq, sample) in agg.items()]
 
 
 # =====================================================================
@@ -398,14 +406,15 @@ def build_graph(force: bool = False) -> dict:
     conn = get_conn()
     cur = conn.cursor()
     try:
+        # INSERT IGNORE: doc_id(파일명) 중복 등 예기치 못한 PK 충돌이 있어도 빌드 전체가 죽지 않게
         cur.execute("DELETE FROM kg_doc_report")
-        _batch_insert(cur, "INSERT INTO kg_doc_report (doc_id, report_index, source, confidence) VALUES (%s,%s,%s,%s)", e1)
+        _batch_insert(cur, "INSERT IGNORE INTO kg_doc_report (doc_id, report_index, source, confidence) VALUES (%s,%s,%s,%s)", e1)
 
         cur.execute("DELETE FROM kg_doc_term")
-        _batch_insert(cur, "INSERT INTO kg_doc_term (doc_id, term_id, freq, sample_alias) VALUES (%s,%s,%s,%s)", e2)
+        _batch_insert(cur, "INSERT IGNORE INTO kg_doc_term (doc_id, term_id, freq, sample_alias) VALUES (%s,%s,%s,%s)", e2)
 
         cur.execute("DELETE FROM kg_report_term")
-        _batch_insert(cur, "INSERT INTO kg_report_term (report_index, term_id, src_col, confidence) VALUES (%s,%s,%s,%s)", e3)
+        _batch_insert(cur, "INSERT IGNORE INTO kg_report_term (report_index, term_id, src_col, confidence) VALUES (%s,%s,%s,%s)", e3)
 
         # E4: 동시출현 materialize
         cur.execute("DELETE FROM kg_term_edge")
