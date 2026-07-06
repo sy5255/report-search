@@ -308,6 +308,9 @@
     const side = $("kgSide");
     if(!side) return;
     const docs = data.top_docs || [];
+    const reports = data.top_reports || [];
+    const useReportFallback = !docs.length && reports.length;
+
     side.innerHTML = `
       <div class="kg-side-head">
         <span class="kg-side-title">${esc(center.name)}</span>
@@ -315,11 +318,16 @@
         <span class="kg-badge">연결 문서 ${num(data.docs_count)}건</span>
         <span class="kg-badge">연결 보고서 ${num(data.reports_count)}건</span>
       </div>
-      <div class="chart-desc" style="margin:0">이 용어가 가장 많이 언급된 문서 (클릭 시 원문 열기)</div>
+      <div class="chart-desc" style="margin:0">${
+        useReportFallback
+          ? "본문에서 매칭된 문서는 없지만, DB에 기록된 분석 건(보고서)이 있습니다"
+          : "이 용어가 가장 많이 언급된 문서 (클릭 시 원문 열기)"
+      }</div>
       <div class="kg-doc-list">
-        ${docs.length ? "" : `<div class="empty-note">연결된 문서가 없습니다</div>`}
+        ${(docs.length || reports.length) ? "" : `<div class="empty-note">연결된 문서/보고서가 없습니다</div>`}
       </div>`;
     const list = side.querySelector(".kg-doc-list");
+
     docs.forEach(d => {
       const item = document.createElement("button");
       item.type = "button";
@@ -332,6 +340,81 @@
       });
       list.appendChild(item);
     });
+
+    if(useReportFallback){
+      reports.forEach(r => {
+        const item = document.createElement("div");
+        item.className = "kg-doc-item";
+        item.style.cursor = "default";
+        item.innerHTML = `<span class="t">📊 보고서 #${esc(r.report_index)}${r.defect ? ` · ${esc(r.defect)}` : ""}</span>
+          <span class="m">${esc(String(r.date || "").slice(0, 10))}${r.src_cols ? ` · 연결 컬럼: ${esc(r.src_cols)}` : ""}</span>`;
+        list.appendChild(item);
+      });
+    }
+  }
+
+  /* ── 연결 상세 드릴다운 (문서↔보고서, evidence 포함) ── */
+  let linksSource = "", linksLoaded = false;
+
+  async function loadLinks(){
+    const box = $("kgLinksTable");
+    if(!box) return;
+    box.innerHTML = `<div class="empty-note">불러오는 중...</div>`;
+    const q = ($("kgLinksSearch") && $("kgLinksSearch").value.trim()) || "";
+    let data;
+    try {
+      const r = await fetch(`/api/kg/links?source=${encodeURIComponent(linksSource)}&q=${encodeURIComponent(q)}&limit=100`, { credentials: "include" });
+      data = await r.json();
+    } catch(e){
+      box.innerHTML = `<div class="empty-note">연결 상세를 불러오지 못했습니다</div>`;
+      return;
+    }
+    const links = data.links || [];
+    if(!links.length){
+      box.innerHTML = `<div class="empty-note">조건에 맞는 연결이 없습니다</div>`;
+      return;
+    }
+    const rows = links.map(l => `
+      <tr>
+        <td><span class="doc-link" data-rel="${esc(l.rel_path)}" title="${esc(l.title)}">${esc(l.title)}</span>
+            <span style="font-size:9px;color:var(--color-secondary)">${esc(l.mail_date || "")}</span></td>
+        <td>#${esc(l.report_index)}</td>
+        <td><span class="kg-src-badge ${esc(l.source)}">${esc(l.source)}</span></td>
+        <td><span class="kg-evidence">${esc(l.evidence || "—")}</span></td>
+        <td>${(l.confidence ?? 0).toFixed(2)}</td>
+      </tr>`).join("");
+    box.innerHTML = `<table>
+      <thead><tr><th>문서 (클릭 시 원문)</th><th>보고서</th><th>방식</th><th>매칭 근거</th><th>conf</th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+    box.querySelectorAll(".doc-link").forEach(a => {
+      a.addEventListener("click", () => {
+        const rel = a.getAttribute("data-rel");
+        if(rel) openDocViewer(a.getAttribute("title") || "", rel);
+      });
+    });
+  }
+
+  function setupLinksPanel(){
+    const toggle = $("kgLinksToggle"), panel = $("kgLinksPanel");
+    if(!toggle || !panel) return;
+    toggle.addEventListener("click", () => {
+      const open = panel.style.display !== "none";
+      panel.style.display = open ? "none" : "block";
+      if(!open && !linksLoaded){ linksLoaded = true; loadLinks(); }
+    });
+    panel.querySelectorAll(".kg-chip[data-src]").forEach(chip => {
+      chip.addEventListener("click", () => {
+        panel.querySelectorAll(".kg-chip[data-src]").forEach(c => c.classList.remove("is-active"));
+        chip.classList.add("is-active");
+        linksSource = chip.dataset.src || "";
+        loadLinks();
+      });
+    });
+    const search = $("kgLinksSearch");
+    if(search){
+      let t = null;
+      search.addEventListener("input", () => { clearTimeout(t); t = setTimeout(loadLinks, 350); });
+    }
   }
 
   async function selectTerm(termId, name, type){
@@ -422,6 +505,7 @@
       });
     });
     setupDocViewer();
+    setupLinksPanel();
     loadEval(days);
     loadKg();
   });

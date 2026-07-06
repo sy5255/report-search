@@ -949,6 +949,44 @@ function applySessionFilter(){
 }
 
 /* ---------- assistant message action bar ---------- */
+function openDownFeedbackPopover(bar, submit){
+  // 이미 열려있으면 재사용
+  const existing = bar.parentElement && bar.parentElement.querySelector(".fb-comment-pop");
+  if(existing){ existing.querySelector("textarea").focus(); return; }
+
+  const pop = document.createElement("div");
+  pop.className = "fb-comment-pop";
+  pop.innerHTML = `
+    <div class="fb-comment-title">어떤 점이 아쉬웠는지 알려주세요 <span>(필수 · 5자 이상)</span></div>
+    <textarea class="fb-comment-input" rows="2" maxlength="500"
+      placeholder="예: 통계 수치가 실제와 다릅니다 / 엉뚱한 문서를 인용했어요"></textarea>
+    <div class="fb-comment-actions">
+      <button type="button" class="fb-cancel">취소</button>
+      <button type="button" class="fb-submit">피드백 보내기</button>
+    </div>`;
+  bar.insertAdjacentElement("afterend", pop);
+
+  const ta = pop.querySelector("textarea");
+  ta.focus();
+  pop.querySelector(".fb-cancel").addEventListener("click", (e) => { e.stopPropagation(); pop.remove(); });
+  pop.querySelector(".fb-submit").addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const comment = ta.value.trim();
+    if(comment.length < 5){
+      if(window.Toast) window.Toast.warn("어떤 점이 아쉬웠는지 5자 이상 적어주세요.");
+      ta.focus();
+      return;
+    }
+    await submit("down", comment);
+    pop.remove();
+  });
+  pop.addEventListener("click", (e) => e.stopPropagation());
+  ta.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if(e.key === "Escape") pop.remove();
+  });
+}
+
 function wireMessageActionBar(scope, assistantMsgId){
   if(!scope || !assistantMsgId) return;
   const bar = scope.querySelector(".msg-action-bar");
@@ -999,26 +1037,42 @@ function wireMessageActionBar(scope, assistantMsgId){
         return;
       }
       if(act === "up" || act === "down"){
-        try{
-          const res = await apiPost("/api/feedback", {
-            assistant_msg_id: assistantMsgId,
-            rating: act,
-            session_id: currentSessionId || null
-          });
-          const newRating = res && res.rating;
-          bar.querySelectorAll(".msg-action-btn[data-action='up'],.msg-action-btn[data-action='down']").forEach(b => {
-            const a = b.getAttribute("data-action");
-            if(a === newRating) b.classList.add("is-active");
-            else b.classList.remove("is-active");
-          });
-          if(window.Toast){
-            if(newRating === "up") window.Toast.success("좋은 응답으로 기록했습니다.");
-            else if(newRating === "down") window.Toast.info("개선이 필요한 응답으로 기록했습니다.");
-            else window.Toast.info("피드백을 취소했습니다.");
+        const submitFeedback = async (rating, comment) => {
+          try{
+            const res = await apiPost("/api/feedback", {
+              assistant_msg_id: assistantMsgId,
+              rating,
+              comment: comment || null,
+              session_id: currentSessionId || null
+            });
+            const newRating = res && res.rating;
+            bar.querySelectorAll(".msg-action-btn[data-action='up'],.msg-action-btn[data-action='down']").forEach(b => {
+              const a = b.getAttribute("data-action");
+              if(a === newRating) b.classList.add("is-active");
+              else b.classList.remove("is-active");
+            });
+            if(window.Toast){
+              if(newRating === "up") window.Toast.success("좋은 응답으로 기록했습니다.");
+              else if(newRating === "down") window.Toast.info("소중한 피드백 감사합니다. 개선에 활용할게요.");
+              else window.Toast.info("피드백을 취소했습니다.");
+            }
+          } catch(err){
+            if(window.Toast) window.Toast.error("피드백 저장에 실패했습니다.");
           }
-        } catch(err){
-          if(window.Toast) window.Toast.error("피드백 저장에 실패했습니다.");
+        };
+
+        if(act === "up"){
+          await submitFeedback("up");
+          return;
         }
+        // 👎는 이유(코멘트)를 필수로 받는다 — 가볍게 누르는 노이즈를 거르고,
+        // '왜 별로였는지'가 있어야 개선 분석(드릴다운)이 가능하기 때문.
+        // 이미 👎 상태에서 다시 누르는 것(취소)은 마찰 없이 바로 처리.
+        if(btn.classList.contains("is-active")){
+          await submitFeedback("down");
+          return;
+        }
+        openDownFeedbackPopover(bar, submitFeedback);
         return;
       }
     });

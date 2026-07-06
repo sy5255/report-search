@@ -916,6 +916,14 @@ async def api_kg_term(term_id: int, request: Request):
     return get_term_overview(term_id)
 
 
+@app.get("/api/kg/links")
+async def api_kg_links(request: Request, source: str = Query(""), q: str = Query(""), limit: int = Query(50)):
+    """문서↔보고서 연결 상세 (매칭 근거 evidence 포함) — 대시보드 드릴다운용."""
+    _require_user(request)
+    from app.kg_repo import get_link_samples
+    return {"links": get_link_samples(source=source.strip(), q=q.strip(), limit=limit)}
+
+
 @app.get("/api/sessions/{session_id}/latest-artifact")
 async def api_latest_artifact(session_id: str, request: Request):
     user = _require_user(request)

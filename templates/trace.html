@@ -110,6 +110,29 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .kg-doc-item .m { font-size: 9px; color: var(--color-secondary); }
 
+  /* 연결 상세 드릴다운 */
+  .kg-links-toggle { margin-top: 12px; font-size: 11px; font-weight: 700; color: var(--chart-1);
+    padding: 6px 12px; border: 1px dashed var(--chart-1); border-radius: 8px; width: 100%; text-align: left; }
+  .kg-links-toggle:hover { background: color-mix(in srgb, var(--chart-1) 8%, transparent); }
+  .kg-links-filter { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 12px 0 8px; }
+  #kgLinksSearch { flex: 1; min-width: 160px; padding: 5px 10px; font-size: 11px;
+    border: 1px solid var(--color-outline-variant); border-radius: 8px;
+    background: var(--color-surface-container-low); color: var(--color-on-surface); }
+  .kg-links-table { max-height: 340px; overflow-y: auto; }
+  .kg-links-table table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .kg-links-table th { position: sticky; top: 0; background: var(--color-surface-container-low);
+    font-size: 10px; color: var(--color-secondary); text-align: left; padding: 5px 8px;
+    border-bottom: 1px solid var(--color-outline-variant); }
+  .kg-links-table td { padding: 5px 8px; border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 50%, transparent); vertical-align: top; }
+  .kg-links-table .doc-link { color: var(--color-on-surface); font-weight: 600; cursor: pointer;
+    display: block; max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kg-links-table .doc-link:hover { color: var(--chart-1); text-decoration: underline; }
+  .kg-src-badge { font-size: 9px; font-weight: 800; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+  .kg-src-badge.lot_wf { color: var(--chart-1); background: color-mix(in srgb, var(--chart-1) 12%, transparent); }
+  .kg-src-badge.lot { color: var(--chart-2); background: color-mix(in srgb, var(--chart-2) 12%, transparent); }
+  .kg-src-badge.edm_token { color: var(--chart-3); background: color-mix(in srgb, var(--chart-3) 12%, transparent); }
+  .kg-evidence { font-family: var(--font-mono); font-size: 10px; color: var(--color-on-surface-soft); }
+
   /* 문서 뷰어 모달 */
   .kg-doc-modal { position: fixed; inset: 0; z-index: 6000; display: flex; align-items: center; justify-content: center; }
   .kg-doc-backdrop { position: absolute; inset: 0; background: rgba(10,15,31,0.6); }
@@ -191,6 +214,17 @@
         <div class="chart-title">문서↔보고서 연결 방식 분포</div>
         <div class="chart-desc">lot_wf(웨이퍼 정밀) &gt; lot(Lot 단위) &gt; edm_token(링크 보조) 순으로 신뢰도가 높습니다</div>
         <div id="chartKgSources"></div>
+        <button id="kgLinksToggle" type="button" class="kg-links-toggle">🔍 연결 상세 보기 — 어떤 문서가 어떤 근거로 연결됐는지</button>
+        <div id="kgLinksPanel" style="display:none">
+          <div class="kg-links-filter">
+            <button class="kg-chip is-active" data-src="" type="button">전체</button>
+            <button class="kg-chip" data-src="lot_wf" type="button">lot_wf</button>
+            <button class="kg-chip" data-src="lot" type="button">lot</button>
+            <button class="kg-chip" data-src="edm_token" type="button">edm_token</button>
+            <input id="kgLinksSearch" type="search" placeholder="제목 / 보고서번호 검색" autocomplete="off"/>
+          </div>
+          <div id="kgLinksTable" class="kg-links-table"></div>
+        </div>
       </div>
       <div class="chart-card">
         <div class="chart-title">문서에서 가장 많이 매칭된 용어</div>

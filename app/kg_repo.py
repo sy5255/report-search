@@ -98,9 +98,57 @@ def get_related(report_index: str = "", doc_id: str = "") -> dict:
     return result
 
 
+def get_link_samples(source: str = "", q: str = "", limit: int = 50) -> list:
+    """문서↔보고서 연결 상세 (대시보드 드릴다운용).
+    반환: [{doc_id, title, mail_date, report_index, source, confidence, evidence, rel_path}]
+    """
+    limit = max(1, min(int(limit or 50), 200))
+    try:
+        conn = get_conn()
+        cur = conn.cursor(dictionary=True)
+        sql = "SELECT doc_id, report_index, source, confidence, evidence FROM kg_doc_report"
+        params = []
+        if source:
+            sql += " WHERE source=%s"
+            params.append(source)
+        sql += " ORDER BY confidence DESC"
+        cur.execute(sql, tuple(params))
+        rows = cur.fetchall() or []
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[KG] get_link_samples 조회 실패: {e}")
+        return []
+
+    meta_map = _doc_meta_map()
+    ql = (q or "").strip().lower()
+    out = []
+    for r in rows:
+        meta = meta_map.get(r["doc_id"]) or {}
+        title = meta.get("title") or r["doc_id"]
+        if ql and ql not in title.lower() and ql not in str(r["doc_id"]).lower() \
+           and ql not in str(r["report_index"]).lower():
+            continue
+        out.append({
+            "doc_id": r["doc_id"],
+            "title": title,
+            "mail_date": meta.get("mail_date") or "",
+            "report_index": str(r["report_index"]),
+            "source": r["source"],
+            "confidence": float(r["confidence"] or 0),
+            "evidence": r.get("evidence") or "",
+            "rel_path": ((meta.get("storage") or {}).get("parsed_md_rel_path")) or "",
+        })
+        if len(out) >= limit:
+            break
+
+    out.sort(key=lambda x: (-x["confidence"], -_parse_date_to_timestamp(x["mail_date"])))
+    return out
+
+
 def get_term_overview(term_id: int, top_n: int = 10) -> dict:
     """용어 허브용: 관련 문서/보고서 수 + 상위 문서 + 동시출현 용어 (Phase 3 UI 대비 API)."""
-    out = {"term_id": term_id, "docs_count": 0, "reports_count": 0, "top_docs": [], "co_terms": []}
+    out = {"term_id": term_id, "docs_count": 0, "reports_count": 0, "top_docs": [], "co_terms": [], "top_reports": []}
     try:
         conn = get_conn()
         cur = conn.cursor(dictionary=True)
@@ -139,6 +187,27 @@ def get_term_overview(term_id: int, top_n: int = 10) -> dict:
             )
             names = {r["term_id"]: r for r in (cur.fetchall() or [])}
 
+        # 연결 보고서 목록 (연결 문서가 0건일 때 사이드패널 fallback 용)
+        report_rows = []
+        rep_meta = {}
+        try:
+            cur.execute("""
+                SELECT report_index, GROUP_CONCAT(DISTINCT src_col) AS cols, MAX(confidence) AS conf
+                FROM kg_report_term WHERE term_id=%s
+                GROUP BY report_index ORDER BY conf DESC LIMIT %s
+            """, (term_id, top_n))
+            report_rows = cur.fetchall() or []
+            if report_rows:
+                ridxs = [str(r["report_index"]) for r in report_rows]
+                ph = ",".join(["%s"] * len(ridxs))
+                cur.execute(
+                    f"SELECT DISTINCT report_index, 불량명, 분석완료일시 FROM v_ai_defect_search "
+                    f"WHERE report_index IN ({ph})", tuple(ridxs))
+                for m in (cur.fetchall() or []):
+                    rep_meta.setdefault(str(m["report_index"]), m)
+        except Exception as e:
+            print(f"[KG] top_reports 보강 실패(무시): {e}")
+
         cur.close()
         conn.close()
     except Exception as e:
@@ -161,5 +230,15 @@ def get_term_overview(term_id: int, top_n: int = 10) -> dict:
             "term_type": info.get("term_type"),
             "co_doc_count": int(r.get("co_doc_count") or 0),
             "co_report_count": int(r.get("co_report_count") or 0),
+        })
+
+    for r in report_rows:
+        ridx = str(r["report_index"])
+        m = rep_meta.get(ridx) or {}
+        out["top_reports"].append({
+            "report_index": ridx,
+            "defect": m.get("불량명") or "",
+            "date": str(m.get("분석완료일시") or ""),
+            "src_cols": r.get("cols") or "",
         })
     return out

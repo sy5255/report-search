@@ -74,10 +74,15 @@ def ensure_kg_tables():
             report_index VARCHAR(64) NOT NULL,
             source ENUM('lot_wf','lot','edm_token') NOT NULL,
             confidence FLOAT NOT NULL DEFAULT 1.0,
+            evidence VARCHAR(255) NULL,
             PRIMARY KEY (doc_id, report_index),
             INDEX idx_report (report_index)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """)
+        try:
+            cur.execute("ALTER TABLE kg_doc_report ADD COLUMN evidence VARCHAR(255) NULL;")
+        except Exception:
+            pass
         cur.execute("""
         CREATE TABLE IF NOT EXISTS kg_doc_term (
             doc_id VARCHAR(255) NOT NULL,
@@ -153,15 +158,16 @@ def build_doc_report_edges_by_lot(docs: list, lot_map: dict) -> list:
       추측하지 않고, 실제 Lot_ID 값 집합과 정규화 토큰을 대조한다.
     - Lot 출현 위치 ±LOT_WF_WINDOW 원문에서 해당 Lot의 WF_ID가 발견되면 (Lot,WF)로
       정밀화(source='lot_wf', 0.95), 아니면 그 Lot의 모든 report와 연결(source='lot', 0.8).
-    반환: [(doc_id, report_index, source, confidence)]
+    - evidence에 매칭 근거(어떤 Lot/WF로 연결됐는지)를 기록해 웹에서 정합 추적 가능하게 한다.
+    반환: [(doc_id, report_index, source, confidence, evidence)]
     """
     best = {}
 
-    def put(doc_id, ridx, source, conf):
+    def put(doc_id, ridx, source, conf, evidence):
         key = (doc_id, str(ridx))
         prev = best.get(key)
         if prev is None or conf > prev[1]:
-            best[key] = (source, conf)
+            best[key] = (source, conf, str(evidence or "")[:255])
 
     lot_keys = set(lot_map.keys())
 
@@ -185,7 +191,7 @@ def build_doc_report_edges_by_lot(docs: list, lot_map: dict) -> list:
                 continue  # 공용/더미 Lot 오탐 가드
 
             # WF 정밀화: Lot 출현 위치 주변 원문에서 WF_ID 경계 매칭
-            wf_hit_reports = set()
+            wf_hits = {}  # report_index -> wf
             for wf, ridx in entries:
                 if not wf:
                     continue
@@ -193,17 +199,17 @@ def build_doc_report_edges_by_lot(docs: list, lot_map: dict) -> list:
                 for (s, e) in token_positions[lot]:
                     window = text[max(0, s - LOT_WF_WINDOW): e + LOT_WF_WINDOW]
                     if pat.search(window):
-                        wf_hit_reports.add(ridx)
+                        wf_hits[ridx] = wf
                         break
 
-            if wf_hit_reports:
-                for ridx in wf_hit_reports:
-                    put(doc_id, ridx, "lot_wf", 0.95)
+            if wf_hits:
+                for ridx, wf in wf_hits.items():
+                    put(doc_id, ridx, "lot_wf", 0.95, f"Lot {lot} + WF {wf}")
             else:
                 for ridx in report_ids:
-                    put(doc_id, ridx, "lot", 0.8)
+                    put(doc_id, ridx, "lot", 0.8, f"Lot {lot}")
 
-    return [(doc_id, ridx, src, conf) for (doc_id, ridx), (src, conf) in best.items()]
+    return [(doc_id, ridx, src, conf, ev) for (doc_id, ridx), (src, conf, ev) in best.items()]
 
 
 def build_edm_token_map(report_rows: list) -> dict:
@@ -222,7 +228,7 @@ def build_edm_token_map(report_rows: list) -> dict:
 def build_doc_report_edges_by_edm(docs: list, edm_token_map: dict, already_linked: set) -> list:
     """R2(보조): DB 보고서링크와 문서 EDM 링크는 문자열이 달라도 같은 문서번호(숫자 토큰)를
     품는 경우가 있어, 토큰 교집합으로 연결한다. R1이 이미 연결한 쌍에는 적용하지 않는다.
-    반환: [(doc_id, report_index, 'edm_token', 0.6)]
+    반환: [(doc_id, report_index, 'edm_token', 0.6, evidence)]
     """
     seen = set()
     out = []
@@ -237,7 +243,7 @@ def build_doc_report_edges_by_edm(docs: list, edm_token_map: dict, already_linke
                     if key in already_linked or key in seen:
                         continue
                     seen.add(key)
-                    out.append((doc_id, ridx, "edm_token", 0.6))
+                    out.append((doc_id, ridx, "edm_token", 0.6, f"EDM 링크 번호 {tok}"))
     return out
 
 
@@ -279,9 +285,16 @@ def build_doc_term_edges(docs: list, term_entries: list) -> list:
         except Exception as e:
             print(f"[KG] 용어 매칭 실패 doc={doc_id}: {e}")
 
-        owner_tid = owner_lookup.get(normalize_alias_text(d.get("mail_from") or ""))
+        # owner 매칭: mail_from은 "이름 <메일>" 전체 문자열이라 사전 alias("이름")와
+        # exact 불일치했음 → 전체/이름부/이메일부 3가지 키로 시도
+        mf = str(d.get("mail_from") or "")
+        name_part = mf.split("<")[0].strip()
+        email_part = mf[mf.find("<") + 1: mf.find(">")].strip() if ("<" in mf and ">" in mf) else ""
+        owner_tid = (owner_lookup.get(normalize_alias_text(mf))
+                     or owner_lookup.get(normalize_alias_text(name_part))
+                     or owner_lookup.get(normalize_alias_text(email_part)))
         if owner_tid and owner_tid not in counts:
-            counts[owner_tid] = [1, (d.get("mail_from") or "")[:255]]
+            counts[owner_tid] = [1, mf[:255]]
 
         for tid, (freq, sample) in counts.items():
             key = (doc_id, tid)
@@ -395,7 +408,7 @@ def build_graph(force: bool = False) -> dict:
     # E1: Lot 사전 매칭(주력) → EDM 링크 ID 토큰(보조, 미연결 쌍만)
     lot_map = build_lot_map(report_rows)
     e1_lot = build_doc_report_edges_by_lot(docs, lot_map)
-    already_linked = {(doc_id, ridx) for (doc_id, ridx, _, _) in e1_lot}
+    already_linked = {(doc_id, ridx) for (doc_id, ridx, _, _, _) in e1_lot}
     edm_token_map = build_edm_token_map(report_rows)
     e1 = e1_lot + build_doc_report_edges_by_edm(docs, edm_token_map, already_linked)
 
@@ -408,7 +421,7 @@ def build_graph(force: bool = False) -> dict:
     try:
         # INSERT IGNORE: doc_id(파일명) 중복 등 예기치 못한 PK 충돌이 있어도 빌드 전체가 죽지 않게
         cur.execute("DELETE FROM kg_doc_report")
-        _batch_insert(cur, "INSERT IGNORE INTO kg_doc_report (doc_id, report_index, source, confidence) VALUES (%s,%s,%s,%s)", e1)
+        _batch_insert(cur, "INSERT IGNORE INTO kg_doc_report (doc_id, report_index, source, confidence, evidence) VALUES (%s,%s,%s,%s,%s)", e1)
 
         cur.execute("DELETE FROM kg_doc_term")
         _batch_insert(cur, "INSERT IGNORE INTO kg_doc_term (doc_id, term_id, freq, sample_alias) VALUES (%s,%s,%s,%s)", e2)
@@ -585,7 +598,7 @@ def print_report(sample_n: int = 10):
         # ── 무작위 샘플 정합 재검증 ──
         print("-" * 60)
         print(f"무작위 연결 샘플 {sample_n}쌍 정합 재검증:")
-        cur.execute(f"SELECT doc_id, report_index, source, confidence FROM kg_doc_report ORDER BY RAND() LIMIT {int(sample_n)}")
+        cur.execute(f"SELECT doc_id, report_index, source, confidence, evidence FROM kg_doc_report ORDER BY RAND() LIMIT {int(sample_n)}")
         samples = cur.fetchall() or []
         if not samples:
             print("  (연결 엣지가 없습니다)")
@@ -620,7 +633,9 @@ def print_report(sample_n: int = 10):
                 ok += 1 if good else 0
                 title = (doc.get("title") or s["doc_id"])[:40]
                 note = f"{title}"
-            print(f"  [{verdict}] report {s['report_index']:<8} {s['source']:<9} conf {s['confidence']:.2f}  {note}")
+            ev = s.get("evidence") or ""
+            print(f"  [{verdict}] report {s['report_index']:<8} {s['source']:<9} conf {s['confidence']:.2f}  {note}"
+                  + (f"  [근거: {ev}]" if ev else ""))
 
         print("-" * 60)
         print(f"샘플 정합률: {ok}/{len(samples)}  (X가 2개 이상이면 MAX_REPORTS_PER_LOT/LOT_MIN_NORM_LEN 튜닝 권장)")
