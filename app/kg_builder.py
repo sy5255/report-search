@@ -34,8 +34,10 @@ DOC_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._\-]{3,}")
 LOT_MIN_NORM_LEN = 5       # 정규화 후 이 길이 미만인 Lot은 오탐 위험으로 사전에서 제외
 LOT_WF_WINDOW = 80         # Lot 출현 위치 주변에서 WF_ID를 찾는 범위(문자)
 MAX_REPORTS_PER_LOT = 10   # 하나의 Lot이 과다한 report에 물리면 공용/더미 Lot으로 보고 스킵
-EDM_ID_TOKEN_RE = re.compile(r"\d{5,}")  # EDM URL 속 문서번호 후보 토큰
-MAX_REPORTS_PER_EDM_TOKEN = 5
+# EDM URL의 진짜 문서 식별자(fileid): .../verLink/<18자리>/<버전> 에서 verLink 뒤 숫자만 캡처.
+# 끝의 /버전, 쿼리 파라미터, 짧은 숫자, viewer/<짧은코드> 형태는 제외됨.
+EDM_FILEID_RE = re.compile(r"verLink/(\d{10,})")
+MAX_REPORTS_PER_EDM_FILEID = 20  # safety cap (18자리 정확 매칭이라 사실상 거의 안 걸림)
 
 # E2 본문 텍스트 매칭을 허용하는 용어 유형.
 # owner(사람 이름)는 일반 명사와 충돌하는 오탐이 많아 본문 매칭에서 제외하고
@@ -212,23 +214,24 @@ def build_doc_report_edges_by_lot(docs: list, lot_map: dict) -> list:
     return [(doc_id, ridx, src, conf, ev) for (doc_id, ridx), (src, conf, ev) in best.items()]
 
 
-def build_edm_token_map(report_rows: list) -> dict:
-    """{보고서링크 URL 속 5자리+ 숫자 토큰: set(report_index)} — 과다 매핑 토큰은 제외."""
-    token_map = {}
+def build_edm_fileid_map(report_rows: list) -> dict:
+    """{보고서링크의 verLink fileid: set(report_index)} — 과다 매핑 fileid는 제외(safety)."""
+    fid_map = {}
     for r in report_rows:
         ridx = str(r.get("report_index") or "").strip()
         link = str(r.get("보고서링크") or "")
         if not ridx or not link:
             continue
-        for tok in EDM_ID_TOKEN_RE.findall(link):
-            token_map.setdefault(tok, set()).add(ridx)
-    return {t: rs for t, rs in token_map.items() if len(rs) <= MAX_REPORTS_PER_EDM_TOKEN}
+        for fid in EDM_FILEID_RE.findall(link):
+            fid_map.setdefault(fid, set()).add(ridx)
+    return {f: rs for f, rs in fid_map.items() if len(rs) <= MAX_REPORTS_PER_EDM_FILEID}
 
 
-def build_doc_report_edges_by_edm(docs: list, edm_token_map: dict, already_linked: set) -> list:
-    """R2(보조): DB 보고서링크와 문서 EDM 링크는 문자열이 달라도 같은 문서번호(숫자 토큰)를
-    품는 경우가 있어, 토큰 교집합으로 연결한다. R1이 이미 연결한 쌍에는 적용하지 않는다.
-    반환: [(doc_id, report_index, 'edm_token', 0.6, evidence)]
+def build_doc_report_edges_by_edm(docs: list, edm_fileid_map: dict, already_linked: set) -> list:
+    """R2(보조): 문서에 가끔 DB와 동일한 edm2/verLink 링크가 들어오는 경우, 그 안의 fileid(18자리)를
+    DB 보고서링크의 fileid와 정확 매칭해 연결한다. 짧은 코드형(viewer/xxxx)은 fileid가 없어 제외.
+    R1(Lot)이 이미 연결한 쌍에는 적용하지 않는다.
+    반환: [(doc_id, report_index, 'edm_token', 0.85, evidence)]
     """
     seen = set()
     out = []
@@ -237,13 +240,13 @@ def build_doc_report_edges_by_edm(docs: list, edm_token_map: dict, already_linke
         if not doc_id:
             continue
         for link in (d.get("report_links") or []):
-            for tok in EDM_ID_TOKEN_RE.findall(str(link or "")):
-                for ridx in edm_token_map.get(tok, ()):
+            for fid in EDM_FILEID_RE.findall(str(link or "")):
+                for ridx in edm_fileid_map.get(fid, ()):
                     key = (doc_id, ridx)
                     if key in already_linked or key in seen:
                         continue
                     seen.add(key)
-                    out.append((doc_id, ridx, "edm_token", 0.6, f"EDM 링크 번호 {tok}"))
+                    out.append((doc_id, ridx, "edm_token", 0.85, f"EDM fileid {fid}"))
     return out
 
 
@@ -409,8 +412,8 @@ def build_graph(force: bool = False) -> dict:
     lot_map = build_lot_map(report_rows)
     e1_lot = build_doc_report_edges_by_lot(docs, lot_map)
     already_linked = {(doc_id, ridx) for (doc_id, ridx, _, _, _) in e1_lot}
-    edm_token_map = build_edm_token_map(report_rows)
-    e1 = e1_lot + build_doc_report_edges_by_edm(docs, edm_token_map, already_linked)
+    edm_fileid_map = build_edm_fileid_map(report_rows)
+    e1 = e1_lot + build_doc_report_edges_by_edm(docs, edm_fileid_map, already_linked)
 
     e2 = build_doc_term_edges(docs, term_entries)
     e3 = build_report_term_edges(report_rows, term_entries)
@@ -532,7 +535,7 @@ def maybe_rebuild() -> bool:
 # 상태 점검 리포트 (--report): 빌드 없이 현재 그래프 상태 + 샘플 정합 재검증
 # =====================================================================
 def _recheck_pair(doc: dict, report_index: str, source: str,
-                  lots_by_report: dict, edm_tokens_by_report: dict) -> bool:
+                  lots_by_report: dict, edm_fileids_by_report: dict) -> bool:
     """샘플 연결쌍의 근거가 문서에 실제 존재하는지 재검증 (precision 스팟 체크)."""
     text = f"{doc.get('title') or ''}\n{(doc.get('raw_content') or '')[:DOC_TEXT_MATCH_LIMIT]}"
 
@@ -548,10 +551,10 @@ def _recheck_pair(doc: dict, report_index: str, source: str,
         return any(_norm_token(l) in tokens for l in lots)
 
     if source == "edm_token":
-        doc_tokens = set()
+        doc_fids = set()
         for link in (doc.get("report_links") or []):
-            doc_tokens.update(EDM_ID_TOKEN_RE.findall(str(link or "")))
-        return bool(doc_tokens & (edm_tokens_by_report.get(str(report_index)) or set()))
+            doc_fids.update(EDM_FILEID_RE.findall(str(link or "")))
+        return bool(doc_fids & (edm_fileids_by_report.get(str(report_index)) or set()))
 
     return False
 
@@ -606,7 +609,7 @@ def print_report(sample_n: int = 10):
 
         ridxs = sorted({str(s["report_index"]) for s in samples})
         placeholders = ",".join(["%s"] * len(ridxs))
-        lots_by_report, edm_tokens_by_report = {}, {}
+        lots_by_report, edm_fileids_by_report = {}, {}
         try:
             cur.execute(f"SELECT DISTINCT report_index, Lot_ID, 보고서링크 FROM v_ai_defect_search "
                         f"WHERE report_index IN ({placeholders})", tuple(ridxs))
@@ -614,8 +617,8 @@ def print_report(sample_n: int = 10):
                 key = str(r["report_index"])
                 if r.get("Lot_ID"):
                     lots_by_report.setdefault(key, []).append(str(r["Lot_ID"]))
-                for tok in EDM_ID_TOKEN_RE.findall(str(r.get("보고서링크") or "")):
-                    edm_tokens_by_report.setdefault(key, set()).add(tok)
+                for fid in EDM_FILEID_RE.findall(str(r.get("보고서링크") or "")):
+                    edm_fileids_by_report.setdefault(key, set()).add(fid)
         except Exception as ex:
             print(f"  (DB 뷰 조회 실패로 재검증 불가: {ex})")
             return
@@ -628,7 +631,7 @@ def print_report(sample_n: int = 10):
                 verdict = "?"
                 note = "(문서 캐시에 없음)"
             else:
-                good = _recheck_pair(doc, str(s["report_index"]), s["source"], lots_by_report, edm_tokens_by_report)
+                good = _recheck_pair(doc, str(s["report_index"]), s["source"], lots_by_report, edm_fileids_by_report)
                 verdict = "O" if good else "X"
                 ok += 1 if good else 0
                 title = (doc.get("title") or s["doc_id"])[:40]
