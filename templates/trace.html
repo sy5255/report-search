@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Cognitive Trace - Intellectual Curator{% endblock %}
+
+{% block extra_head %}
+<style>
+  /* ── 차트 팔레트 (validate_palette.js 통과값: light/dark 별도 스텝) ── */
+  :root {
+    --chart-1: #0891b2;  /* RAG / teal */
+    --chart-2: #7c3aed;  /* DB / violet */
+    --chart-3: #b45309;  /* HYBRID / amber */
+    --chart-4: #2563eb;  /* GENERAL / blue */
+    --status-good: #15803d;
+    --status-bad: #b52b2b;
+    --grid-line: color-mix(in srgb, var(--color-on-surface) 8%, transparent);
+  }
+  .dark {
+    --chart-1: #0d9488;
+    --chart-2: #8b5cf6;
+    --chart-3: #d97706;
+    --chart-4: #3b82f6;
+    --status-good: #22c55e;
+    --status-bad: #f87171;
+  }
+
+  .stat-tile { background: var(--color-surface); border: 1px solid var(--color-outline-variant); border-radius: 14px; padding: 16px 18px; }
+  .stat-tile .stat-label { font-size: 11px; font-weight: 600; color: var(--color-secondary); margin-bottom: 6px; display:flex; align-items:center; gap:4px; }
+  .stat-tile .stat-value { font-family: var(--font-display); font-size: 26px; font-weight: 800; letter-spacing: -0.02em; color: var(--color-on-surface); }
+  .stat-tile .stat-sub { font-size: 10px; color: var(--color-secondary); margin-top: 2px; }
+
+  .chart-card { background: var(--color-surface); border: 1px solid var(--color-outline-variant); border-radius: 14px; padding: 18px; }
+  .chart-title { font-family: var(--font-display); font-weight: 700; font-size: 13px; margin-bottom: 2px; }
+  .chart-desc { font-size: 11px; color: var(--color-secondary); margin-bottom: 12px; }
+
+  /* 세로 바 차트 (일별 추이) */
+  .vbar-chart { display: flex; align-items: flex-end; gap: 2px; height: 120px; border-bottom: 1px solid var(--grid-line); }
+  .vbar-col { flex: 1 1 0; min-width: 3px; display: flex; align-items: flex-end; gap: 1px; height: 100%; }
+  .vbar { flex: 1 1 0; border-radius: 4px 4px 0 0; min-height: 2px; cursor: default; }
+  .vbar:hover { filter: brightness(1.15); }
+
+  /* 가로 바 차트 (분포) */
+  .hbar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .hbar-label { width: 130px; font-size: 11px; color: var(--color-on-surface); text-align: right; flex-shrink: 0; }
+  .hbar-track { flex: 1; height: 14px; display: flex; align-items: center; }
+  .hbar { height: 14px; border-radius: 0 4px 4px 0; min-width: 2px; }
+  .hbar-value { font-size: 11px; font-weight: 700; color: var(--color-on-surface); margin-left: 8px; font-variant-numeric: tabular-nums; }
+
+  .legend { display: flex; gap: 14px; font-size: 11px; color: var(--color-secondary); margin-bottom: 10px; }
+  .legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+
+  .range-chip { padding: 5px 14px; border-radius: 999px; border: 1px solid var(--color-outline-variant); font-size: 12px; font-weight: 600; color: var(--color-secondary); }
+  .range-chip.is-active { background: var(--color-primary); color: var(--color-on-primary); border-color: var(--color-primary); }
+
+  .chart-table summary { font-size: 10px; color: var(--color-secondary); cursor: pointer; margin-top: 10px; }
+  .chart-table table { width: 100%; font-size: 10px; margin-top: 6px; border-collapse: collapse; }
+  .chart-table th, .chart-table td { border: 1px solid var(--color-outline-variant); padding: 3px 6px; text-align: right; }
+  .chart-table th:first-child, .chart-table td:first-child { text-align: left; }
+
+  /* 공유 hover 툴팁 */
+  #traceTip { position: fixed; z-index: 5000; pointer-events: none; background: var(--color-surface); border: 1px solid var(--color-outline-variant); border-radius: 8px; box-shadow: var(--shadow-card-hover); padding: 6px 10px; font-size: 11px; color: var(--color-on-surface); display: none; white-space: nowrap; }
+
+  .empty-note { font-size: 11px; color: var(--color-secondary); padding: 18px 0; text-align: center; }
+</style>
+{% endblock %}
+
+{% block content %}
+<main class="flex-1 overflow-y-auto scrolled-content">
+  <div class="max-w-6xl mx-auto px-8 py-8">
+    <header class="mb-6 flex items-end justify-between flex-wrap gap-4">
+      <div>
+        <h1 class="font-headline text-3xl font-extrabold tracking-tight mb-1">Cognitive Trace</h1>
+        <p class="text-sm text-secondary">시스템 성능 평가 · 답변 품질 · Knowledge Graph 상태</p>
+      </div>
+      <div class="flex gap-2" role="radiogroup" aria-label="집계 기간">
+        <button class="range-chip" data-days="7" type="button">7일</button>
+        <button class="range-chip is-active" data-days="30" type="button">30일</button>
+        <button class="range-chip" data-days="90" type="button">90일</button>
+      </div>
+    </header>
+
+    <!-- ── 핵심 지표 타일 ── -->
+    <section id="statTiles" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6"></section>
+
+    <!-- ── 품질/사용량 차트 ── -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+      <div class="chart-card">
+        <div class="chart-title">일별 질문 수</div>
+        <div class="chart-desc">사용자가 보낸 질문(메시지) 수 추이</div>
+        <div id="chartDaily"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">사용자 피드백 추이</div>
+        <div class="chart-desc">답변에 남긴 👍 좋아요 / 👎 별로예요</div>
+        <div class="legend">
+          <span><span class="dot" style="background:var(--status-good)"></span>👍 좋아요</span>
+          <span><span class="dot" style="background:var(--status-bad)"></span>👎 별로예요</span>
+        </div>
+        <div id="chartFeedback"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">분석 방식(인텐트) 분포</div>
+        <div class="chart-desc">라우터가 선택한 답변 방식별 대화 수</div>
+        <div id="chartIntents"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">일별 근거 충족도</div>
+        <div class="chart-desc">답변 속 주장이 근거 문서로 뒷받침된 비율 (검증된 턴 기준)</div>
+        <div id="chartGrounded"></div>
+      </div>
+    </section>
+
+    <!-- ── Knowledge Graph ── -->
+    <header class="mb-4">
+      <h2 class="font-headline text-xl font-bold text-primary">Knowledge Graph</h2>
+      <p class="text-xs text-secondary">DB 보고서 ↔ 문서 ↔ 용어사전 연결 상태 (24h 주기 자동 빌드)</p>
+    </header>
+    <section id="kgTiles" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6"></section>
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-10">
+      <div class="chart-card">
+        <div class="chart-title">문서↔보고서 연결 방식 분포</div>
+        <div class="chart-desc">lot_wf(웨이퍼 정밀) &gt; lot(Lot 단위) &gt; edm_token(링크 보조) 순으로 신뢰도가 높습니다</div>
+        <div id="chartKgSources"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">문서에서 가장 많이 매칭된 용어</div>
+        <div class="chart-desc">용어사전이 실제 문서와 얼마나 연결되는지 (상위 8개)</div>
+        <div id="chartKgTerms"></div>
+      </div>
+    </section>
+  </div>
+</main>
+<div id="traceTip" role="tooltip"></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', path='/js/trace.js') }}"></script>
+{% endblock %}

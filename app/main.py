@@ -184,10 +184,11 @@ async def analytics_page(request: Request):
 @app.get("/trace", response_class=HTMLResponse)
 async def trace_page(request: Request):
     user = _require_user(request)
-    # Phase 5에서 구현할 인지 추적 페이지
-    return templates.TemplateResponse("base.html", {
+    return templates.TemplateResponse("trace.html", {
         "request": request,
-        "user_id": user})
+        "user_id": user,
+        "active_tab": "trace",
+    })
 
 
 # =========================
@@ -410,7 +411,9 @@ async def api_chat_stream(request: Request):
                 "top_docs": final_data.get("top_docs", []),
                 "intent" : final_data.get("intent"),
                 "suggested_actions" : final_data.get("suggested_actions", []),
-                "agent_steps" : final_data.get("steps", [])
+                "agent_steps" : final_data.get("steps", []),
+                # 평가 대시보드(Cognitive Trace) 시계열 집계용
+                "verification": final_data.get("verification", {})
             }
             
             repo.insert_turn_artifact(
@@ -873,6 +876,23 @@ async def api_active_announcements(request: Request):
             "end_date": end,
         })
     return {"items": out}
+
+
+# =========================
+# API: 성능 평가 대시보드 (Cognitive Trace)
+# =========================
+@app.get("/api/eval/summary")
+async def api_eval_summary(request: Request, days: int = Query(30)):
+    _require_user(request)
+    from app.eval_repo import get_eval_summary
+    return get_eval_summary(days=min(max(days, 1), 180))
+
+
+@app.get("/api/kg/stats")
+async def api_kg_stats(request: Request):
+    _require_user(request)
+    from app.eval_repo import get_kg_stats
+    return get_kg_stats()
 
 
 # =========================
