@@ -172,6 +172,195 @@
       color: "var(--chart-2)",
       sub: `유형: ${tm.term_type || "-"}`,
     })), { nameHeader: "용어", valueHeader: "문서 수", unit: "건" });
+
+    // 그래프 탐색기 초기화 (상위 용어 칩 + 1위 용어 자동 선택)
+    setupExplorer(data.top_terms || []);
+  }
+
+  /* ── KG 그래프 탐색기 ─────────────────────────────── */
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const TYPE_COLORS = { defect: "var(--chart-1)", chemistry: "var(--chart-2)", process: "var(--chart-3)", node: "var(--chart-4)" };
+  const typeColor = (t) => TYPE_COLORS[t] || "var(--color-secondary)";
+  let allTerms = null;
+  let currentTermId = null;
+
+  async function ensureTerms(){
+    if(allTerms) return allTerms;
+    try {
+      const r = await fetch("/api/dictionary/terms", { credentials: "include" });
+      const d = await r.json();
+      allTerms = d.terms || [];
+    } catch(e){ allTerms = []; }
+    return allTerms;
+  }
+
+  function svgEl(tag, attrs){
+    const el = document.createElementNS(SVG_NS, tag);
+    for(const k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+
+  function renderEgoGraph(center, coTerms){
+    const box = $("kgGraph");
+    if(!box) return;
+    box.innerHTML = "";
+    const W = 640, H = 380, CX = W / 2, CY = H / 2;
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img",
+      "aria-label": `${center.name} 중심 동시출현 그래프` });
+
+    const neighbors = (coTerms || []).slice(0, 12);
+    if(!neighbors.length){
+      box.innerHTML = `<div class="empty-note" style="padding-top:170px">'${esc(center.name)}'와 함께 등장하는 용어가 아직 없습니다</div>`;
+      return;
+    }
+    const maxW = Math.max(1, ...neighbors.map(n => (n.co_doc_count || 0) + (n.co_report_count || 0)));
+    const RX = 215, RY = 130;
+
+    // 엣지 먼저 (노드 아래 깔리도록)
+    const positions = neighbors.map((n, i) => {
+      const ang = (2 * Math.PI * i) / neighbors.length - Math.PI / 2;
+      return { x: CX + RX * Math.cos(ang), y: CY + RY * Math.sin(ang) };
+    });
+    neighbors.forEach((n, i) => {
+      const w = (n.co_doc_count || 0) + (n.co_report_count || 0);
+      const line = svgEl("line", {
+        class: "kg-edge", x1: CX, y1: CY, x2: positions[i].x, y2: positions[i].y,
+        "stroke-width": (1.2 + 4.8 * (w / maxW)).toFixed(1), "stroke-linecap": "round",
+      });
+      bindTip(line, `<b>${esc(center.name)} ↔ ${esc(n.canonical_name || "")}</b><br>함께 등장: 문서 ${num(n.co_doc_count)}건 · 보고서 ${num(n.co_report_count)}건`);
+      svg.appendChild(line);
+    });
+
+    // 이웃 노드
+    neighbors.forEach((n, i) => {
+      const { x, y } = positions[i];
+      const g = svgEl("g", { class: "kg-node" });
+      g.appendChild(svgEl("circle", { cx: x, cy: y, r: 9, fill: typeColor(n.term_type) }));
+      const name = String(n.canonical_name || `#${n.term_id}`);
+      const label = svgEl("text", { x: x, y: y + (y >= CY ? 22 : -14), "text-anchor": "middle" });
+      label.textContent = name.length > 10 ? name.slice(0, 10) + "…" : name;
+      g.appendChild(label);
+      bindTip(g, `<b>${esc(name)}</b> <span style="color:var(--color-secondary)">(${esc(n.term_type || "-")})</span><br>함께 등장: 문서 ${num(n.co_doc_count)}건 · 보고서 ${num(n.co_report_count)}건<br><span style="color:var(--color-secondary)">클릭하면 이 용어 중심으로 이동</span>`);
+      g.addEventListener("click", () => selectTerm(n.term_id, name, n.term_type));
+      svg.appendChild(g);
+    });
+
+    // 중심 노드
+    const cg = svgEl("g", { class: "kg-node" });
+    cg.appendChild(svgEl("circle", { cx: CX, cy: CY, r: 17, fill: typeColor(center.type),
+      stroke: "var(--color-surface)", "stroke-width": 3 }));
+    const cl = svgEl("text", { class: "kg-center-label", x: CX, y: CY + 34, "text-anchor": "middle" });
+    cl.textContent = center.name;
+    cg.appendChild(cl);
+    svg.appendChild(cg);
+
+    box.appendChild(svg);
+  }
+
+  function renderTermSide(center, data){
+    const side = $("kgSide");
+    if(!side) return;
+    const docs = data.top_docs || [];
+    side.innerHTML = `
+      <div class="kg-side-head">
+        <span class="kg-side-title">${esc(center.name)}</span>
+        <span class="kg-badge">유형: ${esc(center.type || "-")}</span>
+        <span class="kg-badge">연결 문서 ${num(data.docs_count)}건</span>
+        <span class="kg-badge">연결 보고서 ${num(data.reports_count)}건</span>
+      </div>
+      <div class="chart-desc" style="margin:0">이 용어가 가장 많이 언급된 문서 (클릭 시 원문 열기)</div>
+      <div class="kg-doc-list">
+        ${docs.length ? "" : `<div class="empty-note">연결된 문서가 없습니다</div>`}
+      </div>`;
+    const list = side.querySelector(".kg-doc-list");
+    docs.forEach(d => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "kg-doc-item";
+      item.innerHTML = `<span class="t">${esc(d.title || d.doc_id)}</span>
+        <span class="m">${esc(d.mail_date || "")}${d.freq ? ` · 언급 ${num(d.freq)}회` : ""}</span>`;
+      item.addEventListener("click", () => {
+        const rel = (((d.additionalField || {}).storage) || {}).parsed_md_rel_path;
+        if(rel) window.open(`/api/view/md?rel=${encodeURIComponent(rel)}`, "_blank", "noopener");
+      });
+      list.appendChild(item);
+    });
+  }
+
+  async function selectTerm(termId, name, type){
+    currentTermId = termId;
+    document.querySelectorAll(".kg-chip").forEach(c => c.classList.toggle("is-active", c.dataset.termId == String(termId)));
+    const box = $("kgGraph");
+    if(box) box.innerHTML = `<div class="empty-note" style="padding-top:170px">불러오는 중...</div>`;
+    let data;
+    try {
+      const r = await fetch(`/api/kg/term/${termId}`, { credentials: "include" });
+      data = await r.json();
+    } catch(e){
+      if(box) box.innerHTML = `<div class="empty-note" style="padding-top:170px">용어 정보를 불러오지 못했습니다</div>`;
+      return;
+    }
+    const center = { name: name || `#${termId}`, type: type || "" };
+    renderEgoGraph(center, data.co_terms || []);
+    renderTermSide(center, data);
+  }
+
+  function setupExplorer(topTerms){
+    const chips = $("kgTopChips");
+    if(chips){
+      chips.innerHTML = "";
+      (topTerms || []).forEach(t => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "kg-chip";
+        b.dataset.termId = String(t.term_id);
+        b.textContent = t.canonical_name || `#${t.term_id}`;
+        b.addEventListener("click", () => selectTerm(t.term_id, t.canonical_name, t.term_type));
+        chips.appendChild(b);
+      });
+    }
+
+    const input = $("kgTermSearch");
+    const sug = $("kgTermSuggest");
+    if(input && sug){
+      const hide = () => { sug.style.display = "none"; };
+      input.addEventListener("input", async () => {
+        const q = input.value.trim().toLowerCase();
+        if(!q){ hide(); return; }
+        const terms = await ensureTerms();
+        const hits = terms.filter(t =>
+          String(t.canonical_name || "").toLowerCase().includes(q) ||
+          String(t.aliases || "").toLowerCase().includes(q)
+        ).slice(0, 8);
+        if(!hits.length){ hide(); return; }
+        sug.innerHTML = "";
+        hits.forEach(t => {
+          const row = document.createElement("div");
+          row.className = "kg-suggest-item";
+          row.innerHTML = `<span>${esc(t.canonical_name)}</span><span class="tt">${esc(t.term_type || "")}</span>`;
+          row.addEventListener("mousedown", () => {
+            input.value = t.canonical_name;
+            hide();
+            selectTerm(t.term_id, t.canonical_name, t.term_type);
+          });
+          sug.appendChild(row);
+        });
+        sug.style.display = "block";
+      });
+      input.addEventListener("blur", () => setTimeout(hide, 150));
+      input.addEventListener("keydown", (e) => {
+        if(e.key === "Enter"){
+          const first = sug.querySelector(".kg-suggest-item");
+          if(first) first.dispatchEvent(new MouseEvent("mousedown"));
+        }
+        if(e.key === "Escape") hide();
+      });
+    }
+
+    // 초기 선택: 최다 매칭 용어 1위
+    if(topTerms && topTerms.length){
+      selectTerm(topTerms[0].term_id, topTerms[0].canonical_name, topTerms[0].term_type);
+    }
   }
 
   /* ── init ────────────────────────────────────────── */

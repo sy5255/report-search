@@ -59,6 +59,56 @@
   #traceTip { position: fixed; z-index: 5000; pointer-events: none; background: var(--color-surface); border: 1px solid var(--color-outline-variant); border-radius: 8px; box-shadow: var(--shadow-card-hover); padding: 6px 10px; font-size: 11px; color: var(--color-on-surface); display: none; white-space: nowrap; }
 
   .empty-note { font-size: 11px; color: var(--color-secondary); padding: 18px 0; text-align: center; }
+
+  /* ── KG 그래프 탐색기 ── */
+  .kg-explorer-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; position: relative; }
+  #kgTermSearch {
+    width: 220px; padding: 7px 12px; font-size: 12px;
+    border: 1px solid var(--color-outline-variant); border-radius: 10px;
+    background: var(--color-surface-container-low); color: var(--color-on-surface);
+  }
+  #kgTermSearch:focus { outline: none; border-color: var(--chart-1); }
+  .kg-suggest {
+    position: absolute; top: 38px; left: 0; z-index: 100; width: 260px; max-height: 240px; overflow-y: auto;
+    background: var(--color-surface); border: 1px solid var(--color-outline-variant); border-radius: 10px;
+    box-shadow: var(--shadow-card-hover);
+  }
+  .kg-suggest-item { padding: 7px 12px; font-size: 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
+  .kg-suggest-item:hover { background: var(--color-surface-container); }
+  .kg-suggest-item .tt { font-size: 10px; color: var(--color-secondary); }
+  .kg-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .kg-chip {
+    padding: 4px 12px; border-radius: 999px; font-size: 11px; font-weight: 600;
+    border: 1px solid var(--color-outline-variant); color: var(--color-on-surface-soft);
+  }
+  .kg-chip:hover { background: var(--color-surface-container); }
+  .kg-chip.is-active { border-color: var(--chart-1); color: var(--chart-1); background: color-mix(in srgb, var(--chart-1) 10%, transparent); }
+
+  .kg-explorer-body { display: grid; grid-template-columns: minmax(0, 3fr) minmax(240px, 2fr); gap: 16px; }
+  @media (max-width: 900px) { .kg-explorer-body { grid-template-columns: 1fr; } }
+  .kg-graph { min-height: 380px; border: 1px dashed var(--color-outline-variant); border-radius: 12px; position: relative; }
+  .kg-graph svg { width: 100%; height: 100%; display: block; }
+  .kg-node { cursor: pointer; }
+  .kg-node circle { transition: filter var(--duration-fast) var(--ease-out-soft); }
+  .kg-node:hover circle { filter: brightness(1.2); }
+  .kg-node text { font-size: 10px; fill: var(--color-on-surface); pointer-events: none; }
+  .kg-node .kg-node-type { font-size: 8px; fill: var(--color-secondary); }
+  .kg-edge { stroke: var(--color-outline-variant); }
+  .kg-center-label { font-size: 13px; font-weight: 800; fill: var(--color-on-surface); }
+
+  .kg-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .kg-side-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .kg-side-title { font-family: var(--font-display); font-weight: 800; font-size: 15px; }
+  .kg-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--color-outline-variant); color: var(--color-secondary); }
+  .kg-doc-list { overflow-y: auto; max-height: 320px; display: flex; flex-direction: column; gap: 6px; }
+  .kg-doc-item {
+    text-align: left; padding: 8px 10px; border: 1px solid var(--color-outline-variant); border-radius: 10px;
+    background: var(--color-surface-container-low); cursor: pointer;
+  }
+  .kg-doc-item:hover { background: var(--color-surface-container); }
+  .kg-doc-item .t { font-size: 11px; font-weight: 600; color: var(--color-on-surface); display: block;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kg-doc-item .m { font-size: 9px; color: var(--color-secondary); }
 </style>
 {% endblock %}
 
@@ -114,7 +164,7 @@
       <p class="text-xs text-secondary">DB 보고서 ↔ 문서 ↔ 용어사전 연결 상태 (24h 주기 자동 빌드)</p>
     </header>
     <section id="kgTiles" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6"></section>
-    <section class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-10">
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
       <div class="chart-card">
         <div class="chart-title">문서↔보고서 연결 방식 분포</div>
         <div class="chart-desc">lot_wf(웨이퍼 정밀) &gt; lot(Lot 단위) &gt; edm_token(링크 보조) 순으로 신뢰도가 높습니다</div>
@@ -124,6 +174,28 @@
         <div class="chart-title">문서에서 가장 많이 매칭된 용어</div>
         <div class="chart-desc">용어사전이 실제 문서와 얼마나 연결되는지 (상위 8개)</div>
         <div id="chartKgTerms"></div>
+      </div>
+    </section>
+
+    <!-- ── KG 그래프 탐색기 ── -->
+    <section class="chart-card mb-10">
+      <div class="chart-title">그래프 탐색기</div>
+      <div class="chart-desc">용어를 선택하면 함께 등장하는 용어들이 연결선으로 표시됩니다. 선이 굵을수록 자주 함께 등장하며, 노드를 클릭하면 그 용어 중심으로 이동합니다.</div>
+      <div class="kg-explorer-head">
+        <input id="kgTermSearch" type="search" placeholder="용어 검색 (예: 파티클)" autocomplete="off"/>
+        <div id="kgTermSuggest" class="kg-suggest" style="display:none"></div>
+        <div id="kgTopChips" class="kg-chips"></div>
+      </div>
+      <div class="kg-explorer-body">
+        <div id="kgGraph" class="kg-graph"><div class="empty-note" style="padding-top:170px">상단에서 용어를 선택하세요</div></div>
+        <div id="kgSide" class="kg-side"></div>
+      </div>
+      <div class="legend" style="margin-top:12px" id="kgLegend">
+        <span><span class="dot" style="background:var(--chart-1)"></span>불량(defect)</span>
+        <span><span class="dot" style="background:var(--chart-2)"></span>성분(chemistry)</span>
+        <span><span class="dot" style="background:var(--chart-3)"></span>공정(process)</span>
+        <span><span class="dot" style="background:var(--chart-4)"></span>노드(node)</span>
+        <span><span class="dot" style="background:var(--color-secondary)"></span>기타 유형</span>
       </div>
     </section>
   </div>
