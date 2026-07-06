@@ -177,6 +177,62 @@
     setupExplorer(data.top_terms || []);
   }
 
+  /* ── 골든셋 평가 ─────────────────────────────────── */
+  async function loadGoldenset(){
+    let data;
+    try {
+      const r = await fetch("/api/eval/goldenset", { credentials: "include" });
+      data = await r.json();
+    } catch(e){
+      $("gsTiles").innerHTML = `<div class="empty-note" style="grid-column:1/-1">골든셋 결과를 불러오지 못했습니다</div>`;
+      return;
+    }
+    const L = data.latest;
+    if(!L){
+      $("gsTiles").innerHTML = `<div class="empty-note" style="grid-column:1/-1">아직 평가 실행이 없습니다. 서버에서 <span class="mono">python -m app.goldenset_runner</span> 를 실행하세요.</div>`;
+      const t = $("gsTable"); if(t) t.innerHTML = "";
+      return;
+    }
+    $("gsTiles").innerHTML = [
+      statTile("문항 수", num(L.total), `마지막 실행 ${esc(String(L.created_at).slice(0,16))}`),
+      statTile("검색 hit@5", pct(L.hit_at_5), L.scored_retrieval ? `채점 ${num(L.scored_retrieval)}문항` : "정답 문서 미지정"),
+      statTile("검색 MRR", L.mrr ?? "—", "정답 문서 평균 역순위"),
+      statTile("검색 hit@1 / @10", `${pct(L.hit_at_1)} / ${pct(L.hit_at_10)}`, "1위 / 10위 내 적중"),
+      statTile("인텐트 정확도", pct(L.intent_accuracy), L.scored_intent ? `채점 ${num(L.scored_intent)}문항` : "기대 인텐트 미지정"),
+      statTile("용어 감지율", pct(L.term_detect_rate), L.scored_terms ? `채점 ${num(L.scored_terms)}문항` : "기대 용어 미지정"),
+    ].join("");
+
+    const items = data.items || [];
+    const box = $("gsTable");
+    if(!box) return;
+    if(!items.length){ box.innerHTML = `<div class="empty-note">문항 상세가 없습니다</div>`; return; }
+    const mark = (scored, ok, naText, okText, badText) =>
+      !scored ? `<span class="gs-mark na">${naText}</span>`
+              : ok ? `<span class="gs-mark ok">${okText}</span>`
+                   : `<span class="gs-mark bad">${badText}</span>`;
+    const rows = items.map(it => {
+      const retok = it.scored_retrieval && it.hit5;
+      const retCell = it.scored_retrieval
+        ? (it.found_rank ? mark(true, it.hit5, "", `rank ${it.found_rank}`, `rank ${it.found_rank}`)
+                         : `<span class="gs-mark bad">MISS</span>`)
+        : `<span class="gs-mark na">—</span>`;
+      const intCell = it.scored_intent
+        ? mark(true, it.intent_ok, "", "정답", `${esc(it.router_intent||"?")}`)
+        : `<span class="gs-mark na">—</span>`;
+      const termCell = it.scored_terms ? pct(it.term_rate) : "—";
+      return `<tr>
+        <td class="gs-q">${esc(it.question||"")}</td>
+        <td>${retCell}</td>
+        <td>${it.scored_intent ? `<span style="color:var(--color-secondary)">${esc(it.expected_intent||"")}</span> → ${intCell}` : intCell}</td>
+        <td>${termCell}</td>
+        <td style="color:var(--color-secondary)">${esc((it.detected||[]).join(", "))}</td>
+      </tr>`;
+    }).join("");
+    box.innerHTML = `<div class="gs-table"><table>
+      <thead><tr><th>질문</th><th>검색(found-rank)</th><th>인텐트(기대→실측)</th><th>용어</th><th>감지된 용어</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+  }
+
   /* ── KG 그래프 탐색기 ─────────────────────────────── */
   const SVG_NS = "http://www.w3.org/2000/svg";
   const TYPE_COLORS = { defect: "var(--chart-1)", chemistry: "var(--chart-2)", process: "var(--chart-3)", node: "var(--chart-4)" };
@@ -507,6 +563,7 @@
     setupDocViewer();
     setupLinksPanel();
     loadEval(days);
+    loadGoldenset();
     loadKg();
   });
 })();

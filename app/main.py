@@ -895,6 +895,13 @@ async def api_kg_stats(request: Request):
     return get_kg_stats()
 
 
+@app.get("/api/eval/goldenset")
+async def api_eval_goldenset(request: Request):
+    _require_user(request)
+    from app.eval_repo import get_goldenset_latest
+    return get_goldenset_latest()
+
+
 # =========================
 # API: Knowledge Graph 연관 조회
 # =========================

@@ -9,6 +9,7 @@
 
 모든 쿼리는 개별 try/except — 일부 실패해도 나머지 지표는 반환한다.
 """
+import json
 from datetime import datetime, timedelta
 
 from app.db import get_conn
@@ -154,6 +155,52 @@ def get_eval_summary(days: int = 30) -> dict:
         cur.close()
         conn.close()
 
+    return out
+
+
+def get_goldenset_latest(trend_n: int = 12) -> dict:
+    """최신 골든셋 평가 run 1건(요약+문항별) + 최근 run들의 hit@5/mrr 추이."""
+    out = {"latest": None, "items": [], "trend": []}
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        try:
+            rows = _q(cur, "SELECT * FROM eval_goldenset_runs ORDER BY created_at DESC LIMIT 1")
+        except Exception as e:
+            print(f"[Eval] goldenset latest 조회 실패(테이블 없음일 수 있음): {e}")
+            return out
+        if not rows:
+            return out
+        r = rows[0]
+        out["latest"] = {
+            "run_id": r["run_id"], "created_at": str(r["created_at"]),
+            "total": int(r["total"] or 0),
+            "hit_at_1": r["hit_at_1"], "hit_at_5": r["hit_at_5"], "hit_at_10": r["hit_at_10"],
+            "mrr": r["mrr"], "intent_accuracy": r["intent_accuracy"], "term_detect_rate": r["term_detect_rate"],
+            "scored_retrieval": int(r["scored_retrieval"] or 0),
+            "scored_intent": int(r["scored_intent"] or 0),
+            "scored_terms": int(r["scored_terms"] or 0),
+        }
+        try:
+            payload = r["summary_json"]
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            out["items"] = (payload or {}).get("items", []) if isinstance(payload, dict) else []
+        except Exception:
+            out["items"] = []
+
+        try:
+            trend = _q(cur, "SELECT created_at, hit_at_5, mrr FROM eval_goldenset_runs "
+                            "ORDER BY created_at DESC LIMIT %s", (trend_n,))
+            out["trend"] = [
+                {"d": str(t["created_at"])[:16], "hit_at_5": t["hit_at_5"], "mrr": t["mrr"]}
+                for t in reversed(trend)
+            ]
+        except Exception:
+            pass
+    finally:
+        cur.close()
+        conn.close()
     return out
 
 

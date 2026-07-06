@@ -133,6 +133,18 @@
   .kg-src-badge.edm_token { color: var(--chart-3); background: color-mix(in srgb, var(--chart-3) 12%, transparent); }
   .kg-evidence { font-family: var(--font-mono); font-size: 10px; color: var(--color-on-surface-soft); }
 
+  /* 골든셋 문항별 테이블 */
+  .gs-table { overflow-x: auto; }
+  .gs-table table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .gs-table th { text-align: left; font-size: 10px; color: var(--color-secondary);
+    padding: 6px 8px; border-bottom: 1px solid var(--color-outline-variant); white-space: nowrap; }
+  .gs-table td { padding: 6px 8px; border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 50%, transparent); vertical-align: top; }
+  .gs-q { max-width: 340px; }
+  .gs-mark { font-size: 10px; font-weight: 800; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+  .gs-mark.ok { color: var(--status-good); background: color-mix(in srgb, var(--status-good) 14%, transparent); }
+  .gs-mark.bad { color: var(--status-bad); background: color-mix(in srgb, var(--status-bad) 12%, transparent); }
+  .gs-mark.na { color: var(--color-secondary); background: var(--color-surface-container); }
+
   /* 문서 뷰어 모달 */
   .kg-doc-modal { position: fixed; inset: 0; z-index: 6000; display: flex; align-items: center; justify-content: center; }
   .kg-doc-backdrop { position: absolute; inset: 0; background: rgba(10,15,31,0.6); }
@@ -201,6 +213,18 @@
         <div class="chart-desc">답변 속 주장이 근거 문서로 뒷받침된 비율 (검증된 턴 기준)</div>
         <div id="chartGrounded"></div>
       </div>
+    </section>
+
+    <!-- ── 골든셋 평가 ── -->
+    <header class="mb-4">
+      <h2 class="font-headline text-xl font-bold text-primary">골든셋 평가</h2>
+      <p class="text-xs text-secondary">대표 질문 + 기대 정답으로 측정하는 검색·라우팅 품질 (변경 전후 통제 비교용) · <span class="font-mono">python -m app.goldenset_runner</span></p>
+    </header>
+    <section id="gsTiles" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4"></section>
+    <section class="chart-card mb-4">
+      <div class="chart-title">문항별 결과</div>
+      <div class="chart-desc">검색 실패(⚠)·인텐트 오분류가 개선 우선순위입니다. found-rank는 기대 문서가 검색 결과 몇 위에서 처음 나왔는지입니다.</div>
+      <div id="gsTable"></div>
     </section>
 
     <!-- ── Knowledge Graph ── -->
