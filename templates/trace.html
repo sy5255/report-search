@@ -22,10 +22,10 @@
     --status-bad: #f87171;
   }
 
-  .stat-tile { background: var(--color-surface); border: 1px solid var(--color-outline-variant); border-radius: 14px; padding: 16px 18px; }
-  .stat-tile .stat-label { font-size: 11px; font-weight: 600; color: var(--color-secondary); margin-bottom: 6px; display:flex; align-items:center; gap:4px; }
-  .stat-tile .stat-value { font-family: var(--font-display); font-size: 26px; font-weight: 800; letter-spacing: -0.02em; color: var(--color-on-surface); }
-  .stat-tile .stat-sub { font-size: 10px; color: var(--color-secondary); margin-top: 2px; }
+  .stat-tile { background: var(--color-surface); border: 1px solid var(--color-outline-variant); border-radius: 14px; padding: 16px 18px; min-width: 0; }
+  .stat-tile .stat-label { font-size: 11px; font-weight: 600; color: var(--color-secondary); margin-bottom: 6px; display:flex; align-items:center; gap:4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stat-tile .stat-value { font-family: var(--font-display); font-size: clamp(18px, 1.7vw, 26px); font-weight: 800; letter-spacing: -0.02em; color: var(--color-on-surface); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .stat-tile .stat-sub { font-size: 10px; color: var(--color-secondary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   .chart-card { background: var(--color-surface); border: 1px solid var(--color-outline-variant); border-radius: 14px; padding: 18px; }
   .chart-title { font-family: var(--font-display); font-weight: 700; font-size: 13px; margin-bottom: 2px; }
@@ -109,12 +109,34 @@
   .kg-doc-item .t { font-size: 11px; font-weight: 600; color: var(--color-on-surface); display: block;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .kg-doc-item .m { font-size: 9px; color: var(--color-secondary); }
+
+  /* 문서 뷰어 모달 */
+  .kg-doc-modal { position: fixed; inset: 0; z-index: 6000; display: flex; align-items: center; justify-content: center; }
+  .kg-doc-backdrop { position: absolute; inset: 0; background: rgba(10,15,31,0.6); }
+  .kg-doc-panel {
+    position: relative; width: min(1000px, 92vw); height: min(84vh, 92vh);
+    background: var(--color-surface); border: 1px solid var(--color-outline-variant);
+    border-radius: 16px; box-shadow: var(--shadow-card-hover);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .kg-doc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 14px 18px; border-bottom: 1px solid var(--color-outline-variant); }
+  .kg-doc-title { font-family: var(--font-display); font-weight: 700; font-size: 13px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kg-doc-close { font-size: 11px; font-weight: 700; padding: 5px 12px; border-radius: 8px;
+    border: 1px solid var(--color-outline-variant); color: var(--color-secondary); }
+  .kg-doc-close:hover { background: var(--color-surface-container); }
+  .kg-doc-body { flex: 1; overflow-y: auto; padding: 20px 24px; font-size: 13px; line-height: 1.7; }
+  .kg-doc-body h1, .kg-doc-body h2, .kg-doc-body h3 { font-weight: 700; margin: 14px 0 8px; }
+  .kg-doc-body table { border-collapse: collapse; margin: 8px 0; }
+  .kg-doc-body th, .kg-doc-body td { border: 1px solid var(--color-outline-variant); padding: 4px 8px; font-size: 12px; }
+  .kg-doc-body pre { background: var(--color-surface-container-low); padding: 10px; border-radius: 8px; overflow-x: auto; }
 </style>
 {% endblock %}
 
 {% block content %}
 <main class="flex-1 overflow-y-auto scrolled-content">
-  <div class="max-w-6xl mx-auto px-8 py-8">
+  <div class="max-w-[1560px] mx-auto px-6 py-8">
     <header class="mb-6 flex items-end justify-between flex-wrap gap-4">
       <div>
         <h1 class="font-headline text-3xl font-extrabold tracking-tight mb-1">Cognitive Trace</h1>
@@ -180,7 +202,8 @@
     <!-- ── KG 그래프 탐색기 ── -->
     <section class="chart-card mb-10">
       <div class="chart-title">그래프 탐색기</div>
-      <div class="chart-desc">용어를 선택하면 함께 등장하는 용어들이 연결선으로 표시됩니다. 선이 굵을수록 자주 함께 등장하며, 노드를 클릭하면 그 용어 중심으로 이동합니다.</div>
+      <div class="chart-desc">용어를 선택하면 함께 등장하는 용어들이 연결선으로 표시됩니다. 선이 굵을수록 자주 함께 등장하며, 노드를 클릭하면 그 용어 중심으로 이동합니다.<br>
+      · <b>연결 문서</b> = 용어가 <u>문서 본문 텍스트</u>에 등장한 아카이브 문서 수 &nbsp;·&nbsp; <b>연결 보고서</b> = 용어가 <u>DB 컬럼값</u>(불량명·성분·공정노드 등)으로 기록된 분석 건 수</div>
       <div class="kg-explorer-head">
         <input id="kgTermSearch" type="search" placeholder="용어 검색 (예: 파티클)" autocomplete="off"/>
         <div id="kgTermSuggest" class="kg-suggest" style="display:none"></div>
@@ -201,8 +224,21 @@
   </div>
 </main>
 <div id="traceTip" role="tooltip"></div>
+
+<!-- 문서 뷰어 모달 (채팅의 문서 모달과 동일한 렌더링 뷰) -->
+<div id="kgDocModal" class="kg-doc-modal" style="display:none" aria-hidden="true">
+  <div id="kgDocBackdrop" class="kg-doc-backdrop"></div>
+  <div class="kg-doc-panel" role="dialog" aria-modal="true">
+    <div class="kg-doc-head">
+      <div id="kgDocTitle" class="kg-doc-title">(Document)</div>
+      <button id="kgDocClose" type="button" class="kg-doc-close">닫기</button>
+    </div>
+    <div id="kgDocBody" class="kg-doc-body markdown-body"></div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="{{ url_for('static', path='/js/trace.js') }}"></script>
 {% endblock %}

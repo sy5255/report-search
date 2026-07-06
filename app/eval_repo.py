@@ -27,7 +27,7 @@ def get_eval_summary(days: int = 30) -> dict:
         "daily": [],
         "intents": [],
         "quality": {"groundedness": None, "claims_rows": 0, "numeric_ok_rate": None, "numeric_rows": 0, "gate_count": 0},
-        "search": {"zero_hit_rate": None, "logs": 0, "avg_terms": None},
+        "search": {"zero_hit_rate": None, "rag_turns": 0, "logs": 0, "avg_terms": None},
     }
 
     conn = get_conn()
@@ -126,20 +126,30 @@ def get_eval_summary(days: int = 30) -> dict:
             print(f"[Eval] quality 실패: {e}")
 
         # ── 검색 품질 ───────────────────────────────────────────
+        # ⚠️ 0건 비율의 분모는 "문서검색이 실제 시도된 턴(RAG/Hybrid 인텐트)"만 사용.
+        # (DB 통계·일반 대화 턴은 top_docs가 당연히 비므로 전체 턴 분모는 비율을 왜곡)
         try:
             r = _q(cur, """
                 SELECT COUNT(*) n,
-                       AVG(JSON_LENGTH(top_docs_json)=0) zero_rate,
-                       AVG(JSON_LENGTH(detected_terms_json)) avg_terms
+                       AVG(JSON_LENGTH(JSON_EXTRACT(rag_response_json,'$.top_docs'))=0) zero_rate
+                FROM chat_turn_artifacts
+                WHERE created_at>=%s
+                  AND JSON_UNQUOTE(JSON_EXTRACT(rag_response_json,'$.intent'))
+                      IN ('RAG_KNOWLEDGE','HYBRID_DB_RAG')
+            """, (since,))[0]
+            out["search"]["rag_turns"] = int(r["n"] or 0)
+            out["search"]["zero_hit_rate"] = round(float(r["zero_rate"]), 3) if r["zero_rate"] is not None else None
+        except Exception as e:
+            print(f"[Eval] search zero-hit 실패: {e}")
+        try:
+            r = _q(cur, """
+                SELECT COUNT(*) n, AVG(JSON_LENGTH(detected_terms_json)) avg_terms
                 FROM chat_search_logs WHERE created_at>=%s
             """, (since,))[0]
-            out["search"] = {
-                "logs": int(r["n"] or 0),
-                "zero_hit_rate": round(float(r["zero_rate"]), 3) if r["zero_rate"] is not None else None,
-                "avg_terms": round(float(r["avg_terms"]), 2) if r["avg_terms"] is not None else None,
-            }
+            out["search"]["logs"] = int(r["n"] or 0)
+            out["search"]["avg_terms"] = round(float(r["avg_terms"]), 2) if r["avg_terms"] is not None else None
         except Exception as e:
-            print(f"[Eval] search 실패: {e}")
+            print(f"[Eval] search terms 실패: {e}")
     finally:
         cur.close()
         conn.close()

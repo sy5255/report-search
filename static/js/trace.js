@@ -122,7 +122,7 @@
       statTile("근거 충족도", pct(q.groundedness), q.claims_rows ? `검증된 턴 ${num(q.claims_rows)}건 평균` : "검증 데이터 없음"),
       statTile("수치 검증 통과율", pct(q.numeric_ok_rate), q.numeric_rows ? `DB 답변 ${num(q.numeric_rows)}건` : "DB 답변 없음"),
       statTile("근거 게이트 발동", num(q.gate_count), "근거 부족으로 답변 중단"),
-      statTile("검색 0건 비율", pct(s.zero_hit_rate), s.logs ? `검색 ${num(s.logs)}회 · 용어 평균 ${s.avg_terms ?? "—"}개` : "검색 로그 없음"),
+      statTile("문서검색 0건 비율", pct(s.zero_hit_rate), s.rag_turns ? `문서검색 시도 ${num(s.rag_turns)}턴 기준 · 용어 평균 ${s.avg_terms ?? "—"}개` : "문서검색 턴 없음"),
     ].join("");
 
     const daily = data.daily || [];
@@ -257,6 +257,53 @@
     box.appendChild(svg);
   }
 
+  /* ── 문서 뷰어 모달 (채팅 문서 모달과 동일한 렌더링 뷰) ── */
+  function preProcessDocMd(mdText){
+    let t = String(mdText || "").replace(/\r\n/g, "\n");
+    // [placeholder] 제거 + 이미지 마커 이후 절단 (chat.js preProcessMarkdown과 동일 규칙)
+    t = t.replace(/\[\s*placeholder\s*\]/gi, "");
+    const m = t.match(/\.\/images\/\|attachments\/inline|<img\s+src=/i);
+    if(m) t = t.substring(0, m.index);
+    // 선두 [MAIL_META] 블록 제거 (chat.js stripLeadingMailMetaBlock과 동일 규칙)
+    t = t.replace(/^\s*```[^\n]*\n([\s\S]*?)\n```[\t ]*\n*/i,
+      (full, inner) => /\[MAIL_META\]/i.test(String(inner || "")) ? "" : full);
+    t = t.replace(/\[MAIL_META\][\s\S]*?(?=\n\s*\n|$)/i, "");
+    return t.trimStart();
+  }
+
+  async function openDocViewer(title, rel){
+    const modal = $("kgDocModal"), body = $("kgDocBody"), head = $("kgDocTitle");
+    if(!modal || !body) return;
+    head.textContent = title || "(제목 없음)";
+    body.innerHTML = `<div class="empty-note">불러오는 중...</div>`;
+    modal.style.display = "flex";
+    modal.setAttribute("aria-hidden", "false");
+    try {
+      const raw = await fetch(`/api/view/md?rel=${encodeURIComponent(rel)}`, { credentials: "include" }).then(r => r.text());
+      const md = preProcessDocMd(raw);
+      body.innerHTML = (typeof marked !== "undefined")
+        ? marked.parse(md)
+        : `<pre style="white-space:pre-wrap">${esc(md)}</pre>`;
+      body.scrollTop = 0;
+    } catch(e){
+      body.innerHTML = `<div class="empty-note">문서를 불러오지 못했습니다</div>`;
+    }
+  }
+
+  function closeDocViewer(){
+    const modal = $("kgDocModal");
+    if(!modal) return;
+    modal.style.display = "none";
+    modal.setAttribute("aria-hidden", "true");
+  }
+
+  function setupDocViewer(){
+    const close = $("kgDocClose"), backdrop = $("kgDocBackdrop");
+    if(close) close.addEventListener("click", closeDocViewer);
+    if(backdrop) backdrop.addEventListener("click", closeDocViewer);
+    document.addEventListener("keydown", (e) => { if(e.key === "Escape") closeDocViewer(); });
+  }
+
   function renderTermSide(center, data){
     const side = $("kgSide");
     if(!side) return;
@@ -281,7 +328,7 @@
         <span class="m">${esc(d.mail_date || "")}${d.freq ? ` · 언급 ${num(d.freq)}회` : ""}</span>`;
       item.addEventListener("click", () => {
         const rel = (((d.additionalField || {}).storage) || {}).parsed_md_rel_path;
-        if(rel) window.open(`/api/view/md?rel=${encodeURIComponent(rel)}`, "_blank", "noopener");
+        if(rel) openDocViewer(d.title || d.doc_id, rel);
       });
       list.appendChild(item);
     });
@@ -374,6 +421,7 @@
         loadEval(days);
       });
     });
+    setupDocViewer();
     loadEval(days);
     loadKg();
   });
