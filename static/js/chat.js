@@ -1196,10 +1196,8 @@ async function loadSession(sessionId){
     lastTopDocs = docs;
     renderTopDocsFiltered();
 
-    if(art && art.citations){
-      lastCitations = art.citations;
-      renderCitations(lastCitations);
-    }
+    lastCitations = (art && art.citations) || null;
+    renderCitations(lastCitations);  // 항상 호출: 비면 서브패널 숨김
     currentEvidenceAssistantMsgId = null;
   } catch(e){
     // ignore
@@ -1527,9 +1525,9 @@ async function loadEvidenceByAssistantMsgId(assistantMsgId){
     lastTopDocs = docs;
     renderTopDocsFiltered();
 
+    lastCitations = art.citations || null;
+    renderCitations(lastCitations);  // 항상 호출: 비면 서브패널 숨김 로직이 돌게 함
     if(art.citations){
-      lastCitations = art.citations;
-      renderCitations(lastCitations);
       // 히스토리 로드 시점엔 citation 개수를 몰라 [n]이 평문으로 남아 있음 → 지금 pill로 변환
       const msgNode = document.querySelector(`.msg.assistant[data-msg-id="${CSS.escape(assistantMsgId)}"]`);
       if(msgNode) enhanceRenderedMessage(msgNode);
@@ -1543,6 +1541,10 @@ function clearEvidencePanels(){
   lastCitations = null;
   el("topDocs").innerHTML = "";
   el("citations").innerHTML = "";
+  // citations 서브패널 표시 상태를 기본(보임)으로 초기화 (renderCitations가 이후 다시 판단)
+  const cbox = el("citations");
+  const cpanel = (cbox && cbox.closest) ? cbox.closest(".panel") : null;
+  if(cpanel) cpanel.style.display = "";
 }
 
 /* ---------- transform RAG hit -> UI topdoc ---------- */
@@ -1645,6 +1647,24 @@ function renderTopDocsFiltered(){
   if (typeof toggleEvidencePanel === "function") toggleEvidencePanel(docs.length > 0);
 
   docs.forEach((d, i) => {
+    // 📊 DB 분석 기록 카드 (REPORT_ANALYSIS의 DB 사실 chunk) — 일반 문서 카드와 구분해 렌더.
+    // doc_id 접두어 "db:"로 판별해 히스토리 복원(kg_source 유실) 후에도 동작.
+    const isDbFact = (d.kg_source === "db") || (typeof d.doc_id === "string" && d.doc_id.startsWith("db:"));
+    if(isDbFact){
+      const factText = (d.merge_title_content || "").replace(/^\[[^\]]*\]\n?/, "").trim();
+      const dbCard = document.createElement("div");
+      dbCard.className = "bg-rag/5 dark:bg-[#0f1a33] dark:text-[#e7eefc] rounded-lg p-3 shadow-sm border border-rag/30 dark:border-[#1f2b4a] border-l-4 border-l-rag";
+      dbCard.innerHTML = `
+        <div class="flex items-center gap-2 mb-2">
+          <span class="material-symbols-outlined text-rag-strong dark:text-rag" style="font-size:16px;">database</span>
+          <span class="text-[11px] font-bold text-rag-strong dark:text-rag">DB 분석 기록 · 보고서 ${escapeHtml(String(d.report_index || (d.doc_id || "").replace(/^db:/, "")))}</span>
+        </div>
+        <div class="text-[11px] leading-relaxed" style="white-space:pre-wrap">${escapeHtml(factText)}</div>
+      `;
+      box.appendChild(dbCard);
+      return;
+    }
+
     const title = stripEnriched(d.title || "(no title)");
     const score = (d.score == null) ? "" : Number(d.score).toFixed(5);
     const meta = pickMailMeta(d.additionalField || {});
@@ -1703,9 +1723,14 @@ function renderCitations(citations){
   const box = el("citations");
   box.innerHTML = "";
   const ans = (citations && citations.answer) ? citations.answer : [];
-  
+
+  // 근거 문장(citations)이 없으면 하단 'Sentence Citations' 서브패널을 숨겨
+  // Top Documents가 전체 높이를 쓰게 한다(빈 박스로 패널이 비어 보이는 문제 방지).
+  // 인라인 style로 토글해 .panel의 flex 클래스와 우선순위가 충돌하지 않게 함.
+  const panel = box.closest ? box.closest(".panel") : null;
+  if(panel) panel.style.display = ans.length ? "" : "none";
+
   if(!ans.length){
-    box.innerHTML = `<div class="text-xs text-secondary dark:text-[#94a3b8] p-3 bg-surface-container-low dark:bg-[#101f3f] rounded">(근거 정보 없음)</div>`;
     return;
   }
 

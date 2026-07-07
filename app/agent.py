@@ -26,22 +26,18 @@ def _call_intent_router(client, user_query: str) -> str:
 
     router_prompt = """
     당신은 반도체 불량 분석 시스템의 '의도 분류 라우터(Router)'입니다.
-    사용자의 질문을 읽고 반드시 다음 5가지 인텐트 중 딱 하나만 텍스트로 반환하세요. (다른 말은 절대 금지)
+    사용자의 질문을 읽고 반드시 다음 4가지 인텐트 중 딱 하나만 텍스트로 반환하세요. (다른 말은 절대 금지)
 
     [인텐트 종류]
     1. "DB_ANALYSIS": 불량 발생 건수, 통계, 순위, 리스트 등 DB 데이터를 조회해야 하는 경우
     2. "RAG_KNOWLEDGE": 특정 불량의 발생 원리, 가이드, 해결책 등 기술 문서를 찾아야 하는 경우
     3. "HYBRID_DB_RAG": 통계 조회와 문서(원리) 검색이 모두 필요한 경우
     4. "GENERAL_CHAT": 안부 인사, 단순 대화 등 도구 검색이 필요 없는 경우
-    5. "REPORT_ANALYSIS": 특정 불량 사례/보고서를 지목해 그 분석 내용·원인·조치를 심층적으로 설명해달라는 경우
-       (특정 Lot, 특정 설비, 특정 시기·조건의 "사례 분석"을 원할 때. 단순 건수/순위 집계는 DB_ANALYSIS)
 
     [출력 예시]
     사용자: "최근 3개월 sf2 불량 순위" -> 출력: DB_ANALYSIS
     사용자: "파티클 원인이 뭐야?" -> 출력: RAG_KNOWLEDGE
     사용자: "안녕 반가워" -> 출력: GENERAL_CHAT
-    사용자: "SF4에서 난 Cu 브릿지 불량 사례 상세히 분석해줘" -> 출력: REPORT_ANALYSIS
-    사용자: "이 Lot에서 발생한 불량 보고서 내용 설명해줘" -> 출력: REPORT_ANALYSIS
     """
     try:
         response = client.chat.completions.create(
@@ -61,8 +57,9 @@ def _call_intent_router(client, user_query: str) -> str:
             
         intent = raw_content.strip().upper()
         
-        if "REPORT_ANALYSIS" in intent: return "REPORT_ANALYSIS"
-        elif "DB_ANALYSIS" in intent: return "DB_ANALYSIS"
+        # REPORT_ANALYSIS는 자동 라우팅 대상이 아님 (명시적 [REPORT_ANALYSIS] 칩/프리픽스로만 발동).
+        # 아래 LLM 자동 분류에는 포함하지 않아 일반 질문이 DB 전용 경로로 새는 것을 방지.
+        if "DB_ANALYSIS" in intent: return "DB_ANALYSIS"
         elif "RAG_KNOWLEDGE" in intent: return "RAG_KNOWLEDGE"
         elif "GENERAL_CHAT" in intent: return "GENERAL_CHAT"
         elif "HYBRID_DB_RAG" in intent: return "HYBRID_DB_RAG"
@@ -594,10 +591,11 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                 except Exception as e:
                     print(f"  ❌ 보고서 심층분석 합성 실패, 루프 답변으로 폴백: {e}")
 
-                # 근거 패널용 문서: DB 사실 chunk는 제외하고 실제 문서(KG 연결 + 검색 보완)만 노출
-                doc_chunks = [c for c in all_chunks if c.get("kg_source") != "db"]
-                top_docs_ui = doc_chunks
-                related_docs = [c for c in doc_chunks if c.get("kg_source") != "search"]
+                # 근거 패널용 문서: DB 사실 chunk도 포함해 노출(연결문서가 적어도 패널이 비지 않도록).
+                # DB 사실 카드는 프론트가 kg_source/doc_id 접두어로 구분해 "📊 DB 분석 기록"으로 렌더.
+                top_docs_ui = list(all_chunks)
+                related_docs = [c for c in all_chunks
+                                if c.get("kg_source") not in ("db", "search")]
 
                 # 검증: 답변 속 숫자가 근거(DB 기록·문서 본문·질문)에 존재하는지 결정적 검사
                 allowed_nums = _extract_numbers(user_query)
