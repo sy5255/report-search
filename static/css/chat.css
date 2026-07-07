@@ -1308,3 +1308,13 @@ mark.archive-highlight {
   writing-mode: vertical-rl; text-orientation: mixed;
   font-size: 10px; font-weight: 700; letter-spacing: 0.02em; color: var(--color-secondary);
 }
+/* ID 선택자(#evidenceRail)가 .hidden(class)보다 특이도가 높아 display:flex가 이겨버리므로,
+   .hidden 토글이 실제로 레일을 숨기도록 동일 ID+class 규칙으로 명시(패널 열림/근거 없음 시 숨김). */
+#evidenceRail.hidden { display: none; }
+
+/* 연결문서 버튼 클릭 시 해당 카드로 스크롤하며 잠깐 강조 */
+@keyframes kgFlash {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  30%      { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-rag, #0891b2) 55%, transparent); }
+}
+.kg-flash { animation: kgFlash 1.6s var(--ease-out-soft, ease-out); }

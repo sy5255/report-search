@@ -1463,9 +1463,23 @@ function appendMessage(role, content, metaText, msgId, extra = null){
     if(kgBtn){
       kgBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        // 연결 문서는 백엔드가 top_docs에 병합해 내려줌 → 우측 패널 열고 표시
-        toggleEvidencePanel(true);
+        // 연결 문서는 백엔드가 top_docs 뒤쪽에 병합해 내려주는데, 기본 표시 개수(5)에 잘려 안 보일 수 있음.
+        // → 전부 렌더하고 패널을 펼친 뒤 첫 KG 연결문서로 스크롤/강조해 확실히 보이게 한다.
+        if(Array.isArray(lastTopDocs) && lastTopDocs.length){
+          topDocsShowN = Math.max(topDocsShowN, lastTopDocs.length);
+        }
+        evidenceHasDocs = true;
+        expandEvidencePanel();      // 접혀 있으면 펼침 (열려 있으면 그대로)
         renderTopDocsFiltered();
+        requestAnimationFrame(() => {
+          const box = el("topDocs");
+          const target = box ? box.querySelector('[data-kg="1"]') : null;
+          if(target){
+            target.scrollIntoView({ behavior: "smooth", block: "center" });
+            target.classList.add("kg-flash");
+            setTimeout(() => target.classList.remove("kg-flash"), 1600);
+          }
+        });
       });
     }
   }
@@ -1652,7 +1666,11 @@ function renderTopDocsFiltered(){
       });
     }
 
+    // 💡 KG 연결문서 여부 (연결문서 버튼 스크롤 타깃 표식)
+    const isKgDoc = (d._index === "kg-related") || (d.kg_source && d.kg_source !== "db" && d.kg_source !== "search");
+
     const card = document.createElement("div");
+    if(isKgDoc) card.setAttribute("data-kg", "1");
     // 💡 [색상 수정] 다크 모드 배경색(dark:bg-[#0f1a33]) 직접 주입
     card.className = "bg-white dark:bg-[#0f1a33] dark:text-[#e7eefc] rounded-lg p-3 shadow-sm border border-surface-container dark:border-[#1f2b4a] border-l-4 border-l-primary dark:border-l-[#60a5fa] cursor-pointer hover:-translate-y-0.5";
     card.innerHTML = `

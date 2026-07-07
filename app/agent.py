@@ -339,6 +339,25 @@ def _to_ui_doc_from_hit(h: dict) -> dict:
         "_rank": h.get("_rank"),
     }
 
+def _rag_fallback_chunks(user_query: str, excluded_indexes: set, top_k: int = 8, limit: int = 12) -> list:
+    """서버측 결정적 재검색 안전망.
+
+    RAG 답변인데 에이전트 루프가 근거를 하나도 못 모았을 때(LLM이 search_documents를 건너뛰었거나
+    일시적 0건) 헛되이 '근거 없음'으로 실패하지 않도록, 서버가 직접 user_query로 검색한다.
+    근거는 여전히 실제 검색된 문서로만 채워지므로 안티-할루시네이션 원칙은 유지된다.
+    반환: rag_chunks 형태 리스트(빈 결과·예외 시 []).
+    """
+    from app.rag_client import rag_retrieve_rrf
+    from app.config import DEFAULT_INDEX_NAME
+    try:
+        rag_result = rag_retrieve_rrf(index_name=DEFAULT_INDEX_NAME, query_text=user_query, top_k=top_k)
+        hits = rag_result.get("hits", {}).get("hits", [])
+    except Exception as e:
+        print(f"[RAG] 서버측 재검색 폴백 실패: {e}")
+        return []
+    return [_to_ui_doc_from_hit(h) for h in _dedupe_and_filter_hits(hits, excluded_indexes)[:limit]]
+
+
 def _report_es_fallback_chunks(ctx: dict, excluded_indexes: set, per_report_k: int = 3, total_limit: int = 4) -> list:
     """[REPORT_ANALYSIS ES 보완] KG 연결문서가 없는 보고서만 불량명 기반 시맨틱 검색으로 근거 보완.
 
@@ -517,7 +536,14 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
 
                 all_chunks = (ctx.get("chunks") or []) + es_chunks
 
-                # 근거 게이트: 근거가 하나도 없으면 자유 생성을 차단하고 정직 응답
+                # 앵커(보고서)를 못 찾았으면 곧바로 실패하지 말고 일반 문서검색으로 우아하게 강등
+                degraded = False
+                if not all_chunks:
+                    yield yield_step("🔎 특정 보고서를 특정하지 못해, 관련 사내 문서를 폭넓게 검색할게요...")
+                    all_chunks = _rag_fallback_chunks(user_query, excluded_indexes)
+                    degraded = True
+
+                # 근거 게이트: 폴백 후에도 근거가 하나도 없을 때만 자유 생성을 차단하고 정직 응답
                 if not all_chunks:
                     yield yield_step("⚠️ 분석할 보고서 근거를 확보하지 못했어요. 추측으로 답하지 않고 안내 메시지를 드릴게요.")
                     final_answer = NO_EVIDENCE_ANSWER
@@ -555,7 +581,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                         user_question=user_query,
                         rag_chunks=all_chunks,
                         previous_messages=prev_for_synth,
-                        style_rules=REPORT_ANALYSIS_STYLE_RULES,
+                        style_rules=(RAG_SYNTHESIS_STYLE_RULES if degraded else REPORT_ANALYSIS_STYLE_RULES),
                         client=client,
                     )
                     if (synth.get("answer_markdown") or "").strip():
@@ -602,6 +628,14 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                 return
 
             # 💡 [근거 게이트] RAG 모드인데 확보된 근거 문서가 없으면 자유 생성을 차단하고 정직 응답
+            if intent == "RAG_KNOWLEDGE" and not rag_chunks:
+                # LLM이 검색 도구를 건너뛰었거나 일시적 0건일 수 있으므로, 서버가 직접 재검색해 헛실패 방지
+                yield yield_step("🔎 근거가 비어 있어 사내 문서를 한 번 더 검색하고 있어요...")
+                fb_chunks = _rag_fallback_chunks(user_query, excluded_indexes)
+                if fb_chunks:
+                    rag_chunks = fb_chunks
+                    top_docs_ui = fb_chunks[:ui_top_k]
+
             if intent == "RAG_KNOWLEDGE" and not rag_chunks:
                 yield yield_step("⚠️ 참고할 사내 문서를 찾지 못했어요. 추측으로 답하지 않고 안내 메시지를 드릴게요.")
                 final_answer = NO_EVIDENCE_ANSWER
