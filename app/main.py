@@ -241,6 +241,7 @@ async def api_get_session_messages(session_id: str, request: Request):
             m["intent"] = rag_info.get("intent")
             m["suggested_actions"] = rag_info.get("suggested_actions", [])
             m["agent_steps"] = rag_info.get("agent_steps", [])
+            m["related_docs"] = rag_info.get("related_docs", [])
             m["feedback"] = feedback_map.get(ast_id)
 
     return {"messages": msgs, "search_logs_by_user_msg_id": search_log_by_user_msg_id}
@@ -413,6 +414,7 @@ async def api_chat_stream(request: Request):
                 "detected_terms": query_norm.get("detected_terms") or [],
                 "expansion_terms": query_norm.get("expansion_terms") or {},
                 "top_docs": final_data.get("top_docs", []),
+                "related_docs": final_data.get("related_docs", []),
                 "intent" : final_data.get("intent"),
                 "suggested_actions" : final_data.get("suggested_actions", []),
                 "agent_steps" : final_data.get("steps", []),
@@ -573,7 +575,8 @@ async def api_chat(request: Request):
         final_answer = agent_result.get("final_answer", "응답을 생성하지 못했습니다.")
         citations_json = agent_result.get("citations", {"answer": [], "final": final_answer, "claims": []})
         top_docs_ui = agent_result.get("top_docs", [])
-       
+        related_docs = agent_result.get("related_docs", [])
+
         intent = agent_result.get("intent")
         suggested_actions = agent_result.get("suggested_actions", [])
         
@@ -591,6 +594,7 @@ async def api_chat(request: Request):
        
         intent = "GENERAL_CHAT"
         suggested_actions = []
+        related_docs = []
         agent_steps = [f"❌ 시스템 에러 발생: {str(e)}"]
 
     assistant_msg_id = repo.insert_message(session_id, user, "assistant", final_answer)
@@ -604,6 +608,7 @@ async def api_chat(request: Request):
         "detected_terms": query_norm.get("detected_terms") or [],
         "expansion_terms": query_norm.get("expansion_terms") or {},
         "top_docs": top_docs_ui,
+        "related_docs": related_docs,
         "intent" : intent,
         "suggested_actions" : suggested_actions,
         "agent_steps" : agent_steps

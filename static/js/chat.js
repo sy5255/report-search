@@ -1173,11 +1173,12 @@ async function loadSession(sessionId){
     }
     // 어시스턴트(LLM)의 과거 메시지일 경우 인텐트/액션 데이터 복구
     else if (m.role === "assistant") {
-      if (m.intent || (m.suggested_actions && m.suggested_actions.length > 0) || m.feedback) {
+      if (m.intent || (m.suggested_actions && m.suggested_actions.length > 0) || (m.related_docs && m.related_docs.length > 0) || m.feedback) {
         extra = {
           intent: m.intent,
           suggested_actions: m.suggested_actions,
           agent_steps: m.agent_steps,
+          related_docs: m.related_docs || [],
           feedback: m.feedback || null,
           raw_markdown: m.content
         };
@@ -1461,8 +1462,14 @@ function appendMessage(role, content, metaText, msgId, extra = null){
   if(role === "assistant"){
     const kgBtn = div.querySelector(".kg-related-chip");
     if(kgBtn){
-      kgBtn.addEventListener("click", (e) => {
+      kgBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
+        // 복원된(또는 이전) 메시지의 버튼일 수 있어 우측 패널이 다른 메시지의 근거를 담고 있을 수 있음.
+        // → 이 메시지의 근거를 먼저 로드해 lastTopDocs를 맞춘다.
+        if(msgId && currentEvidenceAssistantMsgId !== msgId){
+          setSelectedAssistantMsg(msgId);
+          try { await loadEvidenceByAssistantMsgId(msgId); } catch(_) {}
+        }
         // 연결 문서는 백엔드가 top_docs 뒤쪽에 병합해 내려주는데, 기본 표시 개수(5)에 잘려 안 보일 수 있음.
         // → 전부 렌더하고 패널을 펼친 뒤 첫 KG 연결문서로 스크롤/강조해 확실히 보이게 한다.
         if(Array.isArray(lastTopDocs) && lastTopDocs.length){
