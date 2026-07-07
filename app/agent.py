@@ -21,21 +21,27 @@ def _call_intent_router(client, user_query: str) -> str:
         return "DB_ANALYSIS"
     if user_query.startswith("[RAG_KNOWLEDGE]"):
         return "RAG_KNOWLEDGE"
+    if user_query.startswith("[REPORT_ANALYSIS]"):
+        return "REPORT_ANALYSIS"
 
     router_prompt = """
     당신은 반도체 불량 분석 시스템의 '의도 분류 라우터(Router)'입니다.
-    사용자의 질문을 읽고 반드시 다음 4가지 인텐트 중 딱 하나만 텍스트로 반환하세요. (다른 말은 절대 금지)
-    
+    사용자의 질문을 읽고 반드시 다음 5가지 인텐트 중 딱 하나만 텍스트로 반환하세요. (다른 말은 절대 금지)
+
     [인텐트 종류]
     1. "DB_ANALYSIS": 불량 발생 건수, 통계, 순위, 리스트 등 DB 데이터를 조회해야 하는 경우
     2. "RAG_KNOWLEDGE": 특정 불량의 발생 원리, 가이드, 해결책 등 기술 문서를 찾아야 하는 경우
     3. "HYBRID_DB_RAG": 통계 조회와 문서(원리) 검색이 모두 필요한 경우
     4. "GENERAL_CHAT": 안부 인사, 단순 대화 등 도구 검색이 필요 없는 경우
-    
+    5. "REPORT_ANALYSIS": 특정 불량 사례/보고서를 지목해 그 분석 내용·원인·조치를 심층적으로 설명해달라는 경우
+       (특정 Lot, 특정 설비, 특정 시기·조건의 "사례 분석"을 원할 때. 단순 건수/순위 집계는 DB_ANALYSIS)
+
     [출력 예시]
     사용자: "최근 3개월 sf2 불량 순위" -> 출력: DB_ANALYSIS
     사용자: "파티클 원인이 뭐야?" -> 출력: RAG_KNOWLEDGE
     사용자: "안녕 반가워" -> 출력: GENERAL_CHAT
+    사용자: "SF4에서 난 Cu 브릿지 불량 사례 상세히 분석해줘" -> 출력: REPORT_ANALYSIS
+    사용자: "이 Lot에서 발생한 불량 보고서 내용 설명해줘" -> 출력: REPORT_ANALYSIS
     """
     try:
         response = client.chat.completions.create(
@@ -55,7 +61,8 @@ def _call_intent_router(client, user_query: str) -> str:
             
         intent = raw_content.strip().upper()
         
-        if "DB_ANALYSIS" in intent: return "DB_ANALYSIS"
+        if "REPORT_ANALYSIS" in intent: return "REPORT_ANALYSIS"
+        elif "DB_ANALYSIS" in intent: return "DB_ANALYSIS"
         elif "RAG_KNOWLEDGE" in intent: return "RAG_KNOWLEDGE"
         elif "GENERAL_CHAT" in intent: return "GENERAL_CHAT"
         elif "HYBRID_DB_RAG" in intent: return "HYBRID_DB_RAG"
@@ -124,7 +131,21 @@ def _get_specialist_prompt(intent: str, current_date: str) -> str:
 
     if intent == "DB_ANALYSIS":
         return base_persona + db_schema + "\n- 당신은 'DB 통계 Agent'로서 오직 DB 통계를 내는 것에만 집중하세요. (도구: query_database 위주)"
-        
+
+    elif intent == "REPORT_ANALYSIS":
+        report_analysis_rule = """
+        [⭐️ 보고서 심층분석 규칙 - 절대 엄수]
+        - 당신의 임무는 사용자가 지목한 불량 사례(보고서)를 찾아내는 것까지입니다.
+          최종 서술형 답변은 시스템이 확보한 근거 문서를 바탕으로 별도 단계에서 생성됩니다.
+        - 반드시 `query_database` 도구로 질문 조건(불량명/Lot/설비/기간 등)에 맞는 보고서를 조회하세요.
+          이때 SELECT 절에 반드시 report_index 컬럼을 포함해야 합니다. (이 값이 후속 근거 연결의 열쇠입니다)
+        - 심층분석 대상은 소수 정예가 좋습니다. `GROUP BY report_index, Lot_ID, WF_ID` + `LIMIT 5` 이내로
+          가장 관련성 높은 보고서만 추리세요.
+        - 결과가 0건이면 조건을 완화(불량명 LIKE 위주)하여 다시 조회하세요.
+        - 조회가 끝나면 추가 서술 없이 간단히 "관련 보고서를 찾았습니다"라고만 답하세요.
+        """
+        return base_persona + db_schema + report_analysis_rule + "\n- 당신은 '보고서 심층분석 Agent'로서 분석 대상 보고서를 정확히 찾는 데 집중하세요. (도구: query_database 전용)"
+
     elif intent == "RAG_KNOWLEDGE":
         rag_action_rule = """
         [⭐️ 도구 호출 필수 규칙 - 절대 엄수]
@@ -163,7 +184,8 @@ def _get_specialist_prompt(intent: str, current_date: str) -> str:
 def _get_suggested_actions(intent: str, db_used: bool = False) -> list:
     if intent == "DB_ANALYSIS":
         actions = [
-            {"label": "📖 관련 사내 문서도 찾아보기", "action": "[RAG_KNOWLEDGE]"}
+            {"label": "📖 관련 사내 문서도 찾아보기", "action": "[RAG_KNOWLEDGE]"},
+            {"label": "🧩 이 보고서 심층분석", "action": "[REPORT_ANALYSIS]"},
         ]
         # DB 쿼리가 실행되었을 때만 '재검색' 기능 활성화
         if db_used:
@@ -175,6 +197,11 @@ def _get_suggested_actions(intent: str, db_used: bool = False) -> list:
     elif intent == "RAG_KNOWLEDGE":
         return [
             {"label": "📊 DB 통계로도 확인해보기", "action": "[DB_ANALYSIS]"}
+        ]
+    elif intent == "REPORT_ANALYSIS":
+        return [
+            {"label": "📊 DB 통계로도 확인해보기", "action": "[DB_ANALYSIS]"},
+            {"label": "📖 관련 사내 문서도 찾아보기", "action": "[RAG_KNOWLEDGE]"},
         ]
     elif intent == "HYBRID_DB_RAG":
         return []
@@ -216,6 +243,7 @@ INTENT_LABELS = {
     "RAG_KNOWLEDGE": "사내 문서 검색",
     "HYBRID_DB_RAG": "통계 + 문서 통합 분석",
     "GENERAL_CHAT": "일반 대화",
+    "REPORT_ANALYSIS": "보고서 심층분석",
 }
 
 def _intent_label(intent: str) -> str:
@@ -264,6 +292,18 @@ RAG_SYNTHESIS_STYLE_RULES = (
     "#### (상세 내용 작성)"
 )
 
+REPORT_ANALYSIS_STYLE_RULES = (
+    "모든 답변은 100% 한국어로 작성하세요. "
+    "당신은 특정 불량 사례(보고서)를 심층 분석하는 케이스 리포트를 작성합니다.\n"
+    "- 근거로 제공된 [보고서 DB 분석 기록]과 연결 문서 내용만 사용하고, 근거에 없는 원인·조치는 절대 추정하지 마세요.\n"
+    "- 보고서별 핵심 사실(Lot/설비/공정/불량명/성분)은 간단한 마크다운 표로 정리해도 좋습니다.\n"
+    "- 발생 현상 → 분석 내용 → 원인/조치 순서로 서술하되, 문서에서 확인된 내용에는 아래 카드형 포맷을 사용하세요:\n"
+    "### 💡 [사례] 분석 내용\n"
+    "> **📌 주요 내용**\n"
+    "#### (상세 내용 작성)\n"
+    "- 여러 보고서가 있으면 공통점과 차이점을 마지막에 짧게 정리하세요."
+)
+
 # =====================================================================
 # 🧠 4. 메인 에이전트 루프 (실시간 스트리밍 및 시행착오 데이터 분리 전송)
 # =====================================================================
@@ -299,6 +339,47 @@ def _to_ui_doc_from_hit(h: dict) -> dict:
         "_rank": h.get("_rank"),
     }
 
+def _report_es_fallback_chunks(ctx: dict, excluded_indexes: set, per_report_k: int = 3, total_limit: int = 4) -> list:
+    """[REPORT_ANALYSIS ES 보완] KG 연결문서가 없는 보고서만 불량명 기반 시맨틱 검색으로 근거 보완.
+
+    ctx는 kg_repo.build_report_analysis_context의 반환값. KG chunk와 doc_id 중복은 제거하고
+    kg_source="search" 태그를 붙여 provenance를 구분한다.
+    """
+    from app.rag_client import rag_retrieve_rrf
+    from app.config import DEFAULT_INDEX_NAME
+
+    linked = ctx.get("linked_report_indexes") or set()
+    kg_doc_ids = {c.get("doc_id") for c in (ctx.get("chunks") or [])}
+    out = []
+    for row in ctx.get("db_rows") or []:
+        if len(out) >= total_limit:
+            break
+        ridx = row.get("report_index")
+        if ridx in linked:
+            continue
+        defect = str(row.get("불량명") or "").strip()
+        if not defect:
+            continue
+        query = " ".join(x for x in (defect, str(row.get("공정명") or "").strip()) if x)
+        try:
+            rag_result = rag_retrieve_rrf(index_name=DEFAULT_INDEX_NAME, query_text=query, top_k=per_report_k)
+            hits = rag_result.get("hits", {}).get("hits", [])
+        except Exception as e:
+            print(f"[KG] ES 보완 검색 실패 (report {ridx}): {e}")
+            continue
+        for h in _dedupe_and_filter_hits(hits, excluded_indexes):
+            chunk = _to_ui_doc_from_hit(h)
+            if not chunk.get("doc_id") or chunk["doc_id"] in kg_doc_ids:
+                continue
+            chunk["kg_source"] = "search"
+            chunk["report_index"] = ridx
+            kg_doc_ids.add(chunk["doc_id"])
+            out.append(chunk)
+            if len(out) >= total_limit:
+                break
+    return out
+
+
 def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list, excluded_indexes: set, ui_top_k: int, forced_intent: str = None):
     client = _make_client(user_id)
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -331,7 +412,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
 
     # [2. 무기 압수 (Tools 필터링)]
     available_tools = TOOLS_SCHEMA
-    if intent == "DB_ANALYSIS":
+    if intent in ("DB_ANALYSIS", "REPORT_ANALYSIS"):
         available_tools = [t for t in TOOLS_SCHEMA if t["function"]["name"] == "query_database"]
     elif intent == "RAG_KNOWLEDGE":
         available_tools = [t for t in TOOLS_SCHEMA if t["function"]["name"] == "search_documents"]
@@ -414,6 +495,111 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                 hits_visible = _dedupe_and_filter_hits(all_collected_hits, excluded_indexes)
                 top_docs_ui = [_to_ui_doc_from_hit(h) for h in hits_visible[:ui_top_k]]
                 rag_chunks = [_to_ui_doc_from_hit(h) for h in hits_visible[:12]]
+
+            # 💡 [Phase 3: REPORT_ANALYSIS] KG로 근거를 조립해 생성에 투입 (전용 경로)
+            if intent == "REPORT_ANALYSIS":
+                yield yield_step("🧩 찾은 보고서를 지식그래프와 연결해 근거를 모으고 있어요...")
+                ctx = {"chunks": [], "glossary": "", "db_rows": [], "linked_report_indexes": set()}
+                if collected_report_indexes:
+                    try:
+                        from app.kg_repo import build_report_analysis_context
+                        ctx = build_report_analysis_context(sorted(collected_report_indexes))
+                    except Exception as e:
+                        print(f"[KG] 보고서 분석 컨텍스트 조립 실패: {e}")
+
+                es_chunks = []
+                try:
+                    es_chunks = _report_es_fallback_chunks(ctx, excluded_indexes)
+                except Exception as e:
+                    print(f"[KG] ES 보완 검색 스킵: {e}")
+                if es_chunks:
+                    yield yield_step(f"🔎 연결 문서가 부족한 보고서는 문서 검색으로 {len(es_chunks)}건을 보완했어요")
+
+                all_chunks = (ctx.get("chunks") or []) + es_chunks
+
+                # 근거 게이트: 근거가 하나도 없으면 자유 생성을 차단하고 정직 응답
+                if not all_chunks:
+                    yield yield_step("⚠️ 분석할 보고서 근거를 확보하지 못했어요. 추측으로 답하지 않고 안내 메시지를 드릴게요.")
+                    final_answer = NO_EVIDENCE_ANSWER
+                    final_result = {
+                        "intent": intent,
+                        "final_answer": final_answer,
+                        "suggested_actions": _get_suggested_actions(intent, db_used=used_db),
+                        "citations": {"answer": [], "final": final_answer, "claims": []},
+                        "top_docs": [],
+                        "steps": execution_steps,
+                        "verification": {"grounded": False},
+                    }
+                    yield json.dumps({"type": "final", "data": final_result}, ensure_ascii=False) + "\n"
+                    return
+
+                # 연결 용어 정의를 미니 용어사전으로 주입 (main.py의 detected_terms 주입 패턴과 동일)
+                prev_for_synth = list(previous_messages or [])
+                if ctx.get("glossary"):
+                    prev_for_synth.insert(0, {
+                        "role": "system",
+                        "content": (
+                            "아래는 분석 대상 보고서와 연결된 사내 전문 용어 정의입니다. "
+                            "문맥 이해에 활용하세요.\n\n[사내 용어 사전]\n" + ctx["glossary"]
+                        ),
+                    })
+
+                kg_doc_count = sum(1 for c in all_chunks if c.get("kg_source") not in (None, "db", "search"))
+                yield yield_step(
+                    f"✅ 근거 {len(all_chunks)}건(DB 기록 {len(ctx.get('db_rows') or [])}·연결 문서 {kg_doc_count}·검색 보완 {len(es_chunks)})을 확보했어요! "
+                    "근거 내용만 바탕으로 심층분석을 정리하고 있어요..."
+                )
+                try:
+                    synth = llm_answer_with_citations(
+                        user_id=user_id,
+                        user_question=user_query,
+                        rag_chunks=all_chunks,
+                        previous_messages=prev_for_synth,
+                        style_rules=REPORT_ANALYSIS_STYLE_RULES,
+                        client=client,
+                    )
+                    if (synth.get("answer_markdown") or "").strip():
+                        final_answer = synth["answer_markdown"]
+                    citations_json = {
+                        "answer": synth.get("answer") or [],
+                        "final": final_answer,
+                        "claims": synth.get("claims") or [],
+                    }
+                except Exception as e:
+                    print(f"  ❌ 보고서 심층분석 합성 실패, 루프 답변으로 폴백: {e}")
+
+                # 근거 패널용 문서: DB 사실 chunk는 제외하고 실제 문서(KG 연결 + 검색 보완)만 노출
+                doc_chunks = [c for c in all_chunks if c.get("kg_source") != "db"]
+                top_docs_ui = doc_chunks
+                related_docs = [c for c in doc_chunks if c.get("kg_source") != "search"]
+
+                # 검증: 답변 속 숫자가 근거(DB 기록·문서 본문·질문)에 존재하는지 결정적 검사
+                allowed_nums = _extract_numbers(user_query)
+                for c in all_chunks:
+                    allowed_nums |= _extract_numbers(c.get("merge_title_content") or "")
+                verification = {"grounded": True}
+                verification.update(_numeric_echo_check(
+                    final_answer=final_answer,
+                    db_tool_results=db_tool_results,
+                    allowed_extra=allowed_nums,
+                ))
+                claim_list = citations_json.get("answer") or []
+                if claim_list:
+                    verification["claims_supported"] = sum(1 for c in claim_list if c.get("support") == "supported")
+                    verification["claims_total"] = len(claim_list)
+
+                final_result = {
+                    "intent": intent,
+                    "final_answer": final_answer,
+                    "suggested_actions": _get_suggested_actions(intent, db_used=used_db),
+                    "citations": citations_json,
+                    "top_docs": top_docs_ui,
+                    "related_docs": related_docs,
+                    "steps": execution_steps,
+                    "verification": verification,
+                }
+                yield json.dumps({"type": "final", "data": final_result}, ensure_ascii=False) + "\n"
+                return
 
             # 💡 [근거 게이트] RAG 모드인데 확보된 근거 문서가 없으면 자유 생성을 차단하고 정직 응답
             if intent == "RAG_KNOWLEDGE" and not rag_chunks:

@@ -268,6 +268,9 @@ async def api_chat_stream(request: Request):
     elif user_text.startswith("[RAG_KNOWLEDGE]"):
         forced_intent = "RAG_KNOWLEDGE"
         user_text = user_text.replace("[RAG_KNOWLEDGE]", "").strip()
+    elif user_text.startswith("[REPORT_ANALYSIS]"):
+        forced_intent = "REPORT_ANALYSIS"
+        user_text = user_text.replace("[REPORT_ANALYSIS]", "").strip()
 
     index_names = body.get("index_names")
     if isinstance(index_names, list):
@@ -500,6 +503,9 @@ async def api_chat(request: Request):
     elif user_text.startswith("[RAG_KNOWLEDGE]"):
         forced_intent = "RAG_KNOWLEDGE"
         user_text = user_text.replace("[RAG_KNOWLEDGE]", "").strip()
+    elif user_text.startswith("[REPORT_ANALYSIS]"):
+        forced_intent = "REPORT_ANALYSIS"
+        user_text = user_text.replace("[REPORT_ANALYSIS]", "").strip()
 
     index_names = body.get("index_names")
     if isinstance(index_names, list):

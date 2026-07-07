@@ -209,7 +209,28 @@ def run(user_id: str = "goldenset_eval", k: int = 10, do_intent: bool = True,
 
         retrieved_ids, top_titles = ([], [])
         if it.get("expected_doc_ids"):
-            retrieved_ids, top_titles = _retrieved_doc_ids(retrieval_query, k, index_name)
+            # Phase 3: REPORT_ANALYSIS 문항은 실제 답변 경로(KG 연결문서)로 채점.
+            # 문항에 report_indexes(앵커 보고서)가 있으면 build_report_analysis_context가
+            # 반환하는 연결문서를 검색 결과처럼 취급하고, 부족분만 ES 검색으로 보완한다.
+            if (it.get("expected_intent") or "").strip() == "REPORT_ANALYSIS" and it.get("report_indexes"):
+                try:
+                    from app.kg_repo import build_report_analysis_context
+                    ctx = build_report_analysis_context([str(x) for x in it["report_indexes"]])
+                    doc_chunks = [c for c in (ctx.get("chunks") or []) if c.get("kg_source") != "db" and c.get("doc_id")]
+                    retrieved_ids = [c["doc_id"] for c in doc_chunks][:k]
+                    top_titles = [c.get("title") or "" for c in doc_chunks]
+                except Exception as e:
+                    print(f"[Goldenset] KG 경로 평가 실패 q={q[:30]}: {e}")
+                if len(retrieved_ids) < k:
+                    es_ids, es_titles = _retrieved_doc_ids(retrieval_query, k, index_name)
+                    for d, t in zip(es_ids, es_titles):
+                        if d and d not in retrieved_ids:
+                            retrieved_ids.append(d)
+                            top_titles.append(t)
+                        if len(retrieved_ids) >= k:
+                            break
+            else:
+                retrieved_ids, top_titles = _retrieved_doc_ids(retrieval_query, k, index_name)
 
         router_intent = None
         if client is not None and (it.get("expected_intent") or "").strip():

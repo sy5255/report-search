@@ -10,6 +10,7 @@
     "DB_ANALYSIS":   { label: "DB 통계 분석",   color: "var(--chart-2)" },
     "HYBRID_DB_RAG": { label: "통계+문서 통합", color: "var(--chart-3)" },
     "GENERAL_CHAT":  { label: "일반 대화",      color: "var(--chart-4)" },
+    "REPORT_ANALYSIS": { label: "보고서 심층분석", color: "var(--chart-5)" },
   };
   const KG_SOURCE_META = {
     "lot_wf":    { label: "Lot+WF 정밀 매칭", color: "var(--chart-1)" },

@@ -1632,6 +1632,18 @@ function renderTopDocsFiltered(){
     if(meta.mailFrom) tagsHtml += `<span class="px-2 py-0.5 bg-surface-container-high dark:bg-[#1f2b4a] text-secondary dark:text-[#94a3b8] text-[9px] rounded">#${escapeHtml(meta.mailFrom)}</span>`;
     if(meta.mailDate) tagsHtml += `<span class="px-2 py-0.5 bg-surface-container-high dark:bg-[#1f2b4a] text-secondary dark:text-[#94a3b8] text-[9px] rounded">#${escapeHtml(meta.mailDate)}</span>`;
     
+    // 💡 [Phase 3] KG 연결 근거 배지 (심층분석 근거 문서의 provenance 표시)
+    const kgSrc = d.kg_source || (d._index === "kg-related" ? "kg" : "");
+    if(kgSrc === "search"){
+      tagsHtml += `<span class="px-2 py-0.5 bg-surface-container-high dark:bg-[#1f2b4a] text-secondary dark:text-[#94a3b8] text-[9px] rounded" title="KG 연결 문서가 없어 시맨틱 검색으로 보완된 근거">🔎 검색 보완</span>`;
+    }else if(kgSrc && kgSrc !== "db"){
+      const tipParts = [];
+      if(d.kg_evidence) tipParts.push(d.kg_evidence);
+      if(d.kg_confidence != null) tipParts.push(`신뢰도 ${Number(d.kg_confidence).toFixed(2)}`);
+      const tip = tipParts.join(" · ") || "지식그래프로 연결된 원본 보고서 문서";
+      tagsHtml += `<span class="px-2 py-0.5 bg-rag/10 text-rag-strong dark:text-rag text-[9px] font-semibold rounded" title="${escapeHtml(tip)}">🧩 KG 연결</span>`;
+    }
+
     // 💡 [복구 완료] 분석보고서 URL(edmLinks) 클릭 기능 복구 (이슈 4 해결)
     if(meta.edmLinks && meta.edmLinks.length){
       meta.edmLinks.forEach(u => {

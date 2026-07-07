@@ -146,6 +146,229 @@ def get_link_samples(source: str = "", q: str = "", limit: int = 50) -> list:
     return out
 
 
+# =====================================================================
+# Phase 3: REPORT_ANALYSIS 생성 근거 조립 (KG를 답변 생성에 투입)
+# =====================================================================
+# 근거 텍스트 절단 길이 — tools.search_documents의 2500자 절단과 동일하게 유지
+# (LLM이 보는 텍스트와 인용 검증 대상 텍스트가 일치해야 verbatim quote가 통과함)
+EVIDENCE_TEXT_LIMIT = 2500
+
+_REPORT_FACT_COLS = "report_index, Lot_ID, WF_ID, 불량명, 성분, 공정노드, 모듈, 공정명, 설비명, 분석담당자, 의뢰자명"
+
+
+def get_report_rows(report_indexes: list) -> list:
+    """report_index 집합의 DB 구조화 사실을 조회해 보고서 단위로 병합 반환.
+
+    v_ai_defect_search는 같은 report_index가 여러 행(성분/불량명 분해)으로 존재할 수
+    있으므로, 보고서당 1건으로 각 컬럼의 고유값을 ', '로 병합한다.
+    반환: [{report_index, Lot_ID, WF_ID, 불량명, ...}]
+    """
+    ridx = [str(r) for r in (report_indexes or []) if str(r).strip()]
+    if not ridx:
+        return []
+    try:
+        conn = get_conn()
+        cur = conn.cursor(dictionary=True)
+        placeholders = ",".join(["%s"] * len(ridx))
+        cur.execute(
+            f"SELECT DISTINCT {_REPORT_FACT_COLS} FROM v_ai_defect_search "
+            f"WHERE report_index IN ({placeholders})",
+            tuple(ridx),
+        )
+        rows = cur.fetchall() or []
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[KG] get_report_rows 조회 실패: {e}")
+        return []
+
+    merged = {}
+    order = []
+    for r in rows:
+        key = str(r.get("report_index") or "")
+        if not key:
+            continue
+        if key not in merged:
+            merged[key] = {"report_index": key}
+            order.append(key)
+        acc = merged[key]
+        for col, val in r.items():
+            if col == "report_index":
+                continue
+            v = str(val or "").strip()
+            if not v:
+                continue
+            existing = acc.get(col)
+            if not existing:
+                acc[col] = v
+            elif v not in existing.split(", "):
+                acc[col] = existing + ", " + v
+    return [merged[k] for k in order]
+
+
+def get_report_terms(report_indexes: list) -> list:
+    """report_index 집합과 연결된 용어 정의 조회 (kg_report_term ⋈ term_dictionary).
+
+    반환: [{report_index, term_id, canonical_name, term_type, description, src_cols}]
+    """
+    ridx = [str(r) for r in (report_indexes or []) if str(r).strip()]
+    if not ridx:
+        return []
+    try:
+        conn = get_conn()
+        cur = conn.cursor(dictionary=True)
+        placeholders = ",".join(["%s"] * len(ridx))
+        cur.execute(
+            f"""
+            SELECT rt.report_index, rt.term_id,
+                   td.canonical_name, td.term_type, td.description,
+                   GROUP_CONCAT(DISTINCT rt.src_col) AS src_cols,
+                   MAX(rt.confidence) AS confidence
+            FROM kg_report_term rt
+            JOIN term_dictionary td ON td.term_id = rt.term_id
+            WHERE rt.report_index IN ({placeholders})
+            GROUP BY rt.report_index, rt.term_id, td.canonical_name, td.term_type, td.description
+            ORDER BY confidence DESC
+            """,
+            tuple(ridx),
+        )
+        rows = cur.fetchall() or []
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[KG] get_report_terms 조회 실패: {e}")
+        return []
+
+    return [{
+        "report_index": str(r["report_index"]),
+        "term_id": r["term_id"],
+        "canonical_name": r.get("canonical_name") or "",
+        "term_type": r.get("term_type") or "",
+        "description": r.get("description") or "",
+        "src_cols": r.get("src_cols") or "",
+    } for r in rows]
+
+
+def get_report_evidence_chunks(report_indexes: list, limit: int = 8) -> list:
+    """KG로 연결된 원본 문서를 **실제 본문을 채운 인용 가능 chunk**로 반환.
+
+    get_docs_for_reports와 달리 merge_title_content에 아카이브 원문(raw_content,
+    EVIDENCE_TEXT_LIMIT 절단)을 채워 llm_answer_with_citations → validate_citations의
+    verbatim quote 검증을 통과할 수 있게 한다. provenance(kg_source/confidence/evidence)를
+    함께 태그해 UI에서 연결 근거를 추적할 수 있다.
+    """
+    ridx = [str(r) for r in (report_indexes or []) if str(r).strip()]
+    if not ridx:
+        return []
+    try:
+        conn = get_conn()
+        cur = conn.cursor(dictionary=True)
+        placeholders = ",".join(["%s"] * len(ridx))
+        cur.execute(
+            f"SELECT doc_id, report_index, source, MAX(confidence) AS confidence, "
+            f"MAX(evidence) AS evidence "
+            f"FROM kg_doc_report WHERE report_index IN ({placeholders}) "
+            f"GROUP BY doc_id, report_index, source "
+            f"ORDER BY confidence DESC",
+            tuple(ridx),
+        )
+        rows = cur.fetchall() or []
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[KG] get_report_evidence_chunks 조회 실패: {e}")
+        return []
+
+    meta_map = _doc_meta_map()
+    out = []
+    seen = set()
+    for r in rows:
+        doc_id = r["doc_id"]
+        if doc_id in seen:
+            continue
+        meta = meta_map.get(doc_id)
+        if not meta:
+            continue
+        seen.add(doc_id)
+        title = meta.get("title") or doc_id
+        body = (meta.get("raw_content") or "").strip()
+        text = f"{title}\n{body}"[:EVIDENCE_TEXT_LIMIT]
+        chunk = _to_ui_doc(meta, report_index=str(r["report_index"]))
+        chunk["chunk_id"] = doc_id  # 안정적 인용 키 (아카이브 문서는 청크 분할 없음)
+        chunk["merge_title_content"] = text
+        chunk["kg_source"] = r["source"]
+        chunk["kg_confidence"] = float(r["confidence"] or 0)
+        chunk["kg_evidence"] = r.get("evidence") or ""
+        out.append(chunk)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _format_report_fact_text(row: dict) -> str:
+    """DB 구조화 사실을 인용 가능한 평문 텍스트로 포맷 (verbatim quote 대상)."""
+    lines = [f"[보고서 {row.get('report_index')} DB 분석 기록]"]
+    for col in ("Lot_ID", "WF_ID", "불량명", "성분", "공정노드", "모듈", "공정명",
+                "설비명", "분석담당자", "의뢰자명"):
+        v = str(row.get(col) or "").strip()
+        if v:
+            lines.append(f"{col}: {v}")
+    return "\n".join(lines)
+
+
+def build_report_analysis_context(report_indexes: list, max_reports: int = 5,
+                                  doc_chunk_limit: int = 8) -> dict:
+    """REPORT_ANALYSIS 생성 근거 통합 조립 (결정적, LLM 미사용).
+
+    반환:
+      chunks     : rag_chunks 형태 근거 목록 — (a) 보고서별 DB 사실 chunk
+                   (doc_id=f"db:{ridx}", kg_source="db") + (b) KG 연결문서 chunk(실제 본문).
+      glossary   : 연결 용어 정의 텍스트 (system 프롬프트 주입용, chunk 아님)
+      db_rows    : 병합된 보고서 DB 행 (numeric echo·UI용)
+      linked_report_indexes : 연결문서가 1건 이상 확보된 report_index 집합 (ES 보완 판단용)
+    """
+    ridx = [str(r) for r in (report_indexes or []) if str(r).strip()][:max_reports]
+    empty = {"chunks": [], "glossary": "", "db_rows": [], "linked_report_indexes": set()}
+    if not ridx:
+        return empty
+
+    db_rows = get_report_rows(ridx)
+    doc_chunks = get_report_evidence_chunks(ridx, limit=doc_chunk_limit)
+    terms = get_report_terms(ridx)
+
+    chunks = []
+    for row in db_rows:
+        r = row["report_index"]
+        chunks.append({
+            "doc_id": f"db:{r}",
+            "chunk_id": "db",
+            "title": f"보고서 {r} DB 분석 기록",
+            "merge_title_content": _format_report_fact_text(row),
+            "score": None,
+            "additionalField": {},
+            "_index": "kg-report-db",
+            "kg_source": "db",
+            "report_index": r,
+        })
+    chunks.extend(doc_chunks)
+
+    glossary_lines = []
+    seen_terms = set()
+    for t in terms:
+        name = t["canonical_name"]
+        if not name or name in seen_terms or not t["description"]:
+            continue
+        seen_terms.add(name)
+        glossary_lines.append(f"* {name} ({t['term_type']}): {t['description']}")
+
+    return {
+        "chunks": chunks,
+        "glossary": "\n".join(glossary_lines),
+        "db_rows": db_rows,
+        "linked_report_indexes": {c.get("report_index") for c in doc_chunks if c.get("report_index")},
+    }
+
+
 def get_term_overview(term_id: int, top_n: int = 10) -> dict:
     """용어 허브용: 관련 문서/보고서 수 + 상위 문서 + 동시출현 용어 (Phase 3 UI 대비 API)."""
     out = {"term_id": term_id, "docs_count": 0, "reports_count": 0, "top_docs": [], "co_terms": [], "top_reports": []}
