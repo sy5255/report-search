@@ -336,26 +336,31 @@ def _to_ui_doc_from_hit(h: dict) -> dict:
         "_rank": h.get("_rank"),
     }
 
-def _rag_fallback_chunks(user_query: str, excluded_indexes: set, top_k: int = 8, limit: int = 12) -> list:
+def _rag_fallback_chunks(user_query: str, excluded_indexes: set, top_k: int = 8, limit: int = 12,
+                         index_names: list | None = None) -> list:
     """서버측 결정적 재검색 안전망.
 
     RAG 답변인데 에이전트 루프가 근거를 하나도 못 모았을 때(LLM이 search_documents를 건너뛰었거나
     일시적 0건) 헛되이 '근거 없음'으로 실패하지 않도록, 서버가 직접 user_query로 검색한다.
     근거는 여전히 실제 검색된 문서로만 채워지므로 안티-할루시네이션 원칙은 유지된다.
+    index_names: UI에서 선택한 인덱스 목록(없으면 DEFAULT_INDEX_NAME).
     반환: rag_chunks 형태 리스트(빈 결과·예외 시 []).
     """
     from app.rag_client import rag_retrieve_rrf
     from app.config import DEFAULT_INDEX_NAME
-    try:
-        rag_result = rag_retrieve_rrf(index_name=DEFAULT_INDEX_NAME, query_text=user_query, top_k=top_k)
-        hits = rag_result.get("hits", {}).get("hits", [])
-    except Exception as e:
-        print(f"[RAG] 서버측 재검색 폴백 실패: {e}")
-        return []
+    targets = [x for x in (index_names or []) if str(x).strip()] or [DEFAULT_INDEX_NAME]
+    hits = []
+    for idx_name in targets:
+        try:
+            rag_result = rag_retrieve_rrf(index_name=idx_name, query_text=user_query, top_k=top_k)
+            hits.extend(rag_result.get("hits", {}).get("hits", []))
+        except Exception as e:
+            print(f"[RAG] 서버측 재검색 폴백 실패 (index {idx_name}): {e}")
     return [_to_ui_doc_from_hit(h) for h in _dedupe_and_filter_hits(hits, excluded_indexes)[:limit]]
 
 
-def _report_es_fallback_chunks(ctx: dict, excluded_indexes: set, per_report_k: int = 3, total_limit: int = 4) -> list:
+def _report_es_fallback_chunks(ctx: dict, excluded_indexes: set, per_report_k: int = 3, total_limit: int = 4,
+                               index_names: list | None = None) -> list:
     """[REPORT_ANALYSIS ES 보완] KG 연결문서가 없는 보고서만 불량명 기반 시맨틱 검색으로 근거 보완.
 
     ctx는 kg_repo.build_report_analysis_context의 반환값. KG chunk와 doc_id 중복은 제거하고
@@ -363,6 +368,7 @@ def _report_es_fallback_chunks(ctx: dict, excluded_indexes: set, per_report_k: i
     """
     from app.rag_client import rag_retrieve_rrf
     from app.config import DEFAULT_INDEX_NAME
+    search_index = ([x for x in (index_names or []) if str(x).strip()] or [DEFAULT_INDEX_NAME])[0]
 
     linked = ctx.get("linked_report_indexes") or set()
     kg_doc_ids = {c.get("doc_id") for c in (ctx.get("chunks") or [])}
@@ -378,7 +384,7 @@ def _report_es_fallback_chunks(ctx: dict, excluded_indexes: set, per_report_k: i
             continue
         query = " ".join(x for x in (defect, str(row.get("공정명") or "").strip()) if x)
         try:
-            rag_result = rag_retrieve_rrf(index_name=DEFAULT_INDEX_NAME, query_text=query, top_k=per_report_k)
+            rag_result = rag_retrieve_rrf(index_name=search_index, query_text=query, top_k=per_report_k)
             hits = rag_result.get("hits", {}).get("hits", [])
         except Exception as e:
             print(f"[KG] ES 보완 검색 실패 (report {ridx}): {e}")
@@ -396,7 +402,7 @@ def _report_es_fallback_chunks(ctx: dict, excluded_indexes: set, per_report_k: i
     return out
 
 
-def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list, excluded_indexes: set, ui_top_k: int, forced_intent: str = None):
+def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list, excluded_indexes: set, ui_top_k: int, forced_intent: str = None, index_names: list = None):
     client = _make_client(user_id)
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
     
@@ -481,10 +487,21 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                     args = {}
                     tech_detail = f"[Tool] {func_name}\n(파라미터 파싱 실패)"
 
+                # 💡 [검색 일관성] 문서검색 쿼리를 서버측 결정 쿼리(용어사전 확장 쿼리 = user_query)로
+                # 오버라이드. LLM이 쿼리를 재작성하며 용어를 뭉개는 것(pc2sige→pc2)을 차단하고,
+                # 용어사전 확장(동의어 OR 블록)이 실제 검색에 반영되게 한다. LLM 제안 쿼리는 투명성을
+                # 위해 technical_detail에 남긴다.
+                if func_name == "search_documents":
+                    llm_query = str(args.get("query") or "").strip()
+                    if llm_query and llm_query != user_query:
+                        tech_detail = (f"[Tool] {func_name}\n[검색 쿼리(용어사전 확장)]\n{user_query}"
+                                       f"\n[LLM 제안 쿼리(미사용)]\n{llm_query}")
+                    args["query"] = user_query
+
                 # 프론트엔드로 Thought와 Tech_detail 발사!
                 yield yield_step(thought=parsed_thought, tech_detail=tech_detail)
 
-                tool_result_str, hits = execute_tool(func_name, args)
+                tool_result_str, hits = execute_tool(func_name, args, index_names=index_names)
 
                 # 숫자 에코 체크용으로 DB 도구 결과 원문 보관 + KG 조인용 report_index 수집
                 if func_name == "query_database":
@@ -525,7 +542,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
 
                 es_chunks = []
                 try:
-                    es_chunks = _report_es_fallback_chunks(ctx, excluded_indexes)
+                    es_chunks = _report_es_fallback_chunks(ctx, excluded_indexes, index_names=index_names)
                 except Exception as e:
                     print(f"[KG] ES 보완 검색 스킵: {e}")
                 if es_chunks:
@@ -537,7 +554,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                 degraded = False
                 if not all_chunks:
                     yield yield_step("🔎 특정 보고서를 특정하지 못해, 관련 사내 문서를 폭넓게 검색할게요...")
-                    all_chunks = _rag_fallback_chunks(user_query, excluded_indexes)
+                    all_chunks = _rag_fallback_chunks(user_query, excluded_indexes, index_names=index_names)
                     degraded = True
 
                 # 근거 게이트: 폴백 후에도 근거가 하나도 없을 때만 자유 생성을 차단하고 정직 응답
@@ -629,7 +646,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
             if intent == "RAG_KNOWLEDGE" and not rag_chunks:
                 # LLM이 검색 도구를 건너뛰었거나 일시적 0건일 수 있으므로, 서버가 직접 재검색해 헛실패 방지
                 yield yield_step("🔎 근거가 비어 있어 사내 문서를 한 번 더 검색하고 있어요...")
-                fb_chunks = _rag_fallback_chunks(user_query, excluded_indexes)
+                fb_chunks = _rag_fallback_chunks(user_query, excluded_indexes, index_names=index_names)
                 if fb_chunks:
                     rag_chunks = fb_chunks
                     top_docs_ui = fb_chunks[:ui_top_k]
@@ -746,14 +763,14 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
 # =====================================================================
 # 🧠 5. 기존 비스트리밍(동기) 방식 호환용 Wrapper 함수 (💡 삭제하면 안 됨!)
 # =====================================================================
-def run_agent_loop(user_id: str, user_query: str, previous_messages: list, excluded_indexes: set, ui_top_k: int, forced_intent: str = None) -> dict:
+def run_agent_loop(user_id: str, user_query: str, previous_messages: list, excluded_indexes: set, ui_top_k: int, forced_intent: str = None, index_names: list = None) -> dict:
     """
     기존 /api/chat 엔드포인트에서 호출할 수 있도록
     스트리밍 제너레이터를 돌려서 마지막 최종 결과 데이터만 추출해 반환합니다.
     """
     final_data = None
-    
-    for chunk in run_agent_loop_stream(user_id, user_query, previous_messages, excluded_indexes, ui_top_k, forced_intent):
+
+    for chunk in run_agent_loop_stream(user_id, user_query, previous_messages, excluded_indexes, ui_top_k, forced_intent, index_names=index_names):
         try:
             chunk_dict = json.loads(chunk.strip())
             if chunk_dict.get("type") == "final":

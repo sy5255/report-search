@@ -154,6 +154,17 @@
   .gs-del:hover { opacity: 1; background: color-mix(in srgb, var(--status-bad) 12%, transparent); }
   #gsTableRunLabel { font-size: 11px; }
 
+  /* 실패 사례 (👎 피드백) */
+  .fb-case-row { cursor: pointer; }
+  .fb-case-row:hover td { background: var(--color-surface-container-low); }
+  .fb-promote { font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+    border: 1px solid var(--chart-1); color: var(--chart-1); white-space: nowrap; }
+  .fb-promote:hover { background: color-mix(in srgb, var(--chart-1) 12%, transparent); }
+  .fb-promote:disabled { opacity: 0.5; cursor: default; }
+  .fb-answer-body { font-size: 11px; line-height: 1.6; white-space: pre-wrap;
+    background: var(--color-surface-container-low); border-radius: 8px; padding: 10px 12px;
+    max-height: 260px; overflow-y: auto; }
+
   /* 문서 뷰어 모달 */
   .kg-doc-modal { position: fixed; inset: 0; z-index: 6000; display: flex; align-items: center; justify-content: center; }
   .kg-doc-backdrop { position: absolute; inset: 0; background: rgba(10,15,31,0.6); }
@@ -228,6 +239,7 @@
     <header class="mb-4">
       <h2 class="font-headline text-xl font-bold text-primary">골든셋 평가</h2>
       <p class="text-xs text-secondary">대표 질문 + 기대 정답으로 측정하는 검색·라우팅 품질 (변경 전후 통제 비교용) · <span class="font-mono">python -m app.goldenset_runner</span></p>
+      <p class="text-xs text-secondary mt-1">📝 문항 작성 가이드: <b>검색형 40%</b>(원리·가이드 질문 + 정답 문서 doc_id) · <b>DB형 30%</b>(건수·순위 질문 + 기대 인텐트) · <b>하이브리드 20%</b>(통계+원리 복합) · <b>함정 10%</b>(사내 문서에 없는 주제 — 근거 게이트가 발동해야 정답). 정답 문서는 goldenset.json의 expected_doc_ids에 아카이브 doc_id(md 파일명)를 넣으세요.</p>
     </header>
     <section id="gsTiles" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4"></section>
     <section class="chart-card mb-4">
@@ -246,6 +258,15 @@
       <div class="chart-desc">검색 실패(⚠)·인텐트 오분류가 개선 우선순위입니다. found-rank는 기대 문서가 검색 결과 몇 위에서 처음 나왔는지입니다.</div>
       <div id="gsTable"></div>
     </section>
+
+    {% if is_admin %}
+    <!-- ── 실패 사례 (👎 피드백, 관리자 전용) ── -->
+    <section class="chart-card mb-4" id="fbCasesCard">
+      <div class="chart-title">실패 사례 — 👎 피드백 <span class="text-secondary" style="font-weight:500">관리자 전용</span></div>
+      <div class="chart-desc">부정 피드백이 달린 실제 질문/답변입니다. [골든셋 후보]를 누르면 goldenset.json에 비활성(enabled=false) 문항으로 추가됩니다 — 정답 문서를 채워 활성화하면 유저 불만이 회귀 테스트가 됩니다. 행을 클릭하면 답변 전문이 열립니다.</div>
+      <div id="fbCases"></div>
+    </section>
+    {% endif %}
 
     <!-- ── Knowledge Graph ── -->
     <header class="mb-4">

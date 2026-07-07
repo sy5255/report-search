@@ -158,6 +158,57 @@ def get_eval_summary(days: int = 30) -> dict:
     return out
 
 
+def get_feedback_cases(limit: int = 50) -> list:
+    """👎(down) 피드백이 달린 턴의 실패 사례 목록 (관리자 실패사례 브라우저용).
+
+    chat_message_feedback ⋈ chat_turn_artifacts(질문 msg_id·intent) ⋈ chat_messages(질문/답변 원문).
+    반환: [{created_at, question, answer, intent, comment, assistant_msg_id, user_id}]
+    """
+    limit = max(1, min(int(limit or 50), 200))
+    out = []
+    try:
+        conn = get_conn()
+        cur = conn.cursor(dictionary=True)
+        rows = _q(cur, """
+            SELECT f.assistant_msg_id, f.comment, f.created_at, f.user_id,
+                   a.rag_response_json,
+                   mu.content AS question, ma.content AS answer
+            FROM chat_message_feedback f
+            LEFT JOIN chat_turn_artifacts a ON a.assistant_msg_id = f.assistant_msg_id
+            LEFT JOIN chat_messages mu ON mu.msg_id = a.user_msg_id
+            LEFT JOIN chat_messages ma ON ma.msg_id = f.assistant_msg_id
+            WHERE f.rating = 'down'
+            ORDER BY f.created_at DESC
+            LIMIT %s
+        """, (limit,))
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[EVAL] get_feedback_cases 조회 실패: {e}")
+        return []
+
+    for r in rows:
+        intent = None
+        rag = r.get("rag_response_json")
+        if isinstance(rag, str):
+            try:
+                rag = json.loads(rag)
+            except Exception:
+                rag = None
+        if isinstance(rag, dict):
+            intent = rag.get("intent")
+        out.append({
+            "created_at": str(r.get("created_at") or ""),
+            "question": r.get("question") or "",
+            "answer": r.get("answer") or "",
+            "intent": intent,
+            "comment": r.get("comment") or "",
+            "assistant_msg_id": r.get("assistant_msg_id"),
+            "user_id": r.get("user_id") or "",
+        })
+    return out
+
+
 def get_goldenset_latest(trend_n: int = 12) -> dict:
     """최신 골든셋 평가 run 1건(요약+문항별) + 최근 run들의 hit@5/mrr 추이."""
     out = {"latest": None, "items": [], "trend": []}

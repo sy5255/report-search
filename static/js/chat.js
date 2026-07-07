@@ -2898,6 +2898,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   if(el("evidenceCollapse")) el("evidenceCollapse").addEventListener("click", collapseEvidencePanel);
   if(el("evidenceRail")) el("evidenceRail").addEventListener("click", expandEvidencePanel);
 
+  // Top Documents 표시 개수 셀렉트
+  if(el("topDocsShowN")) el("topDocsShowN").addEventListener("change", applyTopDocsN);
+
   await refreshSessions();
   newSession();
 

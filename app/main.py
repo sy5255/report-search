@@ -367,7 +367,8 @@ async def api_chat_stream(request: Request):
             previous_messages=previous_messages,
             excluded_indexes=EXCLUDED_TOPDOC_INDEXES,
             ui_top_k=ui_top_k,
-            forced_intent=forced_intent
+            forced_intent=forced_intent,
+            index_names=index_names
         ):
             # 💡 [핵심 해킹 로직] 에이전트 스트림 청크를 가로채어 배열 맨 앞에 로그를 끼워 넣습니다.
             if glossary_step_log:
@@ -570,7 +571,8 @@ async def api_chat(request: Request):
             previous_messages=previous_messages,
             excluded_indexes=EXCLUDED_TOPDOC_INDEXES,
             ui_top_k=ui_top_k,
-            forced_intent=forced_intent 
+            forced_intent=forced_intent,
+            index_names=index_names
         )
         final_answer = agent_result.get("final_answer", "응답을 생성하지 못했습니다.")
         citations_json = agent_result.get("citations", {"answer": [], "final": final_answer, "claims": []})
@@ -941,6 +943,64 @@ async def api_delete_goldenset_run(run_id: str, request: Request):
     if not ok:
         raise HTTPException(status_code=404, detail="run not found")
     return {"ok": True}
+
+
+@app.get("/api/eval/feedback-cases")
+async def api_eval_feedback_cases(request: Request, limit: int = Query(50)):
+    """👎 피드백 실패 사례 목록 (타 유저 질문이 노출되므로 관리자 전용)."""
+    user = _require_user(request)
+    if user not in ADMIN_USER_IDS:
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+    from app.eval_repo import get_feedback_cases
+    return {"cases": get_feedback_cases(limit=limit)}
+
+
+@app.post("/api/eval/goldenset/candidates")
+async def api_add_goldenset_candidate(request: Request):
+    """실패 사례를 골든셋 후보 문항으로 승격 (관리자 전용).
+
+    enabled=false로 추가되므로 평가 실행(CLI 전용)에는 곧바로 포함되지 않는다.
+    관리자가 goldenset.json에서 정답 doc_ids를 채운 뒤 enabled=true로 활성화하는 흐름.
+    """
+    import hashlib
+    user = _require_user(request)
+    if user not in ADMIN_USER_IDS:
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+    body = await request.json()
+    question = (body.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question required")
+
+    from app.goldenset_runner import GOLDENSET_PATH
+    data = {"items": []}
+    try:
+        if GOLDENSET_PATH.exists():
+            data = json.load(open(GOLDENSET_PATH, encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"goldenset.json 읽기 실패: {e}")
+    items = data.setdefault("items", [])
+
+    if any((it.get("question") or "").strip() == question for it in items):
+        return {"ok": False, "duplicated": True, "message": "이미 같은 질문의 문항이 있습니다."}
+
+    note = (body.get("note") or "").strip()
+    item = {
+        "id": f"fb-{hashlib.sha1(question.encode('utf-8')).hexdigest()[:8]}",
+        "question": question,
+        "expected_intent": (body.get("expected_intent") or "").strip(),
+        "expected_doc_ids": [],
+        "expected_terms": [],
+        "enabled": False,
+        "notes": ("👎 피드백에서 승격" + (f": {note}" if note else "")
+                  + " — 정답 doc_ids를 채우고 enabled=true로 바꾸면 평가에 포함됩니다."),
+    }
+    items.append(item)
+    try:
+        with open(GOLDENSET_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"goldenset.json 저장 실패: {e}")
+    return {"ok": True, "item": item}
 
 
 # =========================

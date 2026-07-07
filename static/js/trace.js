@@ -707,5 +707,76 @@
     loadEval(days);
     loadGoldenset();
     loadKg();
+    if(window.__IS_ADMIN__ === true) loadFeedbackCases();
   });
+
+  /* ── 실패 사례 (👎 피드백, 관리자 전용) ───────────────── */
+  async function loadFeedbackCases(){
+    const box = $("fbCases");
+    if(!box) return;
+    let cases = [];
+    try {
+      const r = await fetch("/api/eval/feedback-cases?limit=50", { credentials: "include" });
+      if(!r.ok) throw new Error(String(r.status));
+      cases = (await r.json()).cases || [];
+    } catch(e){
+      box.innerHTML = `<div class="empty-note">실패 사례를 불러오지 못했습니다.</div>`;
+      return;
+    }
+    if(!cases.length){
+      box.innerHTML = `<div class="empty-note">👎 피드백이 아직 없습니다. 채팅 답변의 엄지 아래 버튼으로 수집됩니다.</div>`;
+      return;
+    }
+
+    const intentLabel = (it) => (INTENT_META[it] ? INTENT_META[it].label : (it || "—"));
+    const rows = cases.map((c, i) => `
+      <tr class="fb-case-row" data-i="${i}">
+        <td style="white-space:nowrap">${esc(String(c.created_at).slice(0,16))}</td>
+        <td>${esc(intentLabel(c.intent))}</td>
+        <td style="max-width:340px">${esc((c.question||"").slice(0,120))}</td>
+        <td style="max-width:220px;color:var(--color-secondary)">${esc((c.comment||"").slice(0,80) || "—")}</td>
+        <td><button class="fb-promote" data-i="${i}" title="goldenset.json에 비활성 문항으로 추가">골든셋 후보</button></td>
+      </tr>
+      <tr class="fb-case-answer" data-for="${i}" style="display:none">
+        <td colspan="5"><div class="fb-answer-body">${esc((c.answer||"(답변 없음)").slice(0,2000))}</div></td>
+      </tr>`).join("");
+
+    box.innerHTML = `<div class="gs-table"><table>
+      <thead><tr><th>시각</th><th>인텐트</th><th>질문</th><th>👎 코멘트</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+
+    box.querySelectorAll(".fb-case-row").forEach(tr => {
+      tr.addEventListener("click", (e) => {
+        if(e.target.closest(".fb-promote")) return;
+        const ans = box.querySelector(`.fb-case-answer[data-for="${tr.dataset.i}"]`);
+        if(ans) ans.style.display = (ans.style.display === "none") ? "" : "none";
+      });
+    });
+    box.querySelectorAll(".fb-promote").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const c = cases[parseInt(btn.dataset.i, 10)];
+        if(!c || !c.question) return;
+        btn.disabled = true;
+        try {
+          const r = await fetch("/api/eval/goldenset/candidates", {
+            method: "POST", credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ question: c.question, expected_intent: c.intent || "", note: c.comment || "" }),
+          });
+          const res = await r.json();
+          if(!r.ok) throw new Error(res.detail || String(r.status));
+          if(res.duplicated){
+            if(window.Toast) window.Toast.info ? window.Toast.info(res.message) : window.Toast.success(res.message);
+          } else {
+            if(window.Toast) window.Toast.success("골든셋 후보로 추가했습니다. goldenset.json에서 정답 문서를 채워 활성화하세요.");
+            btn.textContent = "추가됨 ✓";
+          }
+        } catch(err){
+          btn.disabled = false;
+          if(window.Toast) window.Toast.error("추가에 실패했습니다.");
+        }
+      });
+    });
+  }
 })();

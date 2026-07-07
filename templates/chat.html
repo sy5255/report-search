@@ -81,7 +81,15 @@
         <div class="panel flex flex-col flex-1 min-h-0" data-panel="topdocs">
             <div class="p-3 bg-surface-container-low border-b border-surface-container flex items-center justify-between z-10 shrink-0">
                 <div class="text-xs font-bold">Top Documents</div>
-                <button class="panel-max p-1 hover:bg-surface-container rounded" data-target="topdocs" aria-label="Top Documents 패널 확대">⤢</button>
+                <div class="flex items-center gap-1">
+                    <select id="topDocsShowN" class="text-[10px] bg-surface-container border border-surface-container rounded px-1 py-0.5" title="표시할 문서 개수">
+                        <option value="5" selected>5개</option>
+                        <option value="10">10개</option>
+                        <option value="20">20개</option>
+                        <option value="999">모두</option>
+                    </select>
+                    <button class="panel-max p-1 hover:bg-surface-container rounded" data-target="topdocs" aria-label="Top Documents 패널 확대">⤢</button>
+                </div>
             </div>
             <div id="topDocs" class="flex-1 min-h-0 overflow-y-auto p-3 space-y-3"></div>
         </div>
