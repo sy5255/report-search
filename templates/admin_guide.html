@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Admin - 분석 프로세스 가이드{% endblock %}
+
+{% block content %}
+<div class="flex flex-col w-full h-full bg-background overflow-hidden">
+    <div class="px-8 py-6 border-b border-surface-container bg-surface-container-lowest shrink-0 flex justify-between items-center z-10">
+        <div class="flex items-center gap-4">
+            <div class="p-2 bg-primary/10 text-primary rounded-lg">
+                <span class="material-symbols-outlined text-2xl">support_agent</span>
+            </div>
+            <div>
+                <h1 class="text-2xl font-extrabold font-manrope text-on-surface tracking-tight">분석 프로세스 가이드 편집</h1>
+                <p class="text-xs text-secondary mt-1 font-bold uppercase tracking-wider">'분석 프로세스 안내' 에이전트 답변 근거 문서 (guide.md)</p>
+            </div>
+        </div>
+        <button type="button" onclick="window.location.href='/chat'" class="px-4 py-2 bg-surface-container hover:bg-surface-container-high rounded-xl text-sm font-bold text-on-surface transition-colors flex items-center gap-2">
+            <span class="material-symbols-outlined text-sm">arrow_back</span>
+            돌아가기
+        </button>
+    </div>
+
+    <div class="flex-1 overflow-y-auto p-8">
+        <div class="max-w-4xl mx-auto">
+            <p class="text-sm text-secondary mb-4">
+                이 문서(Markdown)는 채팅의 '분석 프로세스 안내' 에이전트가 답변할 때 근거로 사용합니다.
+                분석 의뢰 방법 · 진행 절차 · 리드타임 · 모듈별 담당자 등을 작성하세요.
+                {% if not is_admin %}<span class="text-error font-bold">(읽기 전용 — 저장은 관리자만 가능합니다.)</span>{% endif %}
+            </p>
+            <textarea id="guideText" class="w-full h-[60vh] bg-surface-container-lowest border border-surface-container rounded-xl p-4 font-mono text-sm leading-relaxed focus:ring-1 focus:ring-primary resize-y" {% if not is_admin %}readonly{% endif %}>{{ guide_text }}</textarea>
+            <div class="flex items-center justify-end gap-3 mt-4">
+                <span id="guideStatus" class="text-xs text-secondary"></span>
+                <button id="guideSaveBtn" class="px-5 py-2 bg-primary text-on-primary rounded-xl font-bold text-sm hover:opacity-90 disabled:opacity-50 flex items-center gap-2" {% if not is_admin %}disabled{% endif %}>
+                    <span class="material-symbols-outlined text-sm">save</span> 저장
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  const btn = document.getElementById("guideSaveBtn");
+  const ta = document.getElementById("guideText");
+  const status = document.getElementById("guideStatus");
+  if(!btn || !ta) return;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    if(status) status.textContent = "저장 중...";
+    try {
+      const r = await fetch("/api/admin/guide", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: ta.value }),
+      });
+      if(!r.ok) throw new Error(String(r.status));
+      if(status) status.textContent = "저장되었습니다. ✓";
+    } catch(e){
+      if(status) status.textContent = "저장 실패 (관리자만 가능)";
+    } finally {
+      btn.disabled = false;
+    }
+  });
+})();
+</script>
+{% endblock %}

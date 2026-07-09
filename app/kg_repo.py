@@ -369,6 +369,74 @@ def build_report_analysis_context(report_indexes: list, max_reports: int = 5,
     }
 
 
+def get_term_network(term_id: int, top_n: int = 16) -> dict:
+    """그래프 탐색기(V2)용 2-hop 네트워크: 중심+이웃 노드 + 이웃끼리 엣지.
+
+    반환:
+      center: {term_id, canonical_name, term_type, docs_count, reports_count}
+      nodes : [{term_id, canonical_name, term_type, weight(co_doc+co_report), docs_count, reports_count}]
+              (중심 이웃 상위 top_n, weight 내림차순)
+      edges : [{a, b, weight}]  — 중심↔이웃 + 이웃↔이웃(kg_term_edge에 존재하는 쌍만)
+    """
+    ov = get_term_overview(term_id, top_n=top_n)
+    center = {
+        "term_id": term_id,
+        "canonical_name": None,
+        "term_type": None,
+        "docs_count": ov.get("docs_count", 0),
+        "reports_count": ov.get("reports_count", 0),
+    }
+    co = ov.get("co_terms") or []
+    if not co:
+        return {"center": center, "nodes": [], "edges": []}
+
+    nodes = []
+    id_set = set()
+    for c in co:
+        tid = c.get("term_id")
+        if tid is None or tid in id_set:
+            continue
+        id_set.add(tid)
+        nodes.append({
+            "term_id": tid,
+            "canonical_name": c.get("canonical_name") or f"#{tid}",
+            "term_type": c.get("term_type") or "",
+            "weight": int(c.get("co_doc_count") or 0) + int(c.get("co_report_count") or 0),
+            "docs_count": int(c.get("co_doc_count") or 0),
+            "reports_count": int(c.get("co_report_count") or 0),
+        })
+
+    edges = [{"a": term_id, "b": c["term_id"],
+              "weight": int(c.get("co_doc_count") or 0) + int(c.get("co_report_count") or 0)}
+             for c in co if c.get("term_id") in id_set]
+
+    # 이웃↔이웃 엣지 (2-hop): kg_term_edge에서 두 끝점이 모두 이웃 집합에 있는 쌍
+    neigh = [n["term_id"] for n in nodes]
+    if len(neigh) >= 2:
+        try:
+            conn = get_conn()
+            cur = conn.cursor(dictionary=True)
+            ph = ",".join(["%s"] * len(neigh))
+            cur.execute(
+                f"""SELECT term_a, term_b, co_doc_count, co_report_count
+                    FROM kg_term_edge
+                    WHERE term_a IN ({ph}) AND term_b IN ({ph})""",
+                tuple(neigh) + tuple(neigh),
+            )
+            for r in (cur.fetchall() or []):
+                a, b = r["term_a"], r["term_b"]
+                if a == b:
+                    continue
+                edges.append({"a": a, "b": b,
+                              "weight": int(r.get("co_doc_count") or 0) + int(r.get("co_report_count") or 0)})
+            cur.close()
+            conn.close()
+        except Exception as e:
+            print(f"[KG] get_term_network 이웃 엣지 조회 실패(무시): {e}")
+
+    return {"center": center, "nodes": nodes, "edges": edges}
+
+
 def get_term_overview(term_id: int, top_n: int = 10) -> dict:
     """용어 허브용: 관련 문서/보고서 수 + 상위 문서 + 동시출현 용어 (Phase 3 UI 대비 API)."""
     out = {"term_id": term_id, "docs_count": 0, "reports_count": 0, "top_docs": [], "co_terms": [], "top_reports": []}

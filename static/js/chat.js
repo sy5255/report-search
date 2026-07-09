@@ -1111,7 +1111,7 @@ function renderWelcomeScreen(){
   const suggestions = [
     { icon: "monitoring",   text: "최근 3개월 동안 가장 많이 발생한 불량명 순위 5개",          hint: "DB 통계" },
     { icon: "description",  text: "Wet Etch 공정에서 파티클 불량의 주요 원인과 가이드를 찾아줘", hint: "문서 검색" },
-    { icon: "auto_awesome", text: "어제 등록된 IFA 보고서 중 양산 관련된 내용을 요약해줘",      hint: "하이브리드" }
+    { icon: "support_agent", text: "불량 분석은 어떻게 의뢰하고 진행되나요?",                   hint: "분석 프로세스 안내" }
   ];
 
   const chipsHtml = suggestions.map(s => `
@@ -1173,12 +1173,13 @@ async function loadSession(sessionId){
     }
     // 어시스턴트(LLM)의 과거 메시지일 경우 인텐트/액션 데이터 복구
     else if (m.role === "assistant") {
-      if (m.intent || (m.suggested_actions && m.suggested_actions.length > 0) || (m.related_docs && m.related_docs.length > 0) || m.feedback) {
+      if (m.intent || (m.suggested_actions && m.suggested_actions.length > 0) || (m.related_docs && m.related_docs.length > 0) || (m.charts && m.charts.length > 0) || m.feedback) {
         extra = {
           intent: m.intent,
           suggested_actions: m.suggested_actions,
           agent_steps: m.agent_steps,
           related_docs: m.related_docs || [],
+          charts: m.charts || [],
           feedback: m.feedback || null,
           raw_markdown: m.content
         };
@@ -1252,6 +1253,7 @@ function appendMessage(role, content, metaText, msgId, extra = null){
   let stepsHtml = "";
   let actionBarHtml = "";
   let verifyHtml = "";
+  let chartsHtml = "";
   const isPending = typeof msgId === "string" && msgId.startsWith("PENDING_");
 
   if(role === "user" && extra) {
@@ -1374,6 +1376,11 @@ function appendMessage(role, content, metaText, msgId, extra = null){
         </div>`;
     }
 
+    // 📈 차트: draw_chart 툴이 생성한 시각화 스펙을 SVG로 렌더
+    if(extra.charts && extra.charts.length){
+      chartsHtml = `<div class="msg-charts mt-4 space-y-4">${extra.charts.map(renderChartSvg).join("")}</div>`;
+    }
+
     // 🔗 KG: DB 통계와 연결된 원본 보고서 문서 칩
     let kgChipHtml = "";
     if(extra.related_docs && extra.related_docs.length){
@@ -1427,6 +1434,7 @@ function appendMessage(role, content, metaText, msgId, extra = null){
             <div class="content markdown-body text-sm leading-relaxed text-on-surface dark:text-[#e7eefc]">
                 ${renderMessageContent(role, content)}
             </div>
+            ${chartsHtml}
             ${actionBarHtml}
             ${chipsHtml}
         </div>
@@ -1635,6 +1643,118 @@ function pickMailMeta(af){
     : [];
 
   return { mailFrom, mailDate, edmLinks };
+}
+
+/* ---------- 차트 렌더 (draw_chart 스펙 → 인라인 SVG) ----------
+   색은 Cognitive Trace에서 dataviz 스킬로 검증된 chart-1~5 팔레트를 재사용한다
+   (chat.css에 --chart-1~5 정의, light/dark 별도). 값은 직접 라벨, 텍스트는 잉크 토큰. */
+const CHART_PALETTE = ["var(--chart-1)","var(--chart-2)","var(--chart-3)","var(--chart-4)","var(--chart-5)"];
+
+function _niceNum(v){
+  const n = Number(v);
+  if(!isFinite(n)) return "0";
+  if(Math.abs(n) >= 1000) return n.toLocaleString();
+  return (Math.round(n * 100) / 100).toString();
+}
+
+function renderChartSvg(spec){
+  if(!spec || !Array.isArray(spec.series) || !spec.series.length) return "";
+  const type = spec.chart_type || "bar";
+  const title = spec.title || "";
+  const s = spec.series.slice(0, 12);
+  const head = title ? `<div class="msg-chart-title">${escapeHtml(title)}</div>` : "";
+  let body = "";
+  if(type === "pie"){
+    body = _pieSvg(s);
+  } else if(type === "line"){
+    body = _lineSvg(s, spec);
+  } else {
+    body = _barSvg(s, spec);
+  }
+  return `<figure class="msg-chart">${head}${body}</figure>`;
+}
+
+function _axisMax(vals){
+  const mx = Math.max(0, ...vals);
+  if(mx <= 0) return 1;
+  const pow = Math.pow(10, Math.floor(Math.log10(mx)));
+  return Math.ceil(mx / pow) * pow;
+}
+
+function _barSvg(s, spec){
+  const W = 520, H = 260, padL = 44, padR = 16, padT = 12, padB = 54;
+  const iw = W - padL - padR, ih = H - padT - padB;
+  const vals = s.map(d => Number(d.value) || 0);
+  const max = _axisMax(vals);
+  const bw = iw / s.length;
+  const barW = Math.min(46, bw * 0.62);
+  let grid = "";
+  for(let g=0; g<=4; g++){
+    const y = padT + ih * (g/4);
+    const val = max * (1 - g/4);
+    grid += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" class="mc-grid"/>`;
+    grid += `<text x="${padL-6}" y="${(y+3).toFixed(1)}" class="mc-axis" text-anchor="end">${escapeHtml(_niceNum(val))}</text>`;
+  }
+  const bars = s.map((d, i) => {
+    const v = Number(d.value) || 0;
+    const bh = ih * (v / max);
+    const x = padL + bw * i + (bw - barW) / 2;
+    const y = padT + ih - bh;
+    const color = CHART_PALETTE[i % CHART_PALETTE.length];
+    const label = String(d.label || "");
+    const short = label.length > 7 ? label.slice(0,7)+"…" : label;
+    return `<g>
+      <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0,bh).toFixed(1)}" rx="4" fill="${color}"><title>${escapeHtml(label)}: ${escapeHtml(_niceNum(v))}</title></rect>
+      <text x="${(x+barW/2).toFixed(1)}" y="${(y-5).toFixed(1)}" class="mc-val" text-anchor="middle">${escapeHtml(_niceNum(v))}</text>
+      <text x="${(x+barW/2).toFixed(1)}" y="${(padT+ih+16).toFixed(1)}" class="mc-cat" text-anchor="middle" transform="rotate(0)">${escapeHtml(short)}</text>
+    </g>`;
+  }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="mc-svg" role="img" aria-label="${escapeHtml(spec.title||'막대 차트')}">${grid}${bars}</svg>`;
+}
+
+function _lineSvg(s, spec){
+  const W = 520, H = 250, padL = 44, padR = 16, padT = 14, padB = 44;
+  const iw = W - padL - padR, ih = H - padT - padB;
+  const vals = s.map(d => Number(d.value) || 0);
+  const max = _axisMax(vals);
+  const xAt = i => padL + (s.length === 1 ? iw/2 : iw * i/(s.length-1));
+  const yAt = v => padT + ih * (1 - v/max);
+  let grid = "";
+  for(let g=0; g<=4; g++){
+    const y = padT + ih*(g/4);
+    grid += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" class="mc-grid"/>`;
+    grid += `<text x="${padL-6}" y="${(y+3).toFixed(1)}" class="mc-axis" text-anchor="end">${escapeHtml(_niceNum(max*(1-g/4)))}</text>`;
+  }
+  const pts = s.map((d,i) => `${xAt(i).toFixed(1)},${yAt(Number(d.value)||0).toFixed(1)}`).join(" ");
+  const dots = s.map((d,i) => {
+    const v = Number(d.value)||0;
+    const label = String(d.label||"");
+    return `<g>
+      <circle cx="${xAt(i).toFixed(1)}" cy="${yAt(v).toFixed(1)}" r="4.5" fill="var(--chart-1)" stroke="var(--color-surface)" stroke-width="2"><title>${escapeHtml(label)}: ${escapeHtml(_niceNum(v))}</title></circle>
+      <text x="${xAt(i).toFixed(1)}" y="${(padT+ih+16).toFixed(1)}" class="mc-cat" text-anchor="middle">${escapeHtml(label.length>7?label.slice(0,7)+"…":label)}</text>
+    </g>`;
+  }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="mc-svg" role="img" aria-label="${escapeHtml(spec.title||'꺾은선 차트')}">${grid}<polyline points="${pts}" fill="none" stroke="var(--chart-1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>${dots}</svg>`;
+}
+
+function _pieSvg(s){
+  const total = s.reduce((a,d)=>a+(Number(d.value)||0),0) || 1;
+  const cx=90, cy=90, r=78, ir=44;
+  let ang = -Math.PI/2;
+  const arcs = s.map((d,i)=>{
+    const frac = (Number(d.value)||0)/total;
+    const a2 = ang + frac*2*Math.PI;
+    const large = frac > 0.5 ? 1 : 0;
+    const x1=cx+r*Math.cos(ang), y1=cy+r*Math.sin(ang);
+    const x2=cx+r*Math.cos(a2), y2=cy+r*Math.sin(a2);
+    const xi1=cx+ir*Math.cos(a2), yi1=cy+ir*Math.sin(a2);
+    const xi2=cx+ir*Math.cos(ang), yi2=cy+ir*Math.sin(ang);
+    ang = a2;
+    const color = CHART_PALETTE[i % CHART_PALETTE.length];
+    return `<path d="M${x1.toFixed(1)},${y1.toFixed(1)} A${r},${r} 0 ${large} 1 ${x2.toFixed(1)},${y2.toFixed(1)} L${xi1.toFixed(1)},${yi1.toFixed(1)} A${ir},${ir} 0 ${large} 0 ${xi2.toFixed(1)},${yi2.toFixed(1)} Z" fill="${color}" stroke="var(--color-surface)" stroke-width="2"><title>${escapeHtml(String(d.label||""))}: ${escapeHtml(_niceNum(d.value))} (${Math.round(frac*100)}%)</title></path>`;
+  }).join("");
+  const legend = s.map((d,i)=>`<div class="mc-leg-item"><span class="mc-leg-dot" style="background:${CHART_PALETTE[i%CHART_PALETTE.length]}"></span>${escapeHtml(String(d.label||""))} <span class="mc-leg-val">${escapeHtml(_niceNum(d.value))}</span></div>`).join("");
+  return `<div class="mc-pie-wrap"><svg viewBox="0 0 180 180" class="mc-pie" role="img">${arcs}</svg><div class="mc-legend">${legend}</div></div>`;
 }
 
 /* ---------- TopDocs render ---------- */

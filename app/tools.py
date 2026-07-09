@@ -44,6 +44,35 @@ TOOLS_SCHEMA = [
                 "required": ["query", "intent"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "draw_chart",
+            "description": "DB 조회로 얻은 통계·순위·추이 수치를 차트로 시각화합니다. 마크다운 표로 답할 때 함께 호출하면 사용자가 한눈에 이해합니다. 막대(bar)는 순위·비교, 꺾은선(line)은 시간 추이, 원형(pie)은 구성비에 사용하세요. 반드시 query_database로 실제 수치를 확인한 뒤 그 값으로 호출하세요.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "chart_type": {"type": "string", "enum": ["bar", "line", "pie"], "description": "차트 종류"},
+                    "title": {"type": "string", "description": "차트 제목"},
+                    "x_label": {"type": "string", "description": "x축 이름 (선택)"},
+                    "y_label": {"type": "string", "description": "y축 이름 (선택)"},
+                    "series": {
+                        "type": "array",
+                        "description": "데이터 포인트 목록 (2~12개 권장)",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": {"type": "string", "description": "항목 이름 (예: 불량명, 월)"},
+                                "value": {"type": "number", "description": "수치"}
+                            },
+                            "required": ["label", "value"]
+                        }
+                    }
+                },
+                "required": ["chart_type", "title", "series"]
+            }
+        }
     }
 ]
 

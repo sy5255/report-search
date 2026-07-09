@@ -98,6 +98,22 @@
   .kg-edge { stroke: var(--color-outline-variant); }
   .kg-center-label { font-size: 13px; font-weight: 800; fill: var(--color-on-surface); }
 
+  /* 네트워크 그래프(V2: 2-hop) */
+  .kg-net-svg { width: 100%; height: 100%; display: block; }
+  .kg-edge-c { stroke: var(--chart-1); }
+  .kg-edge-2hop { stroke: var(--color-secondary); }
+  .kg-node-label { font-size: 10px; fill: var(--color-on-surface); pointer-events: none; font-weight: 600; }
+  .kg-node-center circle { filter: drop-shadow(0 2px 6px color-mix(in srgb, var(--chart-1) 45%, transparent)); }
+  .kg-net-enter { animation: kgNetIn var(--duration-med, 0.32s) var(--ease-out-soft, ease-out); }
+  @keyframes kgNetIn { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
+  /* 유형 필터 칩 */
+  .kg-type-filter { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+  .kg-type-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+    padding: 3px 10px; border-radius: 999px; border: 1px solid var(--color-outline-variant);
+    color: var(--color-secondary); opacity: 0.5; transition: opacity var(--duration-fast) var(--ease-out-soft); }
+  .kg-type-chip.is-on { opacity: 1; color: var(--color-on-surface); background: var(--color-surface-container-low); }
+  .kg-type-chip .dot { width: 9px; height: 9px; border-radius: 3px; }
+
   .kg-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
   .kg-side-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .kg-side-title { font-family: var(--font-display); font-weight: 800; font-size: 15px; }
@@ -308,6 +324,7 @@
         <div id="kgTermSuggest" class="kg-suggest" style="display:none"></div>
         <div id="kgTopChips" class="kg-chips"></div>
       </div>
+      <div id="kgTypeFilter" class="kg-type-filter"></div>
       <div class="kg-explorer-body">
         <div id="kgGraph" class="kg-graph"><div class="empty-note" style="padding-top:170px">상단에서 용어를 선택하세요</div></div>
         <div id="kgSide" class="kg-side"></div>

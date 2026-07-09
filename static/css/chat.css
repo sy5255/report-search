@@ -1318,3 +1318,32 @@ mark.archive-highlight {
   30%      { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-rag, #0891b2) 55%, transparent); }
 }
 .kg-flash { animation: kgFlash 1.6s var(--ease-out-soft, ease-out); }
+
+/* ── 채팅 차트 (draw_chart) ─────────────────────────────
+   팔레트는 Cognitive Trace(dataviz 검증)의 chart-1~5와 동일 값. light/dark 별도. */
+:root {
+  --chart-1: #0891b2; --chart-2: #7c3aed; --chart-3: #b45309; --chart-4: #2563eb; --chart-5: #be185d;
+}
+.dark {
+  --chart-1: #0d9488; --chart-2: #8b5cf6; --chart-3: #d97706; --chart-4: #3b82f6; --chart-5: #ec4899;
+}
+.msg-chart {
+  margin: 0; padding: 14px 14px 10px; border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 12px; background: var(--color-surface, #fff); overflow-x: auto;
+}
+.dark .msg-chart { background: #0f1a33; border-color: #1f2b4a; }
+.msg-chart-title { font-size: 12px; font-weight: 700; margin-bottom: 8px; color: var(--color-on-surface, #0f172a); }
+.dark .msg-chart-title { color: #e7eefc; }
+.mc-svg { width: 100%; max-width: 560px; height: auto; display: block; }
+.mc-grid { stroke: color-mix(in srgb, currentColor 10%, transparent); stroke-width: 1; color: #64748b; }
+.mc-axis { font-size: 9px; fill: var(--color-secondary, #64748b); }
+.mc-cat  { font-size: 10px; fill: var(--color-secondary, #64748b); }
+.mc-val  { font-size: 10px; font-weight: 700; fill: var(--color-on-surface, #0f172a); }
+.dark .mc-val { fill: #e7eefc; }
+.mc-pie-wrap { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.mc-pie { width: 160px; height: 160px; }
+.mc-legend { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--color-on-surface, #0f172a); }
+.dark .mc-legend { color: #e7eefc; }
+.mc-leg-item { display: flex; align-items: center; gap: 6px; }
+.mc-leg-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.mc-leg-val { color: var(--color-secondary, #64748b); font-variant-numeric: tabular-nums; }

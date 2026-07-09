@@ -23,21 +23,28 @@ def _call_intent_router(client, user_query: str) -> str:
         return "RAG_KNOWLEDGE"
     if user_query.startswith("[REPORT_ANALYSIS]"):
         return "REPORT_ANALYSIS"
+    if user_query.startswith("[PROCESS_GUIDE]"):
+        return "PROCESS_GUIDE"
 
     router_prompt = """
     당신은 반도체 불량 분석 시스템의 '의도 분류 라우터(Router)'입니다.
-    사용자의 질문을 읽고 반드시 다음 4가지 인텐트 중 딱 하나만 텍스트로 반환하세요. (다른 말은 절대 금지)
+    사용자의 질문을 읽고 반드시 다음 5가지 인텐트 중 딱 하나만 텍스트로 반환하세요. (다른 말은 절대 금지)
 
     [인텐트 종류]
     1. "DB_ANALYSIS": 불량 발생 건수, 통계, 순위, 리스트 등 DB 데이터를 조회해야 하는 경우
     2. "RAG_KNOWLEDGE": 특정 불량의 발생 원리, 가이드, 해결책 등 기술 문서를 찾아야 하는 경우
     3. "HYBRID_DB_RAG": 통계 조회와 문서(원리) 검색이 모두 필요한 경우
     4. "GENERAL_CHAT": 안부 인사, 단순 대화 등 도구 검색이 필요 없는 경우
+    5. "PROCESS_GUIDE": 분석 '의뢰 방법', 진행 '절차/프로세스', 리드타임, 담당자 배정 등 사내 분석 업무
+       운영 안내를 묻는 경우. (불량의 원인·분석 내용이 아니라 '어떻게 의뢰/진행하는가'를 물을 때)
 
     [출력 예시]
     사용자: "최근 3개월 sf2 불량 순위" -> 출력: DB_ANALYSIS
     사용자: "파티클 원인이 뭐야?" -> 출력: RAG_KNOWLEDGE
     사용자: "안녕 반가워" -> 출력: GENERAL_CHAT
+    사용자: "불량 분석은 어떻게 의뢰하나요?" -> 출력: PROCESS_GUIDE
+    사용자: "FA 분석 진행 프로세스 알려줘" -> 출력: PROCESS_GUIDE
+    사용자: "BEOL 모듈 담당자 누구야?" -> 출력: PROCESS_GUIDE
     """
     try:
         response = client.chat.completions.create(
@@ -59,7 +66,8 @@ def _call_intent_router(client, user_query: str) -> str:
         
         # REPORT_ANALYSIS는 자동 라우팅 대상이 아님 (명시적 [REPORT_ANALYSIS] 칩/프리픽스로만 발동).
         # 아래 LLM 자동 분류에는 포함하지 않아 일반 질문이 DB 전용 경로로 새는 것을 방지.
-        if "DB_ANALYSIS" in intent: return "DB_ANALYSIS"
+        if "PROCESS_GUIDE" in intent: return "PROCESS_GUIDE"
+        elif "DB_ANALYSIS" in intent: return "DB_ANALYSIS"
         elif "RAG_KNOWLEDGE" in intent: return "RAG_KNOWLEDGE"
         elif "GENERAL_CHAT" in intent: return "GENERAL_CHAT"
         elif "HYBRID_DB_RAG" in intent: return "HYBRID_DB_RAG"
@@ -166,6 +174,22 @@ def _get_specialist_prompt(intent: str, current_date: str) -> str:
         """
         return base_persona + db_schema + rag_rules + hybrid_specific + hybrid_action_rule + "\n- 당신은 '통합 분석 Agent'로서 모든 도구를 사용하세요."
         
+    elif intent == "PROCESS_GUIDE":
+        from app.guide_repo import load_guide
+        guide_text = load_guide()
+        process_guide_rule = f"""
+        [분석 프로세스 안내 Agent 규칙 - 절대 엄수]
+        - 당신은 '분석 프로세스 안내' 담당입니다. 사내 불량 분석의 '의뢰 방법·진행 절차·리드타임·담당자' 등
+          운영 안내를 답합니다. (불량의 기술적 원인·분석 결과가 아니라 업무 프로세스입니다.)
+        - ⭐️ 반드시 아래 [분석 안내 문서]의 내용에만 근거해서 답하세요. 문서에 없는 내용은 지어내지 말고
+          "해당 내용은 안내 문서에 아직 없습니다. 담당 부서에 문의해 주세요."라고 정직하게 답하세요.
+        - 표가 필요하면 간단한 마크다운 표를, 절차는 번호 목록을 사용해 읽기 쉽게 정리하세요.
+
+        [분석 안내 문서]
+        {guide_text}
+        """
+        return base_persona + process_guide_rule
+
     else: # GENERAL_CHAT
         general_chat_rule = """
         [GENERAL CHAT 전문가 엄격 규칙]
@@ -241,6 +265,7 @@ INTENT_LABELS = {
     "HYBRID_DB_RAG": "통계 + 문서 통합 분석",
     "GENERAL_CHAT": "일반 대화",
     "REPORT_ANALYSIS": "보고서 심층분석",
+    "PROCESS_GUIDE": "분석 프로세스 안내",
 }
 
 def _intent_label(intent: str) -> str:
@@ -322,6 +347,36 @@ def _dedupe_and_filter_hits(hits: list[dict], excluded_indexes: set) -> list[dic
     out = list(best.values())
     out.sort(key=lambda x: (-(x.get("_score") or 0), (x.get("_rank") or 10**9)))
     return out
+
+def _sanitize_chart_spec(args: dict) -> dict | None:
+    """draw_chart 인자를 안전한 차트 스펙으로 정규화. 유효하지 않으면 None.
+    프론트가 이 스펙으로 결정적으로 SVG를 그린다(수치는 LLM이 지정한 값 그대로)."""
+    if not isinstance(args, dict):
+        return None
+    ctype = str(args.get("chart_type") or "bar").lower()
+    if ctype not in ("bar", "line", "pie"):
+        ctype = "bar"
+    series = []
+    for p in (args.get("series") or [])[:12]:
+        if not isinstance(p, dict):
+            continue
+        label = str(p.get("label") or "").strip()
+        try:
+            value = float(p.get("value"))
+        except (TypeError, ValueError):
+            continue
+        if label:
+            series.append({"label": label[:40], "value": value})
+    if len(series) < 1:
+        return None
+    return {
+        "chart_type": ctype,
+        "title": str(args.get("title") or "").strip()[:120],
+        "x_label": str(args.get("x_label") or "").strip()[:40],
+        "y_label": str(args.get("y_label") or "").strip()[:40],
+        "series": series,
+    }
+
 
 def _to_ui_doc_from_hit(h: dict) -> dict:
     src = h.get("_source") or {}
@@ -434,25 +489,30 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
 
     # [2. 무기 압수 (Tools 필터링)]
     available_tools = TOOLS_SCHEMA
-    if intent in ("DB_ANALYSIS", "REPORT_ANALYSIS"):
+    if intent == "DB_ANALYSIS":
+        available_tools = [t for t in TOOLS_SCHEMA if t["function"]["name"] in ("query_database", "draw_chart")]
+    elif intent == "REPORT_ANALYSIS":
         available_tools = [t for t in TOOLS_SCHEMA if t["function"]["name"] == "query_database"]
     elif intent == "RAG_KNOWLEDGE":
         available_tools = [t for t in TOOLS_SCHEMA if t["function"]["name"] == "search_documents"]
+    elif intent == "PROCESS_GUIDE":
+        available_tools = []  # 도구 없이 가이드 문서 근거로 직접 답변
 
     MAX_STEPS = 10
     all_collected_hits = []
     used_db = False
     db_tool_results = []
     collected_report_indexes = set()
+    collected_charts = []
 
     for step in range(MAX_STEPS):
-        response = client.chat.completions.create(
-            model="openai/gpt-oss-120b",
-            messages=messages,
-            tools=available_tools,
-            tool_choice="auto",
-            temperature=0.0
-        )
+        # 도구가 없는 인텐트(PROCESS_GUIDE 등)는 tools 인자를 아예 넘기지 않는다
+        # (빈 tools 배열이 일부 백엔드에서 오류를 내는 것을 방지).
+        completion_kwargs = dict(model="openai/gpt-oss-120b", messages=messages, temperature=0.0)
+        if available_tools:
+            completion_kwargs["tools"] = available_tools
+            completion_kwargs["tool_choice"] = "auto"
+        response = client.chat.completions.create(**completion_kwargs)
         
         ai_message = response.choices[0].message
         messages.append(ai_message)
@@ -474,6 +534,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                 if not parsed_thought:
                     if func_name == "query_database": parsed_thought = "📊 DB에서 통계 데이터를 찾아보고 있어요..."
                     elif func_name == "search_documents": parsed_thought = "📖 사내 기술 문서를 찾아보고 있어요..."
+                    elif func_name == "draw_chart": parsed_thought = "📈 결과를 차트로 그리고 있어요..."
 
                 # 💡 파라미터 파싱 및 SQL 추출 (Technical Detail 구성)
                 try:
@@ -497,6 +558,20 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                         tech_detail = (f"[Tool] {func_name}\n[검색 쿼리(용어사전 확장)]\n{user_query}"
                                        f"\n[LLM 제안 쿼리(미사용)]\n{llm_query}")
                     args["query"] = user_query
+
+                # 💡 [차트 툴] 실제 검색/DB 조회가 아니라 시각화 스펙 수집. 렌더는 클라이언트가
+                # 스펙으로 결정적으로 그리므로(LLM은 값만 지정) 할루시네이션 없음.
+                if func_name == "draw_chart":
+                    spec = _sanitize_chart_spec(args)
+                    if spec:
+                        collected_charts.append(spec)
+                        tech_detail = (f"[Tool] draw_chart\n[Chart] {spec.get('chart_type')} · "
+                                       f"{spec.get('title')} ({len(spec.get('series') or [])}개 항목)")
+                    yield yield_step(thought=parsed_thought, tech_detail=tech_detail)
+                    messages.append({"role": "tool", "tool_call_id": tool_call.id,
+                                     "content": ("차트를 생성했습니다. 이제 표와 서술로 답변을 이어서 작성하세요."
+                                                 if spec else "차트 데이터가 유효하지 않아 건너뜁니다.")})
+                    continue
 
                 # 프론트엔드로 Thought와 Tech_detail 발사!
                 yield yield_step(thought=parsed_thought, tech_detail=tech_detail)
@@ -741,6 +816,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                 "citations": citations_json,
                 "top_docs": top_docs_ui,
                 "related_docs": related_docs,
+                "charts": collected_charts,
                 "steps": execution_steps,
                 "verification": verification,
             }

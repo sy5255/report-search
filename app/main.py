@@ -146,6 +146,32 @@ async def admin_dictionary_page(request: Request):
     })
 
 
+@app.get("/admin/guide", response_class=HTMLResponse)
+async def admin_guide_page(request: Request):
+    user = _require_user(request)
+    from app.guide_repo import load_guide
+    return templates.TemplateResponse("admin_guide.html", {
+        "request": request,
+        "user_id": user,
+        "active_tab": "admin",
+        "is_admin": user in ADMIN_USER_IDS,
+        "guide_text": load_guide(),
+    })
+
+
+@app.post("/api/admin/guide")
+async def api_save_guide(request: Request):
+    """분석 프로세스 가이드 문서 저장 (관리자 전용)."""
+    user = _require_user(request)
+    if user not in ADMIN_USER_IDS:
+        raise HTTPException(status_code=403, detail="가이드 편집은 관리자 권한이 필요합니다.")
+    body = await request.json()
+    from app.guide_repo import save_guide
+    if not save_guide(body.get("text") or ""):
+        raise HTTPException(status_code=500, detail="가이드 저장에 실패했습니다.")
+    return {"ok": True}
+
+
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request):
     user = _require_user(request)
@@ -242,6 +268,7 @@ async def api_get_session_messages(session_id: str, request: Request):
             m["suggested_actions"] = rag_info.get("suggested_actions", [])
             m["agent_steps"] = rag_info.get("agent_steps", [])
             m["related_docs"] = rag_info.get("related_docs", [])
+            m["charts"] = rag_info.get("charts", [])
             m["feedback"] = feedback_map.get(ast_id)
 
     return {"messages": msgs, "search_logs_by_user_msg_id": search_log_by_user_msg_id}
@@ -416,6 +443,7 @@ async def api_chat_stream(request: Request):
                 "expansion_terms": query_norm.get("expansion_terms") or {},
                 "top_docs": final_data.get("top_docs", []),
                 "related_docs": final_data.get("related_docs", []),
+                "charts": final_data.get("charts", []),
                 "intent" : final_data.get("intent"),
                 "suggested_actions" : final_data.get("suggested_actions", []),
                 "agent_steps" : final_data.get("steps", []),
@@ -475,7 +503,8 @@ async def api_chat_stream(request: Request):
                 "suggested_actions": final_data.get("suggested_actions", []),
                 "agent_steps": final_data.get("steps", []),
                 "verification": final_data.get("verification", {}),
-                "related_docs": final_data.get("related_docs", [])
+                "related_docs": final_data.get("related_docs", []),
+                "charts": final_data.get("charts", [])
             }
             yield json.dumps({"type": "final", "data": final_res_payload}, ensure_ascii=False) + "\n"
 
@@ -578,6 +607,7 @@ async def api_chat(request: Request):
         citations_json = agent_result.get("citations", {"answer": [], "final": final_answer, "claims": []})
         top_docs_ui = agent_result.get("top_docs", [])
         related_docs = agent_result.get("related_docs", [])
+        charts = agent_result.get("charts", [])
 
         intent = agent_result.get("intent")
         suggested_actions = agent_result.get("suggested_actions", [])
@@ -597,6 +627,7 @@ async def api_chat(request: Request):
         intent = "GENERAL_CHAT"
         suggested_actions = []
         related_docs = []
+        charts = []
         agent_steps = [f"❌ 시스템 에러 발생: {str(e)}"]
 
     assistant_msg_id = repo.insert_message(session_id, user, "assistant", final_answer)
@@ -611,6 +642,7 @@ async def api_chat(request: Request):
         "expansion_terms": query_norm.get("expansion_terms") or {},
         "top_docs": top_docs_ui,
         "related_docs": related_docs,
+        "charts": charts,
         "intent" : intent,
         "suggested_actions" : suggested_actions,
         "agent_steps" : agent_steps
@@ -1022,6 +1054,14 @@ async def api_kg_term(term_id: int, request: Request):
     _require_user(request)
     from app.kg_repo import get_term_overview
     return get_term_overview(term_id)
+
+
+@app.get("/api/kg/network")
+async def api_kg_network(request: Request, term_id: int = Query(...)):
+    """그래프 탐색기(2-hop): 중심+이웃 노드 + 이웃끼리 엣지."""
+    _require_user(request)
+    from app.kg_repo import get_term_network
+    return get_term_network(term_id)
 
 
 @app.get("/api/kg/links")

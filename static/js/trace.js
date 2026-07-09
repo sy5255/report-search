@@ -398,61 +398,125 @@
     return el;
   }
 
-  function renderEgoGraph(center, coTerms){
+  // 그래프 탐색기 상태: 마지막 네트워크 데이터 + 유형 필터
+  let lastNetwork = null;          // { center, nodes, edges }
+  let activeTypes = null;          // null = 전체 표시, Set = 표시할 유형
+
+  function _typeKey(t){ return TYPE_COLORS[t] ? t : "기타"; }
+
+  function renderTypeFilter(nodes){
+    const host = $("kgTypeFilter");
+    if(!host) return;
+    const present = [];
+    const seen = new Set();
+    (nodes || []).forEach(n => { const k = _typeKey(n.term_type); if(!seen.has(k)){ seen.add(k); present.push(k); } });
+    if(!present.length){ host.innerHTML = ""; return; }
+    const nameOf = { defect:"불량", chemistry:"성분", process:"공정", node:"노드", "기타":"기타" };
+    host.innerHTML = present.map(k => {
+      const on = !activeTypes || activeTypes.has(k);
+      const col = k === "기타" ? "var(--color-secondary)" : TYPE_COLORS[k];
+      return `<button class="kg-type-chip ${on?"is-on":""}" data-type="${esc(k)}" type="button">
+        <span class="dot" style="background:${col}"></span>${esc(nameOf[k]||k)}</button>`;
+    }).join("");
+    host.querySelectorAll(".kg-type-chip").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const k = btn.getAttribute("data-type");
+        const keys = present.slice();
+        if(!activeTypes) activeTypes = new Set(keys);   // 첫 클릭: 전체에서 시작
+        if(activeTypes.has(k)) activeTypes.delete(k); else activeTypes.add(k);
+        if(activeTypes.size === 0 || activeTypes.size === keys.length) activeTypes = null; // 전체
+        if(lastNetwork) renderNetworkGraph(lastNetwork, { keepFade: false });
+      });
+    });
+  }
+
+  function _visible(type){ return !activeTypes || activeTypes.has(_typeKey(type)); }
+
+  function renderNetworkGraph(net, opts){
     const box = $("kgGraph");
     if(!box) return;
+    lastNetwork = net;
     box.innerHTML = "";
-    const W = 640, H = 380, CX = W / 2, CY = H / 2;
-    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img",
-      "aria-label": `${center.name} 중심 동시출현 그래프` });
-
-    const neighbors = (coTerms || []).slice(0, 12);
-    if(!neighbors.length){
-      box.innerHTML = `<div class="empty-note" style="padding-top:170px">'${esc(center.name)}'와 함께 등장하는 용어가 아직 없습니다</div>`;
+    const center = net.center || {};
+    const nodes = (net.nodes || []).slice().sort((a,b) => (b.weight||0) - (a.weight||0)).slice(0, 16);
+    if(!nodes.length){
+      box.innerHTML = `<div class="empty-note" style="padding-top:170px">'${esc(center.canonical_name||"")}'와 함께 등장하는 용어가 아직 없습니다</div>`;
+      renderTypeFilter([]);
       return;
     }
-    const maxW = Math.max(1, ...neighbors.map(n => (n.co_doc_count || 0) + (n.co_report_count || 0)));
-    const RX = 215, RY = 130;
+    const W = 680, H = 420, CX = W/2, CY = H/2;
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, class: "kg-net-svg", role: "img",
+      "aria-label": `${center.canonical_name||""} 중심 지식그래프` });
+    if(!opts || opts.keepFade !== false) svg.classList.add("kg-net-enter");
 
-    // 엣지 먼저 (노드 아래 깔리도록)
-    const positions = neighbors.map((n, i) => {
-      const ang = (2 * Math.PI * i) / neighbors.length - Math.PI / 2;
-      return { x: CX + RX * Math.cos(ang), y: CY + RY * Math.sin(ang) };
+    // 2중 링 배치: 강도 상위=안쪽, 하위=바깥
+    const inner = nodes.slice(0, Math.min(8, nodes.length));
+    const outer = nodes.slice(8);
+    const pos = { [center.term_id]: { x: CX, y: CY } };
+    const place = (arr, rx, ry) => arr.forEach((n, i) => {
+      const ang = (2*Math.PI*i)/Math.max(1,arr.length) - Math.PI/2 + (arr === outer ? Math.PI/arr.length : 0);
+      pos[n.term_id] = { x: CX + rx*Math.cos(ang), y: CY + ry*Math.sin(ang) };
     });
-    neighbors.forEach((n, i) => {
-      const w = (n.co_doc_count || 0) + (n.co_report_count || 0);
-      const line = svgEl("line", {
-        class: "kg-edge", x1: CX, y1: CY, x2: positions[i].x, y2: positions[i].y,
-        "stroke-width": (1.2 + 4.8 * (w / maxW)).toFixed(1), "stroke-linecap": "round",
+    place(inner, 150, 96);
+    place(outer, 285, 176);
+
+    const wMaxNode = Math.max(1, ...nodes.map(n => n.weight||0));
+    const nodeR = w => 7 + 13*Math.sqrt((w||0)/wMaxNode);
+    const wMaxEdge = Math.max(1, ...(net.edges||[]).map(e => e.weight||0));
+    const idType = {}; nodes.forEach(n => idType[n.term_id] = n.term_type);
+    idType[center.term_id] = center.term_type;
+
+    // ── 엣지 (노드 아래) : 중심↔이웃 = 실선 굵게 / 이웃↔이웃 = 얇고 반투명(2-hop 클러스터) ──
+    (net.edges||[]).forEach(e => {
+      const p1 = pos[e.a], p2 = pos[e.b];
+      if(!p1 || !p2) return;
+      const isCenter = (e.a === center.term_id || e.b === center.term_id);
+      const dim = !(_visible(idType[e.a]) && _visible(idType[e.b]));
+      // 곡선(quadratic): 중점에서 수직으로 살짝 휘게
+      const mx = (p1.x+p2.x)/2, my = (p1.y+p2.y)/2;
+      const dx = p2.x-p1.x, dy = p2.y-p1.y, len = Math.hypot(dx,dy)||1;
+      const off = isCenter ? 0 : 18;
+      const cxp = mx + (-dy/len)*off, cyp = my + (dx/len)*off;
+      const path = svgEl("path", {
+        class: isCenter ? "kg-edge-c" : "kg-edge-2hop",
+        d: `M${p1.x.toFixed(1)},${p1.y.toFixed(1)} Q${cxp.toFixed(1)},${cyp.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`,
+        fill: "none", "stroke-linecap": "round",
+        "stroke-width": isCenter ? (1.4 + 4.6*((e.weight||0)/wMaxEdge)).toFixed(1) : (0.6 + 1.4*((e.weight||0)/wMaxEdge)).toFixed(1),
+        opacity: dim ? 0.06 : (isCenter ? 0.55 : 0.28),
       });
-      bindTip(line, `<b>${esc(center.name)} ↔ ${esc(n.canonical_name || "")}</b><br>함께 등장: 문서 ${num(n.co_doc_count)}건 · 보고서 ${num(n.co_report_count)}건`);
-      svg.appendChild(line);
+      svg.appendChild(path);
     });
 
-    // 이웃 노드
-    neighbors.forEach((n, i) => {
-      const { x, y } = positions[i];
-      const g = svgEl("g", { class: "kg-node" });
-      g.appendChild(svgEl("circle", { cx: x, cy: y, r: 9, fill: typeColor(n.term_type) }));
+    // ── 이웃 노드 ──
+    nodes.forEach(n => {
+      const p = pos[n.term_id]; if(!p) return;
+      const dim = !_visible(n.term_type);
+      const r = nodeR(n.weight);
+      const g = svgEl("g", { class: "kg-node", opacity: dim ? 0.18 : 1 });
+      g.appendChild(svgEl("circle", { cx: p.x, cy: p.y, r: r.toFixed(1), fill: typeColor(n.term_type),
+        stroke: "var(--color-surface)", "stroke-width": 1.5 }));
       const name = String(n.canonical_name || `#${n.term_id}`);
-      const label = svgEl("text", { x: x, y: y + (y >= CY ? 22 : -14), "text-anchor": "middle" });
-      label.textContent = name.length > 10 ? name.slice(0, 10) + "…" : name;
-      g.appendChild(label);
-      bindTip(g, `<b>${esc(name)}</b> <span style="color:var(--color-secondary)">(${esc(n.term_type || "-")})</span><br>함께 등장: 문서 ${num(n.co_doc_count)}건 · 보고서 ${num(n.co_report_count)}건<br><span style="color:var(--color-secondary)">클릭하면 이 용어 중심으로 이동</span>`);
-      g.addEventListener("click", () => selectTerm(n.term_id, name, n.term_type));
+      const lbl = svgEl("text", { x: p.x, y: (p.y + (p.y>=CY ? r+13 : -r-6)).toFixed(1), "text-anchor": "middle", class: "kg-node-label" });
+      lbl.textContent = name.length > 9 ? name.slice(0,9)+"…" : name;
+      g.appendChild(lbl);
+      bindTip(g, `<b>${esc(name)}</b> <span style="color:var(--color-secondary)">(${esc(n.term_type||"-")})</span><br>함께 등장: 문서 ${num(n.docs_count)}건 · 보고서 ${num(n.reports_count)}건 · 강도 ${num(n.weight)}<br><span style="color:var(--color-secondary)">클릭하면 이 용어 중심으로 이동</span>`);
+      if(!dim) g.addEventListener("click", () => selectTerm(n.term_id, name, n.term_type));
       svg.appendChild(g);
     });
 
-    // 중심 노드
-    const cg = svgEl("g", { class: "kg-node" });
-    cg.appendChild(svgEl("circle", { cx: CX, cy: CY, r: 17, fill: typeColor(center.type),
-      stroke: "var(--color-surface)", "stroke-width": 3 }));
-    const cl = svgEl("text", { class: "kg-center-label", x: CX, y: CY + 34, "text-anchor": "middle" });
-    cl.textContent = center.name;
+    // ── 중심 노드 ──
+    const cname = center.canonical_name || `#${center.term_id}`;
+    const cg = svgEl("g", { class: "kg-node kg-node-center" });
+    cg.appendChild(svgEl("circle", { cx: CX, cy: CY, r: 19, fill: typeColor(center.term_type),
+      stroke: "var(--color-surface)", "stroke-width": 3.5 }));
+    const cl = svgEl("text", { class: "kg-center-label", x: CX, y: CY + 37, "text-anchor": "middle" });
+    cl.textContent = cname;
     cg.appendChild(cl);
+    bindTip(cg, `<b>${esc(cname)}</b><br>연결 문서 ${num(center.docs_count)}건 · 연결 보고서 ${num(center.reports_count)}건`);
     svg.appendChild(cg);
 
     box.appendChild(svg);
+    renderTypeFilter(nodes);
   }
 
   /* ── 문서 뷰어 모달 (채팅 문서 모달과 동일한 렌더링 뷰) ── */
@@ -617,20 +681,29 @@
 
   async function selectTerm(termId, name, type){
     currentTermId = termId;
+    activeTypes = null;  // 새 중심으로 이동 시 필터 리셋
     document.querySelectorAll(".kg-chip").forEach(c => c.classList.toggle("is-active", c.dataset.termId == String(termId)));
     const box = $("kgGraph");
     if(box) box.innerHTML = `<div class="empty-note" style="padding-top:170px">불러오는 중...</div>`;
-    let data;
+    let net, ov;
     try {
-      const r = await fetch(`/api/kg/term/${termId}`, { credentials: "include" });
-      data = await r.json();
+      // 2-hop 네트워크(그래프) + 용어 개요(사이드 패널) 병렬 조회
+      const [rn, ro] = await Promise.all([
+        fetch(`/api/kg/network?term_id=${termId}`, { credentials: "include" }),
+        fetch(`/api/kg/term/${termId}`, { credentials: "include" }),
+      ]);
+      net = await rn.json();
+      ov = await ro.json();
     } catch(e){
       if(box) box.innerHTML = `<div class="empty-note" style="padding-top:170px">용어 정보를 불러오지 못했습니다</div>`;
       return;
     }
-    const center = { name: name || `#${termId}`, type: type || "" };
-    renderEgoGraph(center, data.co_terms || []);
-    renderTermSide(center, data);
+    // 네트워크 center에 이름/유형 보강(백엔드는 canonical_name을 채우지 않음)
+    net.center = Object.assign({ term_id: termId, canonical_name: name || `#${termId}`, term_type: type || "",
+      docs_count: (ov && ov.docs_count) || 0, reports_count: (ov && ov.reports_count) || 0 }, net.center || {},
+      { canonical_name: name || `#${termId}`, term_type: type || "" });
+    renderNetworkGraph(net, { keepFade: true });
+    renderTermSide({ name: name || `#${termId}`, type: type || "" }, ov || {});
   }
 
   function setupExplorer(topTerms){
