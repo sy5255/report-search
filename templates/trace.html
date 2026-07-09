@@ -1,0 +1,361 @@
+{% extends "base.html" %}
+{% block title %}Cognitive Trace - Intellectual Curator{% endblock %}
+
+{% block extra_head %}
+<style>
+  /* ── 차트 팔레트 (validate_palette.js 통과값: light/dark 별도 스텝) ── */
+  :root {
+    --chart-1: #0891b2;  /* RAG / teal */
+    --chart-2: #7c3aed;  /* DB / violet */
+    --chart-3: #b45309;  /* HYBRID / amber */
+    --chart-4: #2563eb;  /* GENERAL / blue */
+    --chart-5: #be185d;  /* REPORT / pink */
+    --status-good: #15803d;
+    --status-bad: #b52b2b;
+    --grid-line: color-mix(in srgb, var(--color-on-surface) 8%, transparent);
+  }
+  .dark {
+    --chart-1: #0d9488;
+    --chart-2: #8b5cf6;
+    --chart-3: #d97706;
+    --chart-4: #3b82f6;
+    --chart-5: #ec4899;
+    --status-good: #22c55e;
+    --status-bad: #f87171;
+  }
+
+  .stat-tile { background: var(--color-surface); border: 1px solid var(--color-outline-variant); border-radius: 14px; padding: 16px 18px; min-width: 0; }
+  .stat-tile .stat-label { font-size: 11px; font-weight: 600; color: var(--color-secondary); margin-bottom: 6px; display:flex; align-items:center; gap:4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stat-tile .stat-value { font-family: var(--font-display); font-size: clamp(18px, 1.7vw, 26px); font-weight: 800; letter-spacing: -0.02em; color: var(--color-on-surface); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .stat-tile .stat-sub { font-size: 10px; color: var(--color-secondary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .chart-card { background: var(--color-surface); border: 1px solid var(--color-outline-variant); border-radius: 14px; padding: 18px; }
+  .chart-title { font-family: var(--font-display); font-weight: 700; font-size: 13px; margin-bottom: 2px; }
+  .chart-desc { font-size: 11px; color: var(--color-secondary); margin-bottom: 12px; }
+
+  /* 세로 바 차트 (일별 추이) */
+  .vbar-chart { display: flex; align-items: flex-end; gap: 2px; height: 120px; border-bottom: 1px solid var(--grid-line); }
+  .vbar-col { flex: 1 1 0; min-width: 3px; display: flex; align-items: flex-end; gap: 1px; height: 100%; }
+  .vbar { flex: 1 1 0; border-radius: 4px 4px 0 0; min-height: 2px; cursor: default; }
+  .vbar:hover { filter: brightness(1.15); }
+
+  /* 가로 바 차트 (분포) */
+  .hbar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .hbar-label { width: 130px; font-size: 11px; color: var(--color-on-surface); text-align: right; flex-shrink: 0; }
+  .hbar-track { flex: 1; height: 14px; display: flex; align-items: center; }
+  .hbar { height: 14px; border-radius: 0 4px 4px 0; min-width: 2px; }
+  .hbar-value { font-size: 11px; font-weight: 700; color: var(--color-on-surface); margin-left: 8px; font-variant-numeric: tabular-nums; }
+
+  .legend { display: flex; gap: 14px; font-size: 11px; color: var(--color-secondary); margin-bottom: 10px; }
+  .legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+
+  .range-chip { padding: 5px 14px; border-radius: 999px; border: 1px solid var(--color-outline-variant); font-size: 12px; font-weight: 600; color: var(--color-secondary); }
+  .range-chip.is-active { background: var(--color-primary); color: var(--color-on-primary); border-color: var(--color-primary); }
+
+  .chart-table summary { font-size: 10px; color: var(--color-secondary); cursor: pointer; margin-top: 10px; }
+  .chart-table table { width: 100%; font-size: 10px; margin-top: 6px; border-collapse: collapse; }
+  .chart-table th, .chart-table td { border: 1px solid var(--color-outline-variant); padding: 3px 6px; text-align: right; }
+  .chart-table th:first-child, .chart-table td:first-child { text-align: left; }
+
+  /* 공유 hover 툴팁 */
+  #traceTip { position: fixed; z-index: 5000; pointer-events: none; background: var(--color-surface); border: 1px solid var(--color-outline-variant); border-radius: 8px; box-shadow: var(--shadow-card-hover); padding: 6px 10px; font-size: 11px; color: var(--color-on-surface); display: none; white-space: nowrap; }
+
+  .empty-note { font-size: 11px; color: var(--color-secondary); padding: 18px 0; text-align: center; }
+
+  /* ── KG 그래프 탐색기 ── */
+  .kg-explorer-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; position: relative; }
+  #kgTermSearch {
+    width: 220px; padding: 7px 12px; font-size: 12px;
+    border: 1px solid var(--color-outline-variant); border-radius: 10px;
+    background: var(--color-surface-container-low); color: var(--color-on-surface);
+  }
+  #kgTermSearch:focus { outline: none; border-color: var(--chart-1); }
+  .kg-suggest {
+    position: absolute; top: 38px; left: 0; z-index: 100; width: 260px; max-height: 240px; overflow-y: auto;
+    background: var(--color-surface); border: 1px solid var(--color-outline-variant); border-radius: 10px;
+    box-shadow: var(--shadow-card-hover);
+  }
+  .kg-suggest-item { padding: 7px 12px; font-size: 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
+  .kg-suggest-item:hover { background: var(--color-surface-container); }
+  .kg-suggest-item .tt { font-size: 10px; color: var(--color-secondary); }
+  .kg-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .kg-chip {
+    padding: 4px 12px; border-radius: 999px; font-size: 11px; font-weight: 600;
+    border: 1px solid var(--color-outline-variant); color: var(--color-on-surface-soft);
+  }
+  .kg-chip:hover { background: var(--color-surface-container); }
+  .kg-chip.is-active { border-color: var(--chart-1); color: var(--chart-1); background: color-mix(in srgb, var(--chart-1) 10%, transparent); }
+
+  .kg-explorer-body { display: grid; grid-template-columns: minmax(0, 3fr) minmax(240px, 2fr); gap: 16px; }
+  @media (max-width: 900px) { .kg-explorer-body { grid-template-columns: 1fr; } }
+  .kg-graph { min-height: 380px; border: 1px dashed var(--color-outline-variant); border-radius: 12px; position: relative; }
+  .kg-graph svg { width: 100%; height: 100%; display: block; }
+  .kg-node { cursor: pointer; }
+  .kg-node circle { transition: filter var(--duration-fast) var(--ease-out-soft); }
+  .kg-node:hover circle { filter: brightness(1.2); }
+  .kg-node text { font-size: 10px; fill: var(--color-on-surface); pointer-events: none; }
+  .kg-node .kg-node-type { font-size: 8px; fill: var(--color-secondary); }
+  .kg-edge { stroke: var(--color-outline-variant); }
+  .kg-center-label { font-size: 13px; font-weight: 800; fill: var(--color-on-surface); }
+
+  /* 네트워크 그래프(V2: 2-hop) */
+  .kg-net-svg { width: 100%; height: 100%; display: block; }
+  .kg-edge-c { stroke: var(--chart-1); }
+  .kg-edge-2hop { stroke: var(--color-secondary); }
+  .kg-node-label { font-size: 10px; fill: var(--color-on-surface); pointer-events: none; font-weight: 600; }
+  .kg-node-center circle { filter: drop-shadow(0 2px 6px color-mix(in srgb, var(--chart-1) 45%, transparent)); }
+  .kg-net-enter { animation: kgNetIn var(--duration-med, 0.32s) var(--ease-out-soft, ease-out); }
+  @keyframes kgNetIn { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
+  /* 유형 필터 칩 */
+  .kg-type-filter { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+  .kg-type-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+    padding: 3px 10px; border-radius: 999px; border: 1px solid var(--color-outline-variant);
+    color: var(--color-secondary); opacity: 0.5; transition: opacity var(--duration-fast) var(--ease-out-soft); }
+  .kg-type-chip.is-on { opacity: 1; color: var(--color-on-surface); background: var(--color-surface-container-low); }
+  .kg-type-chip .dot { width: 9px; height: 9px; border-radius: 3px; }
+
+  .kg-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .kg-side-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .kg-side-title { font-family: var(--font-display); font-weight: 800; font-size: 15px; }
+  .kg-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--color-outline-variant); color: var(--color-secondary); }
+  .kg-doc-list { overflow-y: auto; max-height: 320px; display: flex; flex-direction: column; gap: 6px; }
+  .kg-doc-item {
+    text-align: left; padding: 8px 10px; border: 1px solid var(--color-outline-variant); border-radius: 10px;
+    background: var(--color-surface-container-low); cursor: pointer;
+  }
+  .kg-doc-item:hover { background: var(--color-surface-container); }
+  .kg-doc-item .t { font-size: 11px; font-weight: 600; color: var(--color-on-surface); display: block;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kg-doc-item .m { font-size: 9px; color: var(--color-secondary); }
+
+  /* 연결 상세 드릴다운 */
+  .kg-links-toggle { margin-top: 12px; font-size: 11px; font-weight: 700; color: var(--chart-1);
+    padding: 6px 12px; border: 1px dashed var(--chart-1); border-radius: 8px; width: 100%; text-align: left; }
+  .kg-links-toggle:hover { background: color-mix(in srgb, var(--chart-1) 8%, transparent); }
+  .kg-links-filter { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 12px 0 8px; }
+  #kgLinksSearch { flex: 1; min-width: 160px; padding: 5px 10px; font-size: 11px;
+    border: 1px solid var(--color-outline-variant); border-radius: 8px;
+    background: var(--color-surface-container-low); color: var(--color-on-surface); }
+  .kg-links-table { max-height: 340px; overflow-y: auto; }
+  .kg-links-table table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .kg-links-table th { position: sticky; top: 0; background: var(--color-surface-container-low);
+    font-size: 10px; color: var(--color-secondary); text-align: left; padding: 5px 8px;
+    border-bottom: 1px solid var(--color-outline-variant); }
+  .kg-links-table td { padding: 5px 8px; border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 50%, transparent); vertical-align: top; }
+  .kg-links-table .doc-link { color: var(--color-on-surface); font-weight: 600; cursor: pointer;
+    display: block; max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kg-links-table .doc-link:hover { color: var(--chart-1); text-decoration: underline; }
+  .kg-src-badge { font-size: 9px; font-weight: 800; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+  .kg-src-badge.lot_wf { color: var(--chart-1); background: color-mix(in srgb, var(--chart-1) 12%, transparent); }
+  .kg-src-badge.lot { color: var(--chart-2); background: color-mix(in srgb, var(--chart-2) 12%, transparent); }
+  .kg-src-badge.edm_token { color: var(--chart-3); background: color-mix(in srgb, var(--chart-3) 12%, transparent); }
+  .kg-evidence { font-family: var(--font-mono); font-size: 10px; color: var(--color-on-surface-soft); }
+
+  /* 골든셋 문항별 테이블 */
+  .gs-table { overflow-x: auto; }
+  .gs-table table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .gs-table th { text-align: left; font-size: 10px; color: var(--color-secondary);
+    padding: 6px 8px; border-bottom: 1px solid var(--color-outline-variant); white-space: nowrap; }
+  .gs-table td { padding: 6px 8px; border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 50%, transparent); vertical-align: top; }
+  .gs-q { max-width: 340px; }
+  .gs-mark { font-size: 10px; font-weight: 800; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+  .gs-mark.ok { color: var(--status-good); background: color-mix(in srgb, var(--status-good) 14%, transparent); }
+  .gs-mark.bad { color: var(--status-bad); background: color-mix(in srgb, var(--status-bad) 12%, transparent); }
+  .gs-mark.na { color: var(--color-secondary); background: var(--color-surface-container); }
+  .gs-run-row { cursor: pointer; }
+  .gs-run-row:hover td { background: var(--color-surface-container-low); }
+  .gs-run-row.is-sel td { background: color-mix(in srgb, var(--chart-1) 10%, transparent); }
+  .gs-label-chip { font-size: 10px; font-weight: 700; padding: 1px 8px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+  .gs-del { font-size: 12px; padding: 2px 6px; border-radius: 6px; opacity: 0.6; }
+  .gs-del:hover { opacity: 1; background: color-mix(in srgb, var(--status-bad) 12%, transparent); }
+  #gsTableRunLabel { font-size: 11px; }
+
+  /* 실패 사례 (👎 피드백) */
+  .fb-case-row { cursor: pointer; }
+  .fb-case-row:hover td { background: var(--color-surface-container-low); }
+  .fb-promote { font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+    border: 1px solid var(--chart-1); color: var(--chart-1); white-space: nowrap; }
+  .fb-promote:hover { background: color-mix(in srgb, var(--chart-1) 12%, transparent); }
+  .fb-promote:disabled { opacity: 0.5; cursor: default; }
+  .fb-answer-body { font-size: 11px; line-height: 1.6; white-space: pre-wrap;
+    background: var(--color-surface-container-low); border-radius: 8px; padding: 10px 12px;
+    max-height: 260px; overflow-y: auto; }
+
+  /* 문서 뷰어 모달 */
+  .kg-doc-modal { position: fixed; inset: 0; z-index: 6000; display: flex; align-items: center; justify-content: center; }
+  .kg-doc-backdrop { position: absolute; inset: 0; background: rgba(10,15,31,0.6); }
+  .kg-doc-panel {
+    position: relative; width: min(1000px, 92vw); height: min(84vh, 92vh);
+    background: var(--color-surface); border: 1px solid var(--color-outline-variant);
+    border-radius: 16px; box-shadow: var(--shadow-card-hover);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .kg-doc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 14px 18px; border-bottom: 1px solid var(--color-outline-variant); }
+  .kg-doc-title { font-family: var(--font-display); font-weight: 700; font-size: 13px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kg-doc-close { font-size: 11px; font-weight: 700; padding: 5px 12px; border-radius: 8px;
+    border: 1px solid var(--color-outline-variant); color: var(--color-secondary); }
+  .kg-doc-close:hover { background: var(--color-surface-container); }
+  .kg-doc-body { flex: 1; overflow-y: auto; padding: 20px 24px; font-size: 13px; line-height: 1.7; }
+  .kg-doc-body h1, .kg-doc-body h2, .kg-doc-body h3 { font-weight: 700; margin: 14px 0 8px; }
+  .kg-doc-body table { border-collapse: collapse; margin: 8px 0; }
+  .kg-doc-body th, .kg-doc-body td { border: 1px solid var(--color-outline-variant); padding: 4px 8px; font-size: 12px; }
+  .kg-doc-body pre { background: var(--color-surface-container-low); padding: 10px; border-radius: 8px; overflow-x: auto; }
+</style>
+{% endblock %}
+
+{% block content %}
+<main class="flex-1 overflow-y-auto scrolled-content">
+  <div class="max-w-[1560px] mx-auto px-6 py-8">
+    <header class="mb-6 flex items-end justify-between flex-wrap gap-4">
+      <div>
+        <h1 class="font-headline text-3xl font-extrabold tracking-tight mb-1">Cognitive Trace</h1>
+        <p class="text-sm text-secondary">시스템 성능 평가 · 답변 품질 · Knowledge Graph 상태</p>
+      </div>
+      <div class="flex gap-2" role="radiogroup" aria-label="집계 기간">
+        <button class="range-chip" data-days="7" type="button">7일</button>
+        <button class="range-chip is-active" data-days="30" type="button">30일</button>
+        <button class="range-chip" data-days="90" type="button">90일</button>
+      </div>
+    </header>
+
+    <!-- ── 핵심 지표 타일 ── -->
+    <section id="statTiles" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6"></section>
+
+    <!-- ── 품질/사용량 차트 ── -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+      <div class="chart-card">
+        <div class="chart-title">일별 질문 수</div>
+        <div class="chart-desc">사용자가 보낸 질문(메시지) 수 추이</div>
+        <div id="chartDaily"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">사용자 피드백 추이</div>
+        <div class="chart-desc">답변에 남긴 👍 좋아요 / 👎 별로예요</div>
+        <div class="legend">
+          <span><span class="dot" style="background:var(--status-good)"></span>👍 좋아요</span>
+          <span><span class="dot" style="background:var(--status-bad)"></span>👎 별로예요</span>
+        </div>
+        <div id="chartFeedback"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">분석 방식(인텐트) 분포</div>
+        <div class="chart-desc">라우터가 선택한 답변 방식별 대화 수</div>
+        <div id="chartIntents"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">일별 근거 충족도</div>
+        <div class="chart-desc">답변 속 주장이 근거 문서로 뒷받침된 비율 (검증된 턴 기준)</div>
+        <div id="chartGrounded"></div>
+      </div>
+    </section>
+
+    <!-- ── 골든셋 평가 ── -->
+    <header class="mb-4">
+      <h2 class="font-headline text-xl font-bold text-primary">골든셋 평가</h2>
+      <p class="text-xs text-secondary">대표 질문 + 기대 정답으로 측정하는 검색·라우팅 품질 (변경 전후 통제 비교용) · <span class="font-mono">python -m app.goldenset_runner</span></p>
+      <p class="text-xs text-secondary mt-1">📝 문항 작성 가이드: <b>검색형 40%</b>(원리·가이드 질문 + 정답 문서 doc_id) · <b>DB형 30%</b>(건수·순위 질문 + 기대 인텐트) · <b>하이브리드 20%</b>(통계+원리 복합) · <b>함정 10%</b>(사내 문서에 없는 주제 — 근거 게이트가 발동해야 정답). 정답 문서는 goldenset.json의 expected_doc_ids에 아카이브 doc_id(md 파일명)를 넣으세요.</p>
+    </header>
+    <section id="gsTiles" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4"></section>
+    <section class="chart-card mb-4">
+      <div class="chart-title">평가 이력 추이</div>
+      <div class="chart-desc">막대=검색 hit@5, 점=MRR. 막대 색은 라벨(구성)별로 구분됩니다. ◆ 마커는 골든셋 문항이 직전 실행과 달라진 지점입니다. 막대에 마우스를 올리면 상세가 보이고, 아래 목록에서 실행을 선택할 수 있습니다.</div>
+      <div id="gsTrendLegend" class="legend"></div>
+      <div id="gsTrend"></div>
+    </section>
+    <section class="chart-card mb-4">
+      <div class="chart-title">실행 이력</div>
+      <div class="chart-desc">행을 클릭하면 그 실행의 문항별 결과가 아래에 표시됩니다.</div>
+      <div id="gsRuns"></div>
+    </section>
+    <section class="chart-card mb-4">
+      <div class="chart-title">문항별 결과 <span id="gsTableRunLabel" class="text-secondary" style="font-weight:500"></span></div>
+      <div class="chart-desc">검색 실패(⚠)·인텐트 오분류가 개선 우선순위입니다. found-rank는 기대 문서가 검색 결과 몇 위에서 처음 나왔는지입니다.</div>
+      <div id="gsTable"></div>
+    </section>
+
+    {% if is_admin %}
+    <!-- ── 실패 사례 (👎 피드백, 관리자 전용) ── -->
+    <section class="chart-card mb-4" id="fbCasesCard">
+      <div class="chart-title">실패 사례 — 👎 피드백 <span class="text-secondary" style="font-weight:500">관리자 전용</span></div>
+      <div class="chart-desc">부정 피드백이 달린 실제 질문/답변입니다. [골든셋 후보]를 누르면 goldenset.json에 비활성(enabled=false) 문항으로 추가됩니다 — 정답 문서를 채워 활성화하면 유저 불만이 회귀 테스트가 됩니다. 행을 클릭하면 답변 전문이 열립니다.</div>
+      <div id="fbCases"></div>
+    </section>
+    {% endif %}
+
+    <!-- ── Knowledge Graph ── -->
+    <header class="mb-4">
+      <h2 class="font-headline text-xl font-bold text-primary">Knowledge Graph</h2>
+      <p class="text-xs text-secondary">DB 보고서 ↔ 문서 ↔ 용어사전 연결 상태 (24h 주기 자동 빌드)</p>
+    </header>
+    <section id="kgTiles" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6"></section>
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+      <div class="chart-card">
+        <div class="chart-title">문서↔보고서 연결 방식 분포</div>
+        <div class="chart-desc">lot_wf(웨이퍼 정밀) &gt; lot(Lot 단위) &gt; edm_token(링크 보조) 순으로 신뢰도가 높습니다</div>
+        <div id="chartKgSources"></div>
+        <button id="kgLinksToggle" type="button" class="kg-links-toggle">🔍 연결 상세 보기 — 어떤 문서가 어떤 근거로 연결됐는지</button>
+        <div id="kgLinksPanel" style="display:none">
+          <div class="kg-links-filter">
+            <button class="kg-chip is-active" data-src="" type="button">전체</button>
+            <button class="kg-chip" data-src="lot_wf" type="button">lot_wf</button>
+            <button class="kg-chip" data-src="lot" type="button">lot</button>
+            <button class="kg-chip" data-src="edm_token" type="button">edm_token</button>
+            <input id="kgLinksSearch" type="search" placeholder="제목 / 보고서번호 검색" autocomplete="off"/>
+          </div>
+          <div id="kgLinksTable" class="kg-links-table"></div>
+        </div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">문서에서 가장 많이 매칭된 용어</div>
+        <div class="chart-desc">용어사전이 실제 문서와 얼마나 연결되는지 (상위 8개)</div>
+        <div id="chartKgTerms"></div>
+      </div>
+    </section>
+
+    <!-- ── KG 그래프 탐색기 ── -->
+    <section class="chart-card mb-10">
+      <div class="chart-title">그래프 탐색기</div>
+      <div class="chart-desc">용어를 선택하면 함께 등장하는 용어들이 연결선으로 표시됩니다. 선이 굵을수록 자주 함께 등장하며, 노드를 클릭하면 그 용어 중심으로 이동합니다.<br>
+      · <b>연결 문서</b> = 용어가 <u>문서 본문 텍스트</u>에 등장한 아카이브 문서 수 &nbsp;·&nbsp; <b>연결 보고서</b> = 용어가 <u>DB 컬럼값</u>(불량명·성분·공정노드 등)으로 기록된 분석 건 수</div>
+      <div class="kg-explorer-head">
+        <input id="kgTermSearch" type="search" placeholder="용어 검색 (예: 파티클)" autocomplete="off"/>
+        <div id="kgTermSuggest" class="kg-suggest" style="display:none"></div>
+        <div id="kgTopChips" class="kg-chips"></div>
+      </div>
+      <div id="kgTypeFilter" class="kg-type-filter"></div>
+      <div class="kg-explorer-body">
+        <div id="kgGraph" class="kg-graph"><div class="empty-note" style="padding-top:170px">상단에서 용어를 선택하세요</div></div>
+        <div id="kgSide" class="kg-side"></div>
+      </div>
+      <div class="legend" style="margin-top:12px" id="kgLegend">
+        <span><span class="dot" style="background:var(--chart-1)"></span>불량(defect)</span>
+        <span><span class="dot" style="background:var(--chart-2)"></span>성분(chemistry)</span>
+        <span><span class="dot" style="background:var(--chart-3)"></span>공정(process)</span>
+        <span><span class="dot" style="background:var(--chart-4)"></span>노드(node)</span>
+        <span><span class="dot" style="background:var(--color-secondary)"></span>기타 유형</span>
+      </div>
+    </section>
+  </div>
+</main>
+<div id="traceTip" role="tooltip"></div>
+
+<!-- 문서 뷰어 모달 (채팅의 문서 모달과 동일한 렌더링 뷰) -->
+<div id="kgDocModal" class="kg-doc-modal" style="display:none" aria-hidden="true">
+  <div id="kgDocBackdrop" class="kg-doc-backdrop"></div>
+  <div class="kg-doc-panel" role="dialog" aria-modal="true">
+    <div class="kg-doc-head">
+      <div id="kgDocTitle" class="kg-doc-title">(Document)</div>
+      <button id="kgDocClose" type="button" class="kg-doc-close">닫기</button>
+    </div>
+    <div id="kgDocBody" class="kg-doc-body markdown-body"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>window.__IS_ADMIN__ = {{ 'true' if is_admin else 'false' }};</script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="{{ url_for('static', path='/js/trace.js') }}"></script>
+{% endblock %}

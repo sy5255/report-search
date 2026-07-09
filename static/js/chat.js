@@ -20,18 +20,42 @@ let lastRealUserQuery = "";
 function el(id){ return document.getElementById(id); }
 
 // 문서 검색 결과 유무에 따라 우측 패널을 열고 닫는 함수
-function toggleEvidencePanel(hasDocs) {
+let evidenceHasDocs = false;
+let evidenceCollapsed = false;  // 기본값 펼침. 사용자가 현재 답변에서 접었을 때만 true.
+
+function _applyEvidenceState(){
   const rightPanel = el("rightPanel");
   const resizer2 = el("resizer2");
-  if (!rightPanel) return;
+  const rail = el("evidenceRail");
+  if(!rightPanel) return;
 
-  if (hasDocs) {
-    rightPanel.classList.remove("hidden");
-    if(resizer2) resizer2.classList.remove("hidden");
-  } else {
-    rightPanel.classList.add("hidden");
-    if(resizer2) resizer2.classList.add("hidden");
+  const open = evidenceHasDocs && !evidenceCollapsed;
+  const railOnly = evidenceHasDocs && evidenceCollapsed;
+
+  rightPanel.classList.toggle("hidden", !open);
+  if(resizer2) resizer2.classList.toggle("hidden", !open);
+  if(rail){
+    rail.classList.toggle("hidden", !railOnly);
+    const cnt = el("evidenceRailCount");
+    if(cnt) cnt.textContent = (Array.isArray(lastTopDocs) && lastTopDocs.length) ? `근거 ${lastTopDocs.length}` : "근거";
   }
+}
+
+// hasDocs=true 인 새 답변마다 패널을 '펼침'으로 리셋(기본값 펼침).
+function toggleEvidencePanel(hasDocs){
+  evidenceHasDocs = !!hasDocs;
+  if(hasDocs) evidenceCollapsed = false;
+  _applyEvidenceState();
+}
+
+function collapseEvidencePanel(){
+  evidenceCollapsed = true;
+  _applyEvidenceState();
+}
+
+function expandEvidencePanel(){
+  evidenceCollapsed = false;
+  _applyEvidenceState();
 }
 
 async function _apiFetch(method, url, body){
@@ -209,8 +233,8 @@ function renderMarkdownSafe(mdText){
     });
   }
 
-  // 인용구 변환: [1], [2]를 citation-pill로 교체
-  rendered = rendered.replace(/\[(\d+)\]/g, '<span class="citation-pill" onclick="openDocFromCitationIndex($1)">$1</span>');
+  // 인용구 [n] → pill 변환은 DOM 렌더 후 convertCitationPills()에서 수행
+  // (문자열 정규식 전역 치환은 표/코드 안의 무관한 [3]까지 오변환하는 버그가 있었음)
 
   return rendered;
 }
@@ -352,6 +376,52 @@ function addCodeCopyButtons(container){
   });
 }
 
+function convertCitationPills(container){
+  // [n] 텍스트를 citation pill로 변환 (DOM 기반).
+  // 조건: 유효한 citation 번호(1..N)일 때만, 표/코드/링크 내부는 제외 → 오변환 방지.
+  if(!container) return;
+  const total = (lastCitations && Array.isArray(lastCitations.answer)) ? lastCitations.answer.length : 0;
+  if(!total) return;
+
+  const SKIP_TAGS = ["A", "CODE", "PRE", "SCRIPT", "STYLE", "BUTTON", "TABLE", "THEAD", "TBODY", "TH", "TD", "SUMMARY", "KBD"];
+  const re = /\[(\d{1,2})\]/g;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+  const targets = [];
+  let node;
+  while((node = walker.nextNode())){
+    let p = node.parentElement, skip = false;
+    while(p && p !== container){
+      if(SKIP_TAGS.includes(p.tagName)){ skip = true; break; }
+      p = p.parentElement;
+    }
+    if(skip) continue;
+    re.lastIndex = 0;
+    if(node.nodeValue && re.test(node.nodeValue)) targets.push(node);
+  }
+
+  targets.forEach(textNode => {
+    const text = textNode.nodeValue || "";
+    const frag = document.createDocumentFragment();
+    let last = 0, changed = false, m;
+    re.lastIndex = 0;
+    while((m = re.exec(text))){
+      const n = parseInt(m[1], 10);
+      if(n < 1 || n > total) continue; // 무효 번호는 텍스트 그대로 유지
+      frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+      const pill = document.createElement("span");
+      pill.className = "citation-pill";
+      pill.textContent = String(n);
+      pill.addEventListener("click", () => window.openDocFromCitationIndex(String(n)));
+      frag.appendChild(pill);
+      last = m.index + m[0].length;
+      changed = true;
+    }
+    if(!changed) return;
+    frag.appendChild(document.createTextNode(text.slice(last)));
+    if(textNode.parentNode) textNode.parentNode.replaceChild(frag, textNode);
+  });
+}
+
 function enhanceRenderedMessage(scope){
   if(!scope) return;
 
@@ -364,6 +434,7 @@ function enhanceRenderedMessage(scope){
       a.target = "_blank";
       a.rel = "noopener noreferrer";
     });
+    convertCitationPills(node);
   });
   attachCitationHovers(scope);
 }
@@ -902,6 +973,44 @@ function applySessionFilter(){
 }
 
 /* ---------- assistant message action bar ---------- */
+function openDownFeedbackPopover(bar, submit){
+  // 이미 열려있으면 재사용
+  const existing = bar.parentElement && bar.parentElement.querySelector(".fb-comment-pop");
+  if(existing){ existing.querySelector("textarea").focus(); return; }
+
+  const pop = document.createElement("div");
+  pop.className = "fb-comment-pop";
+  pop.innerHTML = `
+    <div class="fb-comment-title">어떤 점이 아쉬웠는지 알려주세요 <span>(필수 · 5자 이상)</span></div>
+    <textarea class="fb-comment-input" rows="2" maxlength="500"
+      placeholder="예: 통계 수치가 실제와 다릅니다 / 엉뚱한 문서를 인용했어요"></textarea>
+    <div class="fb-comment-actions">
+      <button type="button" class="fb-cancel">취소</button>
+      <button type="button" class="fb-submit">피드백 보내기</button>
+    </div>`;
+  bar.insertAdjacentElement("afterend", pop);
+
+  const ta = pop.querySelector("textarea");
+  ta.focus();
+  pop.querySelector(".fb-cancel").addEventListener("click", (e) => { e.stopPropagation(); pop.remove(); });
+  pop.querySelector(".fb-submit").addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const comment = ta.value.trim();
+    if(comment.length < 5){
+      if(window.Toast) window.Toast.warn("어떤 점이 아쉬웠는지 5자 이상 적어주세요.");
+      ta.focus();
+      return;
+    }
+    await submit("down", comment);
+    pop.remove();
+  });
+  pop.addEventListener("click", (e) => e.stopPropagation());
+  ta.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if(e.key === "Escape") pop.remove();
+  });
+}
+
 function wireMessageActionBar(scope, assistantMsgId){
   if(!scope || !assistantMsgId) return;
   const bar = scope.querySelector(".msg-action-bar");
@@ -952,26 +1061,42 @@ function wireMessageActionBar(scope, assistantMsgId){
         return;
       }
       if(act === "up" || act === "down"){
-        try{
-          const res = await apiPost("/api/feedback", {
-            assistant_msg_id: assistantMsgId,
-            rating: act,
-            session_id: currentSessionId || null
-          });
-          const newRating = res && res.rating;
-          bar.querySelectorAll(".msg-action-btn[data-action='up'],.msg-action-btn[data-action='down']").forEach(b => {
-            const a = b.getAttribute("data-action");
-            if(a === newRating) b.classList.add("is-active");
-            else b.classList.remove("is-active");
-          });
-          if(window.Toast){
-            if(newRating === "up") window.Toast.success("좋은 응답으로 기록했습니다.");
-            else if(newRating === "down") window.Toast.info("개선이 필요한 응답으로 기록했습니다.");
-            else window.Toast.info("피드백을 취소했습니다.");
+        const submitFeedback = async (rating, comment) => {
+          try{
+            const res = await apiPost("/api/feedback", {
+              assistant_msg_id: assistantMsgId,
+              rating,
+              comment: comment || null,
+              session_id: currentSessionId || null
+            });
+            const newRating = res && res.rating;
+            bar.querySelectorAll(".msg-action-btn[data-action='up'],.msg-action-btn[data-action='down']").forEach(b => {
+              const a = b.getAttribute("data-action");
+              if(a === newRating) b.classList.add("is-active");
+              else b.classList.remove("is-active");
+            });
+            if(window.Toast){
+              if(newRating === "up") window.Toast.success("좋은 응답으로 기록했습니다.");
+              else if(newRating === "down") window.Toast.info("소중한 피드백 감사합니다. 개선에 활용할게요.");
+              else window.Toast.info("피드백을 취소했습니다.");
+            }
+          } catch(err){
+            if(window.Toast) window.Toast.error("피드백 저장에 실패했습니다.");
           }
-        } catch(err){
-          if(window.Toast) window.Toast.error("피드백 저장에 실패했습니다.");
+        };
+
+        if(act === "up"){
+          await submitFeedback("up");
+          return;
         }
+        // 👎는 이유(코멘트)를 필수로 받는다 — 가볍게 누르는 노이즈를 거르고,
+        // '왜 별로였는지'가 있어야 개선 분석(드릴다운)이 가능하기 때문.
+        // 이미 👎 상태에서 다시 누르는 것(취소)은 마찰 없이 바로 처리.
+        if(btn.classList.contains("is-active")){
+          await submitFeedback("down");
+          return;
+        }
+        openDownFeedbackPopover(bar, submitFeedback);
         return;
       }
     });
@@ -986,7 +1111,7 @@ function renderWelcomeScreen(){
   const suggestions = [
     { icon: "monitoring",   text: "최근 3개월 동안 가장 많이 발생한 불량명 순위 5개",          hint: "DB 통계" },
     { icon: "description",  text: "Wet Etch 공정에서 파티클 불량의 주요 원인과 가이드를 찾아줘", hint: "문서 검색" },
-    { icon: "auto_awesome", text: "어제 등록된 IFA 보고서 중 양산 관련된 내용을 요약해줘",      hint: "하이브리드" }
+    { icon: "support_agent", text: "불량 분석은 어떻게 의뢰하고 진행되나요?",                   hint: "분석 프로세스 안내" }
   ];
 
   const chipsHtml = suggestions.map(s => `
@@ -1048,11 +1173,13 @@ async function loadSession(sessionId){
     }
     // 어시스턴트(LLM)의 과거 메시지일 경우 인텐트/액션 데이터 복구
     else if (m.role === "assistant") {
-      if (m.intent || (m.suggested_actions && m.suggested_actions.length > 0) || m.feedback) {
+      if (m.intent || (m.suggested_actions && m.suggested_actions.length > 0) || (m.related_docs && m.related_docs.length > 0) || (m.charts && m.charts.length > 0) || m.feedback) {
         extra = {
           intent: m.intent,
           suggested_actions: m.suggested_actions,
           agent_steps: m.agent_steps,
+          related_docs: m.related_docs || [],
+          charts: m.charts || [],
           feedback: m.feedback || null,
           raw_markdown: m.content
         };
@@ -1070,10 +1197,8 @@ async function loadSession(sessionId){
     lastTopDocs = docs;
     renderTopDocsFiltered();
 
-    if(art && art.citations){
-      lastCitations = art.citations;
-      renderCitations(lastCitations);
-    }
+    lastCitations = (art && art.citations) || null;
+    renderCitations(lastCitations);  // 항상 호출: 비면 서브패널 숨김
     currentEvidenceAssistantMsgId = null;
   } catch(e){
     // ignore
@@ -1127,6 +1252,8 @@ function appendMessage(role, content, metaText, msgId, extra = null){
   let chipsHtml = "";
   let stepsHtml = "";
   let actionBarHtml = "";
+  let verifyHtml = "";
+  let chartsHtml = "";
   const isPending = typeof msgId === "string" && msgId.startsWith("PENDING_");
 
   if(role === "user" && extra) {
@@ -1151,6 +1278,22 @@ function appendMessage(role, content, metaText, msgId, extra = null){
           <span class="agent-badge-divider">·</span>
           <span class="agent-badge-time">${escapeHtml(formatTimeForUI(metaText))}</span>
         </div>`;
+    }
+
+    // 💡 검증 배지: claim 근거 지원율 + DB 수치 에코 체크 결과
+    if(extra.verification){
+      const v = extra.verification;
+      const parts = [];
+      if(typeof v.claims_total === "number" && v.claims_total > 0){
+        const ok = v.claims_supported || 0;
+        const cls = ok === v.claims_total ? "is-good" : (ok > 0 ? "is-mid" : "is-bad");
+        parts.push(`<span class="verify-badge ${cls}" title="답변 속 주장 중 근거 문서로 뒷받침된 비율">근거 ${ok}/${v.claims_total}</span>`);
+      }
+      if(v.numeric_ok === false){
+        const nums = (v.unmatched || []).join(", ");
+        parts.push(`<span class="verify-badge is-bad" title="답변 속 일부 수치가 DB 조회 결과에서 확인되지 않았습니다: ${escapeHtml(nums)}">⚠ 수치 확인 필요</span>`);
+      }
+      if(parts.length) verifyHtml = `<div class="verify-badges mb-3">${parts.join("")}</div>`;
     }
 
     // 💡 [개편] 계층형 개별 토글 UI 적용 (숫자 뱃지 + 양끝 정렬)
@@ -1233,12 +1376,23 @@ function appendMessage(role, content, metaText, msgId, extra = null){
         </div>`;
     }
 
-    if(extra.suggested_actions && extra.suggested_actions.length > 0) {
-      const chips = extra.suggested_actions.map(chip => {
+    // 📈 차트: draw_chart 툴이 생성한 시각화 스펙을 SVG로 렌더
+    if(extra.charts && extra.charts.length){
+      chartsHtml = `<div class="msg-charts mt-4 space-y-4">${extra.charts.map(renderChartSvg).join("")}</div>`;
+    }
+
+    // 🔗 KG: DB 통계와 연결된 원본 보고서 문서 칩
+    let kgChipHtml = "";
+    if(extra.related_docs && extra.related_docs.length){
+      kgChipHtml = `<button class="kg-related-chip px-4 py-2 border border-rag/50 text-rag-strong dark:text-rag hover:bg-rag/10 rounded-full text-[11px] font-semibold flex items-center gap-2 hover:-translate-y-0.5" type="button" title="이 통계와 연결된 원본 보고서 문서를 우측 패널에서 보기"><span class="material-symbols-outlined text-sm">link</span> 연결된 보고서 문서 ${extra.related_docs.length}건 보기</button>`;
+    }
+
+    if((extra.suggested_actions && extra.suggested_actions.length > 0) || kgChipHtml) {
+      const chips = (extra.suggested_actions || []).map(chip => {
         if (chip.disabled) return `<button class="px-4 py-2 bg-surface-container dark:bg-[#1f2b4a] text-outline dark:text-[#94a3b8] rounded-full text-[11px] font-semibold flex items-center gap-2 cursor-not-allowed opacity-60" disabled><span class="material-symbols-outlined text-sm">block</span> ${escapeHtml(chip.label)}</button>`;
         return `<button class="action-chip px-4 py-2 border border-outline-variant dark:border-[#475569] hover:bg-surface-container dark:hover:bg-[#1f2b4a] dark:text-[#e7eefc] rounded-full text-[11px] font-semibold flex items-center gap-2 hover:-translate-y-0.5" data-action="${escapeHtml(chip.action)}"><span class="material-symbols-outlined text-sm">bolt</span> ${escapeHtml(chip.label)}</button>`;
       }).join("");
-      chipsHtml = `<div class="pt-4 mt-4 border-t border-surface-container dark:border-[#1f2b4a] flex flex-wrap items-center gap-3">${chips}</div>`;
+      chipsHtml = `<div class="pt-4 mt-4 border-t border-surface-container dark:border-[#1f2b4a] flex flex-wrap items-center gap-3">${kgChipHtml}${chips}</div>`;
     }
   }
 
@@ -1275,10 +1429,12 @@ function appendMessage(role, content, metaText, msgId, extra = null){
       <div class="assistant-card w-full max-w-[90%] bg-white dark:bg-[#0f1a33] border border-surface-container dark:border-[#1f2b4a] rounded-2xl p-6 hover:shadow-md cursor-pointer group/ai-card">
         ${intentHtml}
         <div class="pl-11">
+            ${verifyHtml}
             ${stepsHtml}
             <div class="content markdown-body text-sm leading-relaxed text-on-surface dark:text-[#e7eefc]">
                 ${renderMessageContent(role, content)}
             </div>
+            ${chartsHtml}
             ${actionBarHtml}
             ${chipsHtml}
         </div>
@@ -1308,6 +1464,38 @@ function appendMessage(role, content, metaText, msgId, extra = null){
       });
     });
   } 
+
+  if(role === "assistant"){
+    const kgBtn = div.querySelector(".kg-related-chip");
+    if(kgBtn){
+      kgBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        // 복원된(또는 이전) 메시지의 버튼일 수 있어 우측 패널이 다른 메시지의 근거를 담고 있을 수 있음.
+        // → 이 메시지의 근거를 먼저 로드해 lastTopDocs를 맞춘다.
+        if(msgId && currentEvidenceAssistantMsgId !== msgId){
+          setSelectedAssistantMsg(msgId);
+          try { await loadEvidenceByAssistantMsgId(msgId); } catch(_) {}
+        }
+        // 연결 문서는 백엔드가 top_docs 뒤쪽에 병합해 내려주는데, 기본 표시 개수(5)에 잘려 안 보일 수 있음.
+        // → 전부 렌더하고 패널을 펼친 뒤 첫 KG 연결문서로 스크롤/강조해 확실히 보이게 한다.
+        if(Array.isArray(lastTopDocs) && lastTopDocs.length){
+          topDocsShowN = Math.max(topDocsShowN, lastTopDocs.length);
+        }
+        evidenceHasDocs = true;
+        expandEvidencePanel();      // 접혀 있으면 펼침 (열려 있으면 그대로)
+        renderTopDocsFiltered();
+        requestAnimationFrame(() => {
+          const box = el("topDocs");
+          const target = box ? box.querySelector('[data-kg="1"]') : null;
+          if(target){
+            target.scrollIntoView({ behavior: "smooth", block: "center" });
+            target.classList.add("kg-flash");
+            setTimeout(() => target.classList.remove("kg-flash"), 1600);
+          }
+        });
+      });
+    }
+  }
 
   if(role === "assistant" && msgId && !isPending){
     wireMessageActionBar(div, msgId);
@@ -1345,9 +1533,12 @@ async function loadEvidenceByAssistantMsgId(assistantMsgId){
     lastTopDocs = docs;
     renderTopDocsFiltered();
 
+    lastCitations = art.citations || null;
+    renderCitations(lastCitations);  // 항상 호출: 비면 서브패널 숨김 로직이 돌게 함
     if(art.citations){
-      lastCitations = art.citations;
-      renderCitations(lastCitations);
+      // 히스토리 로드 시점엔 citation 개수를 몰라 [n]이 평문으로 남아 있음 → 지금 pill로 변환
+      const msgNode = document.querySelector(`.msg.assistant[data-msg-id="${CSS.escape(assistantMsgId)}"]`);
+      if(msgNode) enhanceRenderedMessage(msgNode);
     }
   } catch(e){
   }
@@ -1358,6 +1549,10 @@ function clearEvidencePanels(){
   lastCitations = null;
   el("topDocs").innerHTML = "";
   el("citations").innerHTML = "";
+  // citations 서브패널 표시 상태를 기본(보임)으로 초기화 (renderCitations가 이후 다시 판단)
+  const cbox = el("citations");
+  const cpanel = (cbox && cbox.closest) ? cbox.closest(".panel") : null;
+  if(cpanel) cpanel.style.display = "";
 }
 
 /* ---------- transform RAG hit -> UI topdoc ---------- */
@@ -1450,6 +1645,118 @@ function pickMailMeta(af){
   return { mailFrom, mailDate, edmLinks };
 }
 
+/* ---------- 차트 렌더 (draw_chart 스펙 → 인라인 SVG) ----------
+   색은 Cognitive Trace에서 dataviz 스킬로 검증된 chart-1~5 팔레트를 재사용한다
+   (chat.css에 --chart-1~5 정의, light/dark 별도). 값은 직접 라벨, 텍스트는 잉크 토큰. */
+const CHART_PALETTE = ["var(--chart-1)","var(--chart-2)","var(--chart-3)","var(--chart-4)","var(--chart-5)"];
+
+function _niceNum(v){
+  const n = Number(v);
+  if(!isFinite(n)) return "0";
+  if(Math.abs(n) >= 1000) return n.toLocaleString();
+  return (Math.round(n * 100) / 100).toString();
+}
+
+function renderChartSvg(spec){
+  if(!spec || !Array.isArray(spec.series) || !spec.series.length) return "";
+  const type = spec.chart_type || "bar";
+  const title = spec.title || "";
+  const s = spec.series.slice(0, 12);
+  const head = title ? `<div class="msg-chart-title">${escapeHtml(title)}</div>` : "";
+  let body = "";
+  if(type === "pie"){
+    body = _pieSvg(s);
+  } else if(type === "line"){
+    body = _lineSvg(s, spec);
+  } else {
+    body = _barSvg(s, spec);
+  }
+  return `<figure class="msg-chart">${head}${body}</figure>`;
+}
+
+function _axisMax(vals){
+  const mx = Math.max(0, ...vals);
+  if(mx <= 0) return 1;
+  const pow = Math.pow(10, Math.floor(Math.log10(mx)));
+  return Math.ceil(mx / pow) * pow;
+}
+
+function _barSvg(s, spec){
+  const W = 520, H = 260, padL = 44, padR = 16, padT = 12, padB = 54;
+  const iw = W - padL - padR, ih = H - padT - padB;
+  const vals = s.map(d => Number(d.value) || 0);
+  const max = _axisMax(vals);
+  const bw = iw / s.length;
+  const barW = Math.min(46, bw * 0.62);
+  let grid = "";
+  for(let g=0; g<=4; g++){
+    const y = padT + ih * (g/4);
+    const val = max * (1 - g/4);
+    grid += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" class="mc-grid"/>`;
+    grid += `<text x="${padL-6}" y="${(y+3).toFixed(1)}" class="mc-axis" text-anchor="end">${escapeHtml(_niceNum(val))}</text>`;
+  }
+  const bars = s.map((d, i) => {
+    const v = Number(d.value) || 0;
+    const bh = ih * (v / max);
+    const x = padL + bw * i + (bw - barW) / 2;
+    const y = padT + ih - bh;
+    const color = CHART_PALETTE[i % CHART_PALETTE.length];
+    const label = String(d.label || "");
+    const short = label.length > 7 ? label.slice(0,7)+"…" : label;
+    return `<g>
+      <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0,bh).toFixed(1)}" rx="4" fill="${color}"><title>${escapeHtml(label)}: ${escapeHtml(_niceNum(v))}</title></rect>
+      <text x="${(x+barW/2).toFixed(1)}" y="${(y-5).toFixed(1)}" class="mc-val" text-anchor="middle">${escapeHtml(_niceNum(v))}</text>
+      <text x="${(x+barW/2).toFixed(1)}" y="${(padT+ih+16).toFixed(1)}" class="mc-cat" text-anchor="middle" transform="rotate(0)">${escapeHtml(short)}</text>
+    </g>`;
+  }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="mc-svg" role="img" aria-label="${escapeHtml(spec.title||'막대 차트')}">${grid}${bars}</svg>`;
+}
+
+function _lineSvg(s, spec){
+  const W = 520, H = 250, padL = 44, padR = 16, padT = 14, padB = 44;
+  const iw = W - padL - padR, ih = H - padT - padB;
+  const vals = s.map(d => Number(d.value) || 0);
+  const max = _axisMax(vals);
+  const xAt = i => padL + (s.length === 1 ? iw/2 : iw * i/(s.length-1));
+  const yAt = v => padT + ih * (1 - v/max);
+  let grid = "";
+  for(let g=0; g<=4; g++){
+    const y = padT + ih*(g/4);
+    grid += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" class="mc-grid"/>`;
+    grid += `<text x="${padL-6}" y="${(y+3).toFixed(1)}" class="mc-axis" text-anchor="end">${escapeHtml(_niceNum(max*(1-g/4)))}</text>`;
+  }
+  const pts = s.map((d,i) => `${xAt(i).toFixed(1)},${yAt(Number(d.value)||0).toFixed(1)}`).join(" ");
+  const dots = s.map((d,i) => {
+    const v = Number(d.value)||0;
+    const label = String(d.label||"");
+    return `<g>
+      <circle cx="${xAt(i).toFixed(1)}" cy="${yAt(v).toFixed(1)}" r="4.5" fill="var(--chart-1)" stroke="var(--color-surface)" stroke-width="2"><title>${escapeHtml(label)}: ${escapeHtml(_niceNum(v))}</title></circle>
+      <text x="${xAt(i).toFixed(1)}" y="${(padT+ih+16).toFixed(1)}" class="mc-cat" text-anchor="middle">${escapeHtml(label.length>7?label.slice(0,7)+"…":label)}</text>
+    </g>`;
+  }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="mc-svg" role="img" aria-label="${escapeHtml(spec.title||'꺾은선 차트')}">${grid}<polyline points="${pts}" fill="none" stroke="var(--chart-1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>${dots}</svg>`;
+}
+
+function _pieSvg(s){
+  const total = s.reduce((a,d)=>a+(Number(d.value)||0),0) || 1;
+  const cx=90, cy=90, r=78, ir=44;
+  let ang = -Math.PI/2;
+  const arcs = s.map((d,i)=>{
+    const frac = (Number(d.value)||0)/total;
+    const a2 = ang + frac*2*Math.PI;
+    const large = frac > 0.5 ? 1 : 0;
+    const x1=cx+r*Math.cos(ang), y1=cy+r*Math.sin(ang);
+    const x2=cx+r*Math.cos(a2), y2=cy+r*Math.sin(a2);
+    const xi1=cx+ir*Math.cos(a2), yi1=cy+ir*Math.sin(a2);
+    const xi2=cx+ir*Math.cos(ang), yi2=cy+ir*Math.sin(ang);
+    ang = a2;
+    const color = CHART_PALETTE[i % CHART_PALETTE.length];
+    return `<path d="M${x1.toFixed(1)},${y1.toFixed(1)} A${r},${r} 0 ${large} 1 ${x2.toFixed(1)},${y2.toFixed(1)} L${xi1.toFixed(1)},${yi1.toFixed(1)} A${ir},${ir} 0 ${large} 0 ${xi2.toFixed(1)},${yi2.toFixed(1)} Z" fill="${color}" stroke="var(--color-surface)" stroke-width="2"><title>${escapeHtml(String(d.label||""))}: ${escapeHtml(_niceNum(d.value))} (${Math.round(frac*100)}%)</title></path>`;
+  }).join("");
+  const legend = s.map((d,i)=>`<div class="mc-leg-item"><span class="mc-leg-dot" style="background:${CHART_PALETTE[i%CHART_PALETTE.length]}"></span>${escapeHtml(String(d.label||""))} <span class="mc-leg-val">${escapeHtml(_niceNum(d.value))}</span></div>`).join("");
+  return `<div class="mc-pie-wrap"><svg viewBox="0 0 180 180" class="mc-pie" role="img">${arcs}</svg><div class="mc-legend">${legend}</div></div>`;
+}
+
 /* ---------- TopDocs render ---------- */
 function renderTopDocsFiltered(){
   const box = el("topDocs");
@@ -1460,6 +1767,24 @@ function renderTopDocsFiltered(){
   if (typeof toggleEvidencePanel === "function") toggleEvidencePanel(docs.length > 0);
 
   docs.forEach((d, i) => {
+    // 📊 DB 분석 기록 카드 (REPORT_ANALYSIS의 DB 사실 chunk) — 일반 문서 카드와 구분해 렌더.
+    // doc_id 접두어 "db:"로 판별해 히스토리 복원(kg_source 유실) 후에도 동작.
+    const isDbFact = (d.kg_source === "db") || (typeof d.doc_id === "string" && d.doc_id.startsWith("db:"));
+    if(isDbFact){
+      const factText = (d.merge_title_content || "").replace(/^\[[^\]]*\]\n?/, "").trim();
+      const dbCard = document.createElement("div");
+      dbCard.className = "bg-rag/5 dark:bg-[#0f1a33] dark:text-[#e7eefc] rounded-lg p-3 shadow-sm border border-rag/30 dark:border-[#1f2b4a] border-l-4 border-l-rag";
+      dbCard.innerHTML = `
+        <div class="flex items-center gap-2 mb-2">
+          <span class="material-symbols-outlined text-rag-strong dark:text-rag" style="font-size:16px;">database</span>
+          <span class="text-[11px] font-bold text-rag-strong dark:text-rag">DB 분석 기록 · 보고서 ${escapeHtml(String(d.report_index || (d.doc_id || "").replace(/^db:/, "")))}</span>
+        </div>
+        <div class="text-[11px] leading-relaxed" style="white-space:pre-wrap">${escapeHtml(factText)}</div>
+      `;
+      box.appendChild(dbCard);
+      return;
+    }
+
     const title = stripEnriched(d.title || "(no title)");
     const score = (d.score == null) ? "" : Number(d.score).toFixed(5);
     const meta = pickMailMeta(d.additionalField || {});
@@ -1468,6 +1793,18 @@ function renderTopDocsFiltered(){
     if(meta.mailFrom) tagsHtml += `<span class="px-2 py-0.5 bg-surface-container-high dark:bg-[#1f2b4a] text-secondary dark:text-[#94a3b8] text-[9px] rounded">#${escapeHtml(meta.mailFrom)}</span>`;
     if(meta.mailDate) tagsHtml += `<span class="px-2 py-0.5 bg-surface-container-high dark:bg-[#1f2b4a] text-secondary dark:text-[#94a3b8] text-[9px] rounded">#${escapeHtml(meta.mailDate)}</span>`;
     
+    // 💡 [Phase 3] KG 연결 근거 배지 (심층분석 근거 문서의 provenance 표시)
+    const kgSrc = d.kg_source || (d._index === "kg-related" ? "kg" : "");
+    if(kgSrc === "search"){
+      tagsHtml += `<span class="px-2 py-0.5 bg-surface-container-high dark:bg-[#1f2b4a] text-secondary dark:text-[#94a3b8] text-[9px] rounded" title="KG 연결 문서가 없어 시맨틱 검색으로 보완된 근거">🔎 검색 보완</span>`;
+    }else if(kgSrc && kgSrc !== "db"){
+      const tipParts = [];
+      if(d.kg_evidence) tipParts.push(d.kg_evidence);
+      if(d.kg_confidence != null) tipParts.push(`신뢰도 ${Number(d.kg_confidence).toFixed(2)}`);
+      const tip = tipParts.join(" · ") || "지식그래프로 연결된 원본 보고서 문서";
+      tagsHtml += `<span class="px-2 py-0.5 bg-rag/10 text-rag-strong dark:text-rag text-[9px] font-semibold rounded" title="${escapeHtml(tip)}">🧩 KG 연결</span>`;
+    }
+
     // 💡 [복구 완료] 분석보고서 URL(edmLinks) 클릭 기능 복구 (이슈 4 해결)
     if(meta.edmLinks && meta.edmLinks.length){
       meta.edmLinks.forEach(u => {
@@ -1476,7 +1813,11 @@ function renderTopDocsFiltered(){
       });
     }
 
+    // 💡 KG 연결문서 여부 (연결문서 버튼 스크롤 타깃 표식)
+    const isKgDoc = (d._index === "kg-related") || (d.kg_source && d.kg_source !== "db" && d.kg_source !== "search");
+
     const card = document.createElement("div");
+    if(isKgDoc) card.setAttribute("data-kg", "1");
     // 💡 [색상 수정] 다크 모드 배경색(dark:bg-[#0f1a33]) 직접 주입
     card.className = "bg-white dark:bg-[#0f1a33] dark:text-[#e7eefc] rounded-lg p-3 shadow-sm border border-surface-container dark:border-[#1f2b4a] border-l-4 border-l-primary dark:border-l-[#60a5fa] cursor-pointer hover:-translate-y-0.5";
     card.innerHTML = `
@@ -1502,9 +1843,14 @@ function renderCitations(citations){
   const box = el("citations");
   box.innerHTML = "";
   const ans = (citations && citations.answer) ? citations.answer : [];
-  
+
+  // 근거 문장(citations)이 없으면 하단 'Sentence Citations' 서브패널을 숨겨
+  // Top Documents가 전체 높이를 쓰게 한다(빈 박스로 패널이 비어 보이는 문제 방지).
+  // 인라인 style로 토글해 .panel의 flex 클래스와 우선순위가 충돌하지 않게 함.
+  const panel = box.closest ? box.closest(".panel") : null;
+  if(panel) panel.style.display = ans.length ? "" : "none";
+
   if(!ans.length){
-    box.innerHTML = `<div class="text-xs text-secondary dark:text-[#94a3b8] p-3 bg-surface-container-low dark:bg-[#101f3f] rounded">(근거 정보 없음)</div>`;
     return;
   }
 
@@ -1512,19 +1858,26 @@ function renderCitations(citations){
     const sentence = (a.sentence || "").trim();
     const cites = a.citations || [];
 
+    // 💡 claim 지원 상태 아이콘 (✓ 근거 확인 / ◐ 부분 / ⚠ 근거 없음)
+    const support = (a.support || "").toLowerCase();
+    let supIcon = "";
+    if(support === "supported")        supIcon = `<span class="cite-support is-good" title="근거 문서로 명확히 뒷받침됨">✓</span>`;
+    else if(support === "unsupported") supIcon = `<span class="cite-support is-bad" title="근거 문서에서 확인되지 않은 주장입니다">⚠</span>`;
+    else if(support)                   supIcon = `<span class="cite-support is-mid" title="부분적으로만 뒷받침됨">◐</span>`;
+
     const div = document.createElement("div");
     // 💡 [색상 수정] 다크 모드 배경색 직접 주입
     div.className = "bg-white dark:bg-[#0f1a33] dark:text-[#e7eefc] p-3 border border-surface-container dark:border-[#1f2b4a] rounded-lg mb-3 shadow-sm";
     div.innerHTML = `
-      <div class="text-[12px] leading-relaxed mb-2"><span class="font-bold text-primary dark:text-[#60a5fa]">${idx+1}.</span> ${escapeHtml(sentence)}</div>
-      <button class="cite-btn px-2 py-1 bg-surface-container dark:bg-[#1f2b4a] hover:bg-surface-container-high dark:hover:bg-[#334155] rounded text-[10px] font-semibold">근거 문서 보기</button>
+      <div class="text-[12px] leading-relaxed mb-2"><span class="font-bold text-primary dark:text-[#60a5fa]">${idx+1}.</span> ${supIcon} ${escapeHtml(sentence)}</div>
+      ${cites.length ? `<button class="cite-btn px-2 py-1 bg-surface-container dark:bg-[#1f2b4a] hover:bg-surface-container-high dark:hover:bg-[#334155] rounded text-[10px] font-semibold">근거 문서 보기</button>` : `<div class="text-[10px] text-error/80">연결된 근거 문서 없음</div>`}
       <div class="cite-list hidden mt-3 space-y-2 border-t border-surface-container dark:border-[#1f2b4a] pt-2"></div>
     `;
 
     const btn = div.querySelector(".cite-btn");
     const list = div.querySelector(".cite-list");
 
-    btn.onclick = () => {
+    if(btn) btn.onclick = () => {
       if(list.classList.contains("hidden")){
         list.classList.remove("hidden");
         list.innerHTML = "";
@@ -2209,8 +2562,8 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
       displayUserText = "🔄 조건을 넓혀서 다시 검색 중...";
     } else {
       rawSendText = overrideActionTag + " " + queryToUse;
-      if (overrideActionTag === "[DB_ANALYSIS]") displayUserText = "📊 DB 통계 Agent 호출 중...";
-      else if (overrideActionTag === "[RAG_KNOWLEDGE]") displayUserText = "📖 문서 검색 Agent 호출 중...";
+      if (overrideActionTag === "[DB_ANALYSIS]") displayUserText = "📊 같은 질문을 DB 통계로 확인하고 있어요...";
+      else if (overrideActionTag === "[RAG_KNOWLEDGE]") displayUserText = "📖 같은 질문을 사내 문서에서 찾아보고 있어요...";
       else displayUserText = "🔄 다시 검색 중...";
     }
     lastRealUserQuery = queryToUse;
@@ -2243,7 +2596,7 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
          <span class="agent-badge-icon"><span class="material-symbols-outlined animate-spin" style="font-size:14px;">progress_activity</span></span>
          <span class="agent-badge-name">분석 중</span>
        </span>
-       <span class="agent-status-text streaming-caret transition-opacity duration-300 opacity-100 tracking-wide">시스템 에이전트 연결 중</span>
+       <span class="agent-status-text streaming-caret transition-opacity duration-300 opacity-100 tracking-wide">답변 준비를 시작하고 있어요...</span>
     </div>
   `;
   appendMessage("assistant", loadingHtml, null, pendingId);
@@ -2277,38 +2630,46 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
     const pendNode = document.querySelector(`.msg.assistant[data-msg-id="${pendingId}"]`);
     const statusTextNode = pendNode ? pendNode.querySelector(".agent-status-text") : null;
     let finalRes = null;
+    let buf = "";
+
+    const processLine = (line) => {
+      const t = (line || "").trim();
+      if(!t) return;
+      try {
+        const parsed = JSON.parse(t);
+        if (parsed.type === "step") {
+          // 💡 객체형(data.thought)과 메시지형(message) step 모두 안전 처리
+          const displayThought = (parsed.data && parsed.data.thought) || parsed.message || "로딩 중...";
+          if (statusTextNode && statusTextNode.textContent !== displayThought) {
+            statusTextNode.style.opacity = '0';
+            setTimeout(() => {
+              statusTextNode.textContent = displayThought;
+              statusTextNode.style.opacity = '1';
+            }, 150);
+          }
+        } else if (parsed.type === "final") {
+          finalRes = parsed.data;
+        }
+      } catch (e) {
+        console.error("Chunk parse error:", e);
+      }
+    };
 
     while (!done) {
       const { value, done: readerDone } = await reader.read();
       done = readerDone;
       if (value) {
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n").filter(line => line.trim() !== "");
-        
-        for (const line of lines) {
-          try {
-            const parsed = JSON.parse(line);
-            
-            if (parsed.type === "step") {
-              // 💡 객체로 변경된 데이터에서 'thought'만 추출하여 라이브 로딩 텍스트로 사용
-              const displayThought = parsed.data.thought || parsed.message || "로딩 중...";
-              
-              if (statusTextNode && statusTextNode.textContent !== displayThought) {
-                statusTextNode.style.opacity = '0';
-                setTimeout(() => {
-                  statusTextNode.textContent = displayThought;
-                  statusTextNode.style.opacity = '1';
-                }, 150);
-              }
-            } else if (parsed.type === "final") {
-              finalRes = parsed.data;
-            }
-          } catch (e) {
-             console.error("Chunk parse error:", e);
-          }
-        }
+        // ⚠️ NDJSON 한 줄(특히 대용량 final)이 여러 read() 조각으로 쪼개져 도착할 수 있으므로
+        // 반드시 라인 버퍼로 이어붙인 뒤 완전한 줄만 파싱한다. (잘린 조각을 그대로 parse하면
+        // final을 통째로 잃어 답변이 빈 화면으로 남는 버그가 있었음)
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop(); // 마지막 불완전 조각은 다음 read와 이어붙임
+        for (const line of lines) processLine(line);
       }
     }
+    buf += decoder.decode(); // 디코더 잔여 바이트 flush
+    if (buf.trim()) processLine(buf); // 개행 없이 끝난 마지막 라인 처리
 
     if (pendNode) pendNode.remove(); 
     
@@ -2335,20 +2696,38 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
         const extraData = {
           intent: finalRes.intent,
           suggested_actions: finalRes.suggested_actions,
-          agent_steps: finalRes.agent_steps
+          agent_steps: finalRes.agent_steps,
+          verification: finalRes.verification || null,
+          related_docs: finalRes.related_docs || []
         };
+
+        // 인용 pill 변환(convertCitationPills)이 렌더 시점에 citation 개수를 참조하므로
+        // appendMessage보다 먼저 세팅해야 한다.
+        currentEvidenceAssistantMsgId = finalRes.assistant_msg_id || null;
+        lastTopDocs = finalRes.top_docs || [];
+        lastCitations = finalRes.citations || {answer:[], final:finalRes.assistant_text};
 
         appendMessage("assistant", finalRes.assistant_text, new Date().toISOString(), finalRes.assistant_msg_id || null, extraData);
         setSelectedAssistantMsg(finalRes.assistant_msg_id || "");
 
-        currentEvidenceAssistantMsgId = finalRes.assistant_msg_id || null;
-        lastTopDocs = finalRes.top_docs || [];
         renderTopDocsFiltered();
-
-        lastCitations = finalRes.citations || {answer:[], final:finalRes.assistant_text};
         renderCitations(lastCitations);
 
         await refreshSessions();
+    } else {
+      // 2차 방어: 스트림은 끝났지만 final을 못 받은 경우 — 답변은 이미 DB에 저장돼 있으므로
+      // 빈 화면 대신 저장된 메시지를 다시 불러와 자동 복구한다 (수동 F5와 동일 효과).
+      console.error("[chat] final chunk missing — recovering from persisted messages");
+      await refreshSessions();
+      if (currentSessionId) {
+        await loadSession(currentSessionId);
+        if (window.Toast) window.Toast.warn("연결이 불안정해 생성된 답변을 다시 불러왔어요.");
+      } else {
+        appendMessage("assistant",
+          `<div class="rounded-xl border border-error/30 bg-error/5 text-error p-4 text-sm">
+             응답을 받는 중 연결이 끊겼습니다. 좌측 대화 목록에서 방금 대화를 선택하면 생성된 답변을 확인할 수 있어요.
+           </div>`, new Date().toISOString(), null);
+      }
     }
 
   } catch(e){
@@ -2632,8 +3011,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   
   if(el("resizer1")) setupVerticalResizer("resizer1", "#sidebar", ".main");
   // 우측 패널 선택자를 기존 ".right"에서 Tailwind가 적용된 "#rightPanel"로 수정!
-  if(el("resizer2")) setupVerticalResizer("resizer2", ".main", "#rightPanel"); 
-  if(el("hresizer1")) setupHorizontalResizer("hresizer1", '.panel[data-panel="topdocs"]', '.panel[data-panel="citations"]');
+  if(el("resizer2")) setupVerticalResizer("resizer2", ".main", "#rightPanel");
+  // Top Documents / Sentence Citations는 균등 50/50 + 각자 스크롤 (가로 리사이저 제거)
+
+  // 근거 패널 접기/펴기
+  if(el("evidenceCollapse")) el("evidenceCollapse").addEventListener("click", collapseEvidencePanel);
+  if(el("evidenceRail")) el("evidenceRail").addEventListener("click", expandEvidencePanel);
+
+  // Top Documents 표시 개수 셀렉트
+  if(el("topDocsShowN")) el("topDocsShowN").addEventListener("change", applyTopDocsN);
 
   await refreshSessions();
   newSession();

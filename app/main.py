@@ -40,6 +40,18 @@ app = FastAPI(title="RAG Search Web", version=VERSION)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+
+@app.on_event("startup")
+async def _kg_startup():
+    """Knowledge Graph 테이블 보장 + 백그라운드 빌드 (기동 시 1회 + 24h 주기).
+    실패해도 서버 기동은 막지 않는다."""
+    try:
+        from app.kg_builder import ensure_kg_tables, start_background_rebuild
+        ensure_kg_tables()
+        start_background_rebuild()
+    except Exception as e:
+        print(f"[KG] 초기화 스킵 (그래프 기능 비활성): {e}")
+
 MAX_HISTORY_MESSAGES = 6  # 최근 6개 메시지 = 대략 최근 3턴
 RETRIEVE_TOP_K_DEFAULT = 12
 EXCLUDED_TOPDOC_INDEXES = {"rp-term-ver1"}
@@ -134,6 +146,32 @@ async def admin_dictionary_page(request: Request):
     })
 
 
+@app.get("/admin/guide", response_class=HTMLResponse)
+async def admin_guide_page(request: Request):
+    user = _require_user(request)
+    from app.guide_repo import load_guide
+    return templates.TemplateResponse("admin_guide.html", {
+        "request": request,
+        "user_id": user,
+        "active_tab": "admin",
+        "is_admin": user in ADMIN_USER_IDS,
+        "guide_text": load_guide(),
+    })
+
+
+@app.post("/api/admin/guide")
+async def api_save_guide(request: Request):
+    """분석 프로세스 가이드 문서 저장 (관리자 전용)."""
+    user = _require_user(request)
+    if user not in ADMIN_USER_IDS:
+        raise HTTPException(status_code=403, detail="가이드 편집은 관리자 권한이 필요합니다.")
+    body = await request.json()
+    from app.guide_repo import save_guide
+    if not save_guide(body.get("text") or ""):
+        raise HTTPException(status_code=500, detail="가이드 저장에 실패했습니다.")
+    return {"ok": True}
+
+
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request):
     user = _require_user(request)
@@ -172,10 +210,12 @@ async def analytics_page(request: Request):
 @app.get("/trace", response_class=HTMLResponse)
 async def trace_page(request: Request):
     user = _require_user(request)
-    # Phase 5에서 구현할 인지 추적 페이지
-    return templates.TemplateResponse("base.html", {
+    return templates.TemplateResponse("trace.html", {
         "request": request,
-        "user_id": user})
+        "user_id": user,
+        "active_tab": "trace",
+        "is_admin": user in ADMIN_USER_IDS,
+    })
 
 
 # =========================
@@ -227,6 +267,8 @@ async def api_get_session_messages(session_id: str, request: Request):
             m["intent"] = rag_info.get("intent")
             m["suggested_actions"] = rag_info.get("suggested_actions", [])
             m["agent_steps"] = rag_info.get("agent_steps", [])
+            m["related_docs"] = rag_info.get("related_docs", [])
+            m["charts"] = rag_info.get("charts", [])
             m["feedback"] = feedback_map.get(ast_id)
 
     return {"messages": msgs, "search_logs_by_user_msg_id": search_log_by_user_msg_id}
@@ -254,6 +296,9 @@ async def api_chat_stream(request: Request):
     elif user_text.startswith("[RAG_KNOWLEDGE]"):
         forced_intent = "RAG_KNOWLEDGE"
         user_text = user_text.replace("[RAG_KNOWLEDGE]", "").strip()
+    elif user_text.startswith("[REPORT_ANALYSIS]"):
+        forced_intent = "REPORT_ANALYSIS"
+        user_text = user_text.replace("[REPORT_ANALYSIS]", "").strip()
 
     index_names = body.get("index_names")
     if isinstance(index_names, list):
@@ -285,7 +330,7 @@ async def api_chat_stream(request: Request):
 
     # 💡 스트리밍 제너레이터 함수
     async def generate_response():
-        yield json.dumps({"type": "step", "message": "🔄 질의어 문맥 분석 및 정규화 진행 중..."}, ensure_ascii=False) + "\n"
+        yield json.dumps({"type": "step", "message": "🔄 질문을 이해하고 검색에 맞게 다듬고 있어요..."}, ensure_ascii=False) + "\n"
 
         rewritten_query = user_text
         try:
@@ -336,7 +381,7 @@ async def api_chat_stream(request: Request):
             previous_messages.insert(0, {"role": "system", "content": system_prompt})
             
             term_keys = ", ".join(unique_terms.keys())
-            glossary_step_log = f"📚 사내 용어 사전 지식 적용 완료 ({term_keys})"
+            glossary_step_log = f"📚 사내 용어 사전에서 관련 용어의 뜻을 확인했어요 ({term_keys})"
 
         retrieval_query = (query_norm.get("expanded_query") or rewritten_query).strip() or rewritten_query
 
@@ -349,7 +394,8 @@ async def api_chat_stream(request: Request):
             previous_messages=previous_messages,
             excluded_indexes=EXCLUDED_TOPDOC_INDEXES,
             ui_top_k=ui_top_k,
-            forced_intent=forced_intent
+            forced_intent=forced_intent,
+            index_names=index_names
         ):
             # 💡 [핵심 해킹 로직] 에이전트 스트림 청크를 가로채어 배열 맨 앞에 로그를 끼워 넣습니다.
             if glossary_step_log:
@@ -396,9 +442,13 @@ async def api_chat_stream(request: Request):
                 "detected_terms": query_norm.get("detected_terms") or [],
                 "expansion_terms": query_norm.get("expansion_terms") or {},
                 "top_docs": final_data.get("top_docs", []),
+                "related_docs": final_data.get("related_docs", []),
+                "charts": final_data.get("charts", []),
                 "intent" : final_data.get("intent"),
                 "suggested_actions" : final_data.get("suggested_actions", []),
-                "agent_steps" : final_data.get("steps", [])
+                "agent_steps" : final_data.get("steps", []),
+                # 평가 대시보드(Cognitive Trace) 시계열 집계용
+                "verification": final_data.get("verification", {})
             }
             
             repo.insert_turn_artifact(
@@ -451,7 +501,10 @@ async def api_chat_stream(request: Request):
                 "expansion_terms": query_norm.get("expansion_terms") or {},
                 "intent": final_data.get("intent"),
                 "suggested_actions": final_data.get("suggested_actions", []),
-                "agent_steps": final_data.get("steps", [])
+                "agent_steps": final_data.get("steps", []),
+                "verification": final_data.get("verification", {}),
+                "related_docs": final_data.get("related_docs", []),
+                "charts": final_data.get("charts", [])
             }
             yield json.dumps({"type": "final", "data": final_res_payload}, ensure_ascii=False) + "\n"
 
@@ -482,6 +535,9 @@ async def api_chat(request: Request):
     elif user_text.startswith("[RAG_KNOWLEDGE]"):
         forced_intent = "RAG_KNOWLEDGE"
         user_text = user_text.replace("[RAG_KNOWLEDGE]", "").strip()
+    elif user_text.startswith("[REPORT_ANALYSIS]"):
+        forced_intent = "REPORT_ANALYSIS"
+        user_text = user_text.replace("[REPORT_ANALYSIS]", "").strip()
 
     index_names = body.get("index_names")
     if isinstance(index_names, list):
@@ -544,12 +600,15 @@ async def api_chat(request: Request):
             previous_messages=previous_messages,
             excluded_indexes=EXCLUDED_TOPDOC_INDEXES,
             ui_top_k=ui_top_k,
-            forced_intent=forced_intent 
+            forced_intent=forced_intent,
+            index_names=index_names
         )
         final_answer = agent_result.get("final_answer", "응답을 생성하지 못했습니다.")
         citations_json = agent_result.get("citations", {"answer": [], "final": final_answer, "claims": []})
         top_docs_ui = agent_result.get("top_docs", [])
-       
+        related_docs = agent_result.get("related_docs", [])
+        charts = agent_result.get("charts", [])
+
         intent = agent_result.get("intent")
         suggested_actions = agent_result.get("suggested_actions", [])
         
@@ -567,6 +626,8 @@ async def api_chat(request: Request):
        
         intent = "GENERAL_CHAT"
         suggested_actions = []
+        related_docs = []
+        charts = []
         agent_steps = [f"❌ 시스템 에러 발생: {str(e)}"]
 
     assistant_msg_id = repo.insert_message(session_id, user, "assistant", final_answer)
@@ -580,6 +641,8 @@ async def api_chat(request: Request):
         "detected_terms": query_norm.get("detected_terms") or [],
         "expansion_terms": query_norm.get("expansion_terms") or {},
         "top_docs": top_docs_ui,
+        "related_docs": related_docs,
+        "charts": charts,
         "intent" : intent,
         "suggested_actions" : suggested_actions,
         "agent_steps" : agent_steps
@@ -639,225 +702,15 @@ async def api_chat(request: Request):
 # =========================
 # API: Digital Archive (Local Exact Match) - 💡 신규 추가
 # =========================
-# 속도 최적화를 위해 파일을 한 번만 읽어 메모리에 저장하는 전역 캐시
-_ARCHIVE_CACHE = []
-# _CACHE_LOADED = False
-_LAST_PROCESSED_MTIME = 0.0  # processed.json의 마지막 수정 시간 저장
-_LAST_CHECK_TIME = 0.0 
-# 24시간(86,400초) 간격으로 체크하도록 수정
-CACHE_CHECK_INTERVAL = 86400 
-
-# processed.json 파일 경로 설정
-PROCESSED_JSON_PATH = PARSE_ROOT / "_state" / "processed.json"
+# 로더 본체는 app/archive_loader.py로 이동 (kg_builder와 공유)
+from app.archive_loader import (
+    get_local_archive_docs,
+    _parse_date_to_timestamp,
+    CACHE_CHECK_INTERVAL,
+)
 
 # 로그인 후 표시할 공지사항 파일 (프로젝트 루트, 관리자가 직접 편집)
 ANNOUNCEMENTS_PATH = Path(__file__).resolve().parent.parent / "announcements.json"
-
-# 허용된 작성자 화이트리스트 (이름만 작성)
-ALLOWED_AUTHORS = ["성지아 <j.na@s.com>", "김지수 <s.go@s.com>", "고미연 <y.ko@s.com>", "김영인 <i.kim@s.com>", "진연수 <s.jin@s.com>", "유미래 <g.y@s.com>", "신현빈 <s.shin@s.com>", "서세린 <s.se@s.com>", "오슬미 <s.y@s.com>", "이자린 <k.lee@s.com>", "김장미 <m.kim@s.com>", "김소희 <j.kim@s.com>", "이나연 <h.oh@s.com>", "윤희서 <k.y@s.com>", "미인지 <s.mg@s.com>"]
-
-# 1. 날짜 문자열을 진짜 시간(Timestamp) 숫자로 변환하는 강력한 함수
-def _parse_date_to_timestamp(date_str):
-    if not date_str:
-        return 0.0 # 날짜가 아예 없으면 맨 뒤로 보냄
-    
-    # 1) 이메일 표준 형식 시도 (예: Fri, 01 Aug 2025 12:34:56 +0900)
-    try:
-        dt = parsedate_to_datetime(date_str)
-        if dt is not None:
-            return dt.timestamp()
-    except Exception:
-        pass
-        
-    # 2) 정규식을 이용해 강제로 연/월/일 추출 (예: 2026-04-10, 2026. 4. 10, 2026년 4월 등)
-    match = re.search(r'(\d{4})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})', date_str)
-    if match:
-        try:
-            y, m, d = map(int, match.groups())
-            return datetime(y, m, d).timestamp()
-        except Exception:
-            pass
-            
-    return 0.0 # 파싱에 완전히 실패하면 맨 뒤로
-
-# 💡 2. 로컬 문서 검색 로직
-def get_local_archive_docs():
-    global _ARCHIVE_CACHE, _LAST_PROCESSED_MTIME, _LAST_CHECK_TIME
-    
-    now = time.time()
-
-    # 마지막 체크 후 24시간이 지나지 않았고 캐시가 있다면 즉시 반환
-    if now - _LAST_CHECK_TIME < CACHE_CHECK_INTERVAL and _ARCHIVE_CACHE:
-        # 💡 이 조건문 덕분에 서버는 24시간 동안 파일 시스템을 건드리지 않고 
-        # 메모리(RAM)에 있는 데이터를 0.0001초 만에 반환합니다.
-        return _ARCHIVE_CACHE
-    
-    if not PROCESSED_JSON_PATH.exists():
-        print(f"[Archive] {PROCESSED_JSON_PATH} 파일을 찾을 수 없습니다.")
-        return []
-
-    _LAST_CHECK_TIME = now
-    current_mtime = os.path.getmtime(PROCESSED_JSON_PATH)
-
-    if _LAST_PROCESSED_MTIME == current_mtime and _ARCHIVE_CACHE:
-        return _ARCHIVE_CACHE
-
-    print(f"[Archive] 24시간 경과: 주기적 캐시 갱신 시작... (mtime: {current_mtime})")
-    
-    try:
-        with open(PROCESSED_JSON_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        
-        items = data.get("items", {})
-        print(f"[Archive Debug] JSON에서 읽어온 전체 아이템 수: {len(items)}")
-        
-        category_max_versions = {}
-        for rel_path in items.keys():
-            parts = rel_path.split('/')
-            if len(parts) >= 2:
-                category = parts[0]
-                version_str = parts[1]
-                match = re.search(r'ver(\d+)', version_str)
-                if match:
-                    v_num = int(match.group(1))
-                    if v_num > category_max_versions.get(category, -1):
-                        category_max_versions[category] = v_num
-
-        print(f"[Archive Debug] 탐지된 카테고리별 최신 버전: {category_max_versions}")
-
-        docs = []
-        
-        # 💡 스킵 사유를 기록할 카운터
-        skip_reasons = {
-            "status_not_done": 0,
-            "not_latest_version": 0,
-            "md_file_not_found": 0,
-            "no_mail_meta_tag": 0,
-            "parse_error": 0
-        }
-        
-        first_missing_path = None # 에러가 난 첫 번째 경로를 기억하기 위함
-
-        for rel_path, info in items.items():
-            if info.get("status") != "DONE":
-                skip_reasons["status_not_done"] += 1
-                continue
-            
-            parts = rel_path.split('/')
-            category = parts[0]
-            version_str = parts[1]
-            match = re.search(r'ver(\d+)', version_str)
-            
-            if not match or int(match.group(1)) != category_max_versions.get(category):
-                skip_reasons["not_latest_version"] += 1
-                continue
-
-            # 경로 계산
-            safe_rel_dir = Path(rel_path).parent
-            safe_out_dir = PARSE_ROOT / safe_rel_dir
-            md_files = list(safe_out_dir.rglob("*.md"))
-            
-            if not md_files:
-                skip_reasons["md_file_not_found"] += 1
-                if not first_missing_path:
-                    first_missing_path = safe_out_dir # 경로가 어떻게 꼬였는지 터미널에 출력하기 위해 저장
-                continue
-            
-            filepath = md_files[0]
-            
-            try:
-                content = filepath.read_text(encoding="utf-8", errors="ignore")
-                
-                # 메타데이터가 없는 파일 거르기
-                if "[MAIL_META]" not in content:
-                    skip_reasons["no_mail_meta_tag"] += 1
-                    continue
-                
-                # 💡 여기서 변수들을 모두 '빈 바구니'로 초기화해야 합니다! (이 부분이 지워져서 났던 에러입니다)
-                title = filepath.stem
-                mail_from = ""
-                mail_date = ""
-                report_links = [] 
-                
-                # 1. 작성자(From) 파싱
-                from_match = re.search(r'From\s*:\s*(.*?)(?=\s*(?:Date|To|Cc|Bcc|Subject|\[)|\n|$)', content, re.IGNORECASE)
-                if from_match: 
-                    # 꺾쇠 유지, 따옴표만 제거
-                    mail_from = from_match.group(1).strip().replace('"', '').replace("'", "")
-                
-                # 💡 2. 화이트리스트 검사 (허용된 사람 아니면 여기서 바로 스킵!)
-                if mail_from not in ALLOWED_AUTHORS:
-                    skip_reasons["not_allowed_author"] = skip_reasons.get("not_allowed_author", 0) + 1
-                    continue
-                
-                # 3. 날짜, 제목, EDM 링크 파싱
-                date_match = re.search(r'Date\s*:\s*(.*?)(?=\s*(?:From|To|Cc|Bcc|Subject|\[)|\n|$)', content, re.IGNORECASE)
-                if date_match: mail_date = date_match.group(1).strip()
-                
-                subject_match = re.search(r'Subject\s*:\s*(.*?)(?=\s*(?:From|Date|To|Cc|Bcc|\[)|\n|$)', content, re.IGNORECASE)
-                if subject_match: title = subject_match.group(1).strip()
-                
-                edm_match = re.search(r'EDM\s*링크\s*:\s*(http[^\s\n]+)', content, re.IGNORECASE)
-                if edm_match: report_links.append(edm_match.group(1).strip())
-                
-                # 4. 이미지 에셋 탐색 로직
-                rel_dir = filepath.parent.relative_to(PARSE_ROOT)
-                target_parts = []
-                for part in rel_dir.parts:
-                    if part.startswith("export_"): break
-                    target_parts.append(part)
-                
-                attachments_dir = MAIL_ROOT.joinpath(*target_parts) / "attachments"
-                assets = []
-                if attachments_dir.exists() and attachments_dir.is_dir():
-                    for ext in ["*.png", "*.jpg", "*.jpeg", "*.webp", "*.PNG", "*.JPG"]:
-                        for img_path in attachments_dir.glob(ext):
-                            assets.append({
-                                "path": str(img_path.relative_to(MAIL_ROOT)).replace("\\", "/"),
-                                "file_name": img_path.name
-                            })
-
-                # 5. 모든 데이터를 묶어서 카드 1개 완성!
-                docs.append({
-                    "doc_id": filepath.name,
-                    "title": title,
-                    "mail_from": mail_from,
-                    "mail_date": mail_date,
-                    "report_links": report_links,
-                    "storage": {"parsed_md_rel_path": str(filepath.relative_to(PARSE_ROOT)).replace("\\", "/")},
-                    "assets": assets,
-                    "raw_content": content,
-                    "version_tag": version_str.upper()
-                })
-                
-            except Exception as e:
-                skip_reasons["parse_error"] += 1
-                if skip_reasons["parse_error"] == 1:
-                    print(f"\n🚨 [디버그] 치명적 에러 원인 발견: {type(e).__name__} - {e}\n")
-
-        docs.sort(key=lambda x: _parse_date_to_timestamp(x["mail_date"]), reverse=True)
-        
-        _ARCHIVE_CACHE = docs
-        _LAST_PROCESSED_MTIME = current_mtime
-        
-        # 💡 리포트 최종 출력
-        print("-" * 50)
-        print(f"[Archive Report] 필터링 및 로딩 결과")
-        print(f"  - 성공적으로 로드된 문서: {len(docs)}개")
-        print(f"  - [Skip] 상태가 DONE이 아님: {skip_reasons['status_not_done']}개")
-        print(f"  - [Skip] 구버전 폴더(최신 아님): {skip_reasons['not_latest_version']}개")
-        print(f"  - [Skip] MD 파일 경로 못 찾음: {skip_reasons['md_file_not_found']}개")
-        print(f"  - [Skip] 문서 내 [MAIL_META] 없음: {skip_reasons['no_mail_meta_tag']}개")
-        print(f"  - [Skip] 읽기 에러 등: {skip_reasons['parse_error']}개")
-        if first_missing_path:
-            print(f"\n⚠️ 주의: MD 파일을 찾지 못한 첫 번째 경로를 확인해보세요!")
-            print(f"서버가 찾으려 한 경로: {first_missing_path}")
-        print("-" * 50)
-        
-    except Exception as e:
-        print(f"[Archive] processed.json 읽기 실패: {e}")
-        
-    return _ARCHIVE_CACHE
 
 
 
@@ -1069,6 +922,154 @@ async def api_active_announcements(request: Request):
             "end_date": end,
         })
     return {"items": out}
+
+
+# =========================
+# API: 성능 평가 대시보드 (Cognitive Trace)
+# =========================
+@app.get("/api/eval/summary")
+async def api_eval_summary(request: Request, days: int = Query(30)):
+    _require_user(request)
+    from app.eval_repo import get_eval_summary
+    return get_eval_summary(days=min(max(days, 1), 180))
+
+
+@app.get("/api/kg/stats")
+async def api_kg_stats(request: Request):
+    _require_user(request)
+    from app.eval_repo import get_kg_stats
+    return get_kg_stats()
+
+
+@app.get("/api/eval/goldenset")
+async def api_eval_goldenset(request: Request):
+    _require_user(request)
+    from app.eval_repo import get_goldenset_latest
+    return get_goldenset_latest()
+
+
+@app.get("/api/eval/goldenset/runs")
+async def api_eval_goldenset_runs(request: Request, limit: int = Query(50)):
+    _require_user(request)
+    from app.eval_repo import list_goldenset_runs
+    return list_goldenset_runs(limit=limit)
+
+
+@app.get("/api/eval/goldenset/runs/{run_id}")
+async def api_eval_goldenset_run(run_id: str, request: Request):
+    _require_user(request)
+    from app.eval_repo import get_goldenset_run
+    data = get_goldenset_run(run_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="run not found")
+    return data
+
+
+@app.delete("/api/eval/goldenset/runs/{run_id}")
+async def api_delete_goldenset_run(run_id: str, request: Request):
+    user = _require_user(request)
+    if user not in ADMIN_USER_IDS:
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+    from app.eval_repo import delete_goldenset_run
+    ok = delete_goldenset_run(run_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="run not found")
+    return {"ok": True}
+
+
+@app.get("/api/eval/feedback-cases")
+async def api_eval_feedback_cases(request: Request, limit: int = Query(50)):
+    """👎 피드백 실패 사례 목록 (타 유저 질문이 노출되므로 관리자 전용)."""
+    user = _require_user(request)
+    if user not in ADMIN_USER_IDS:
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+    from app.eval_repo import get_feedback_cases
+    return {"cases": get_feedback_cases(limit=limit)}
+
+
+@app.post("/api/eval/goldenset/candidates")
+async def api_add_goldenset_candidate(request: Request):
+    """실패 사례를 골든셋 후보 문항으로 승격 (관리자 전용).
+
+    enabled=false로 추가되므로 평가 실행(CLI 전용)에는 곧바로 포함되지 않는다.
+    관리자가 goldenset.json에서 정답 doc_ids를 채운 뒤 enabled=true로 활성화하는 흐름.
+    """
+    import hashlib
+    user = _require_user(request)
+    if user not in ADMIN_USER_IDS:
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+    body = await request.json()
+    question = (body.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question required")
+
+    from app.goldenset_runner import GOLDENSET_PATH
+    data = {"items": []}
+    try:
+        if GOLDENSET_PATH.exists():
+            data = json.load(open(GOLDENSET_PATH, encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"goldenset.json 읽기 실패: {e}")
+    items = data.setdefault("items", [])
+
+    if any((it.get("question") or "").strip() == question for it in items):
+        return {"ok": False, "duplicated": True, "message": "이미 같은 질문의 문항이 있습니다."}
+
+    note = (body.get("note") or "").strip()
+    item = {
+        "id": f"fb-{hashlib.sha1(question.encode('utf-8')).hexdigest()[:8]}",
+        "question": question,
+        "expected_intent": (body.get("expected_intent") or "").strip(),
+        "expected_doc_ids": [],
+        "expected_terms": [],
+        "enabled": False,
+        "notes": ("👎 피드백에서 승격" + (f": {note}" if note else "")
+                  + " — 정답 doc_ids를 채우고 enabled=true로 바꾸면 평가에 포함됩니다."),
+    }
+    items.append(item)
+    try:
+        with open(GOLDENSET_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"goldenset.json 저장 실패: {e}")
+    return {"ok": True, "item": item}
+
+
+# =========================
+# API: Knowledge Graph 연관 조회
+# =========================
+@app.get("/api/kg/related")
+async def api_kg_related(request: Request, report_index: str = Query(""), doc_id: str = Query("")):
+    """report_index 또는 doc_id 기준으로 연결된 문서/보고서를 반환."""
+    _require_user(request)
+    if not report_index and not doc_id:
+        raise HTTPException(status_code=400, detail="report_index or doc_id required")
+    from app.kg_repo import get_related
+    return get_related(report_index=report_index.strip(), doc_id=doc_id.strip())
+
+
+@app.get("/api/kg/term/{term_id}")
+async def api_kg_term(term_id: int, request: Request):
+    """용어 기준 연관 문서/보고서 수 + 상위 문서 + 동시출현 용어."""
+    _require_user(request)
+    from app.kg_repo import get_term_overview
+    return get_term_overview(term_id)
+
+
+@app.get("/api/kg/network")
+async def api_kg_network(request: Request, term_id: int = Query(...)):
+    """그래프 탐색기(2-hop): 중심+이웃 노드 + 이웃끼리 엣지."""
+    _require_user(request)
+    from app.kg_repo import get_term_network
+    return get_term_network(term_id)
+
+
+@app.get("/api/kg/links")
+async def api_kg_links(request: Request, source: str = Query(""), q: str = Query(""), limit: int = Query(50)):
+    """문서↔보고서 연결 상세 (매칭 근거 evidence 포함) — 대시보드 드릴다운용."""
+    _require_user(request)
+    from app.kg_repo import get_link_samples
+    return {"links": get_link_samples(source=source.strip(), q=q.strip(), limit=limit)}
 
 
 @app.get("/api/sessions/{session_id}/latest-artifact")

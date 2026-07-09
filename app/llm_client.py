@@ -115,7 +115,8 @@ def _build_context_summary(previous_messages: list[dict] | None, max_items: int 
 def _build_answer_prompt(
     user_question: str,
     rag_chunks: list[dict],
-    previous_messages: list[dict] | None = None
+    previous_messages: list[dict] | None = None,
+    style_rules: str | None = None
 ) -> list[dict]:
     system = (
         "You are a helpful RAG answerer.\n"
@@ -155,12 +156,17 @@ def _build_answer_prompt(
             "Use markdown headings, bullet lists, or tables when they improve readability.",
             "If the user asks for a table, output a markdown table.",
             "If the user asks for code, output a markdown code block inside the answer_markdown string.",
-            "Do not include citations in this step.",
+            "After each factual sentence, append an inline citation marker like [1] or [2] "
+            "referencing the 'no' of the evidence that supports it. "
+            "Use ONLY evidence numbers that exist. Do not put markers inside tables or code blocks.",
             "If evidence is insufficient, say so clearly."
         ],
         "question": user_question,
         "evidence": evidence_lines
     }
+
+    if style_rules:
+        user_payload["style_rules"] = style_rules
 
     messages = [{"role": "system", "content": system}]
     messages.extend(_build_context_summary(previous_messages))
@@ -197,17 +203,19 @@ def _build_citation_prompt(
 
     user_payload = {
         "task": (
-            "Extract at most 3 main factual claims from the answer and attach citations "
-            "from the evidence."
+            "Extract the factual claims from the answer (sentence-level) and attach citations "
+            "from the evidence. Also judge how well each claim is supported."
         ),
         "output_schema": {
             "claims": [
                 {
                     "claim": "Short factual claim in Korean",
+                    "support": "supported | partial | unsupported",
                     "citations": [
                         {
                             "doc_id": "string",
                             "chunk_id": "string",
+                            "quote": "verbatim passage copied EXACTLY from the evidence text that supports the claim",
                             "score": "number or null"
                         }
                     ]
@@ -219,10 +227,14 @@ def _build_citation_prompt(
             "No markdown fences.",
             "No trailing commas.",
             "All strings must be valid JSON strings.",
-            "Return at most 3 claims.",
+            "Return up to 8 claims, covering the main factual statements of the answer.",
             "Each claim must be short and concise.",
             "Each claim should have 1 to 2 citations.",
             "Use only doc_id and chunk_id that exist in evidence.",
+            "'quote' MUST be copied verbatim (character-for-character) from the evidence text. Never paraphrase the quote.",
+            "Set support='supported' only when the evidence clearly states the claim; "
+            "'partial' when related but not exact; 'unsupported' when no evidence backs it.",
+            "For unsupported claims, return an empty citations array.",
             "If the answer contains uncertainty, only cite the supported factual parts."
         ],
         "question": user_question,
@@ -240,19 +252,89 @@ def _normalize_claims_to_answer_list(claims: list[dict] | None) -> list[dict]:
     out = []
     for c in claims or []:
         claim = (c.get("claim") or "").strip()
+        support = (c.get("support") or "").strip().lower()
+        if support not in ("supported", "partial", "unsupported"):
+            support = "partial"
         cites = []
         for x in (c.get("citations") or []):
             cites.append({
                 "doc_id": x.get("doc_id"),
                 "chunk_id": x.get("chunk_id"),
-                "quote": "",
+                "quote": (x.get("quote") or "").strip(),
                 "score": x.get("score"),
             })
         if claim:
             out.append({
                 "sentence": claim,
+                "support": support,
                 "citations": cites
             })
+    return out
+
+
+def _normalize_ws(s: str) -> str:
+    return " ".join(str(s or "").split()).lower()
+
+
+def validate_citations(claims: list[dict] | None, rag_chunks: list[dict]) -> list[dict]:
+    """LLM이 뽑은 citation을 코드로 검증한다 (지어낸 인용 차단).
+    - 존재하지 않는 doc_id/chunk_id 인용은 제거.
+    - quote가 해당 청크 원문의 substring이 아니면 quote를 비우고 support를 'partial'로 강등.
+    - citation이 전부 제거된 claim은 support를 'unsupported'로 강등.
+    """
+    chunk_texts = {}
+    for c in rag_chunks or []:
+        key = (str(c.get("doc_id") or ""), str(c.get("chunk_id") or ""))
+        chunk_texts[key] = _normalize_ws(c.get("merge_title_content") or "")
+    doc_texts = {}
+    for (doc_id, _), text in chunk_texts.items():
+        doc_texts.setdefault(doc_id, []).append(text)
+
+    out = []
+    for c in claims or []:
+        claim = (c.get("claim") or "").strip()
+        if not claim:
+            continue
+        support = (c.get("support") or "").strip().lower()
+        if support not in ("supported", "partial", "unsupported"):
+            support = "partial"
+
+        valid_cites = []
+        for x in (c.get("citations") or []):
+            doc_id = str(x.get("doc_id") or "")
+            chunk_id = str(x.get("chunk_id") or "")
+            key = (doc_id, chunk_id)
+            # 존재하지 않는 문서/청크 인용 제거 (chunk_id 불일치는 doc 단위로 한 번 더 허용)
+            if key in chunk_texts:
+                candidate_texts = [chunk_texts[key]]
+            elif doc_id in doc_texts:
+                candidate_texts = doc_texts[doc_id]
+            else:
+                continue
+
+            quote = (x.get("quote") or "").strip()
+            if quote:
+                nq = _normalize_ws(quote)
+                if not nq or not any(nq in t for t in candidate_texts):
+                    # 원문에 없는 인용문 → 인용문만 제거하고 지원도 강등
+                    quote = ""
+                    if support == "supported":
+                        support = "partial"
+            valid_cites.append({
+                "doc_id": x.get("doc_id"),
+                "chunk_id": x.get("chunk_id"),
+                "quote": quote,
+                "score": x.get("score"),
+            })
+
+        if not valid_cites and support != "unsupported":
+            support = "unsupported"
+
+        out.append({
+            "claim": claim,
+            "support": support,
+            "citations": valid_cites,
+        })
     return out
 
 
@@ -278,15 +360,19 @@ def llm_answer_with_citations(
     user_id: str,
     user_question: str,
     rag_chunks: list[dict],
-    previous_messages: list[dict] | None = None
+    previous_messages: list[dict] | None = None,
+    style_rules: str | None = None,
+    client: OpenAI | None = None
 ) -> dict:
-    client = _make_client(user_id)
+    if client is None:
+        client = _make_client(user_id)
 
     # 1차: markdown 답변 생성
     answer_messages = _build_answer_prompt(
         user_question=user_question,
         rag_chunks=rag_chunks,
         previous_messages=previous_messages,
+        style_rules=style_rules,
     )
 
     answer_json = _call_answer_json_or_fallback_markdown(
@@ -319,6 +405,9 @@ def llm_answer_with_citations(
     except Exception as e:
         print(f"[citation-step-failed] {e}")
         claims = []
+
+    # 코드 레벨 검증: 존재하지 않는 인용 제거 + 지어낸 quote 차단
+    claims = validate_citations(claims, rag_chunks)
 
     return {
         "answer_markdown": final_answer,

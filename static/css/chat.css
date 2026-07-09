@@ -1244,3 +1244,106 @@ mark.archive-highlight {
   padding: 6px 12px; border-radius: 8px; border: 1px solid var(--color-outline-variant);
 }
 .ann-dismiss-btn:hover { background: var(--color-surface-container); color: var(--color-on-surface); }
+
+/* ---------- 답변 검증 배지 (근거 지원율 · 수치 에코 체크) ---------- */
+.verify-badges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.verify-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.01em;
+  padding: 2px 8px; border-radius: 999px; border: 1px solid transparent;
+  cursor: help;
+}
+.verify-badge.is-good { color: var(--accent-rag-strong); background: var(--accent-rag-soft); border-color: var(--accent-rag); }
+.verify-badge.is-mid  { color: #92600a; background: rgba(217, 156, 32, 0.14); border-color: rgba(217, 156, 32, 0.45); }
+.dark .verify-badge.is-mid { color: #f0c46a; }
+.verify-badge.is-bad  { color: var(--color-error); background: rgba(181, 43, 43, 0.10); border-color: rgba(181, 43, 43, 0.40); }
+
+/* claim별 지원 상태 아이콘 (Sentence Citations 패널) */
+.cite-support {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border-radius: 999px;
+  font-size: 9px; font-weight: 800; vertical-align: middle;
+  cursor: help;
+}
+.cite-support.is-good { color: var(--accent-rag-strong); background: var(--accent-rag-soft); }
+.cite-support.is-mid  { color: #92600a; background: rgba(217, 156, 32, 0.16); }
+.dark .cite-support.is-mid { color: #f0c46a; }
+.cite-support.is-bad  { color: var(--color-error); background: rgba(181, 43, 43, 0.12); }
+
+/* 👎 피드백 필수 코멘트 팝오버 */
+.fb-comment-pop {
+  margin-top: 8px; padding: 12px 14px;
+  background: var(--color-surface); border: 1px solid var(--color-outline-variant);
+  border-radius: 12px; box-shadow: var(--shadow-card);
+  max-width: 480px;
+}
+.fb-comment-title { font-size: 11px; font-weight: 700; color: var(--color-on-surface); margin-bottom: 8px; }
+.fb-comment-title span { font-weight: 500; color: var(--color-secondary); }
+.fb-comment-input {
+  width: 100%; font-size: 12px; padding: 8px 10px; resize: vertical;
+  border: 1px solid var(--color-outline-variant); border-radius: 8px;
+  background: var(--color-surface-container-low); color: var(--color-on-surface);
+}
+.fb-comment-input:focus { outline: none; border-color: var(--accent-rag); }
+.fb-comment-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.fb-comment-actions button { font-size: 11px; font-weight: 700; padding: 6px 14px; border-radius: 8px; }
+.fb-comment-actions .fb-cancel { color: var(--color-secondary); border: 1px solid var(--color-outline-variant); }
+.fb-comment-actions .fb-cancel:hover { background: var(--color-surface-container); }
+.fb-comment-actions .fb-submit { color: var(--color-on-primary); background: var(--color-primary); }
+.fb-comment-actions .fb-submit:hover { opacity: 0.9; }
+
+/* 근거 패널 접힘 시 우측 가장자리 세로 레일 (다시 펼치기) */
+#evidenceRail {
+  position: fixed; right: 0; top: 50%; transform: translateY(-50%); z-index: 40;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 12px 6px; border-radius: 12px 0 0 12px;
+  background: var(--color-surface); color: var(--color-primary);
+  border: 1px solid var(--color-outline-variant); border-right: none;
+  box-shadow: var(--shadow-card);
+  cursor: pointer; transition: background var(--duration-fast) var(--ease-out-soft);
+}
+#evidenceRail:hover { background: var(--color-surface-container); }
+.dark #evidenceRail { color: var(--color-on-surface); }
+#evidenceRail .evidence-rail-count {
+  writing-mode: vertical-rl; text-orientation: mixed;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.02em; color: var(--color-secondary);
+}
+/* ID 선택자(#evidenceRail)가 .hidden(class)보다 특이도가 높아 display:flex가 이겨버리므로,
+   .hidden 토글이 실제로 레일을 숨기도록 동일 ID+class 규칙으로 명시(패널 열림/근거 없음 시 숨김). */
+#evidenceRail.hidden { display: none; }
+
+/* 연결문서 버튼 클릭 시 해당 카드로 스크롤하며 잠깐 강조 */
+@keyframes kgFlash {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  30%      { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-rag, #0891b2) 55%, transparent); }
+}
+.kg-flash { animation: kgFlash 1.6s var(--ease-out-soft, ease-out); }
+
+/* ── 채팅 차트 (draw_chart) ─────────────────────────────
+   팔레트는 Cognitive Trace(dataviz 검증)의 chart-1~5와 동일 값. light/dark 별도. */
+:root {
+  --chart-1: #0891b2; --chart-2: #7c3aed; --chart-3: #b45309; --chart-4: #2563eb; --chart-5: #be185d;
+}
+.dark {
+  --chart-1: #0d9488; --chart-2: #8b5cf6; --chart-3: #d97706; --chart-4: #3b82f6; --chart-5: #ec4899;
+}
+.msg-chart {
+  margin: 0; padding: 14px 14px 10px; border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 12px; background: var(--color-surface, #fff); overflow-x: auto;
+}
+.dark .msg-chart { background: #0f1a33; border-color: #1f2b4a; }
+.msg-chart-title { font-size: 12px; font-weight: 700; margin-bottom: 8px; color: var(--color-on-surface, #0f172a); }
+.dark .msg-chart-title { color: #e7eefc; }
+.mc-svg { width: 100%; max-width: 560px; height: auto; display: block; }
+.mc-grid { stroke: color-mix(in srgb, currentColor 10%, transparent); stroke-width: 1; color: #64748b; }
+.mc-axis { font-size: 9px; fill: var(--color-secondary, #64748b); }
+.mc-cat  { font-size: 10px; fill: var(--color-secondary, #64748b); }
+.mc-val  { font-size: 10px; font-weight: 700; fill: var(--color-on-surface, #0f172a); }
+.dark .mc-val { fill: #e7eefc; }
+.mc-pie-wrap { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.mc-pie { width: 160px; height: 160px; }
+.mc-legend { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--color-on-surface, #0f172a); }
+.dark .mc-legend { color: #e7eefc; }
+.mc-leg-item { display: flex; align-items: center; gap: 6px; }
+.mc-leg-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.mc-leg-val { color: var(--color-secondary, #64748b); font-variant-numeric: tabular-nums; }

@@ -69,29 +69,45 @@
 <div id="resizer2" class="w-1 cursor-col-resize hover:bg-primary/20 z-10 transition-colors hidden"></div>
 
 <aside id="rightPanel" class="w-80 bg-surface-container-low flex flex-col h-full shrink-0 border-l border-surface-container hidden">
-    <div class="p-4 border-b border-surface-container">
+    <div class="p-4 border-b border-surface-container flex items-center justify-between gap-2">
         <h2 class="text-xs font-bold font-headline text-primary flex items-center gap-2">
             <span class="material-symbols-outlined text-sm">bookmarks</span> Archive References
         </h2>
+        <button id="evidenceCollapse" class="p-1 rounded hover:bg-surface-container text-secondary" aria-label="근거 패널 접기" title="근거 패널 접기">
+            <span class="material-symbols-outlined text-sm">chevron_right</span>
+        </button>
     </div>
     <div class="flex-1 flex flex-col overflow-hidden">
-        <div class="panel flex flex-col min-h-[120px]" data-panel="topdocs">
-            <div class="p-3 bg-surface-container-low border-b border-surface-container flex items-center justify-between z-10">
+        <div class="panel flex flex-col flex-1 min-h-0" data-panel="topdocs">
+            <div class="p-3 bg-surface-container-low border-b border-surface-container flex items-center justify-between z-10 shrink-0">
                 <div class="text-xs font-bold">Top Documents</div>
-                <button class="panel-max p-1 hover:bg-surface-container rounded" data-target="topdocs" aria-label="Top Documents 패널 확대">⤢</button>
+                <div class="flex items-center gap-1">
+                    <select id="topDocsShowN" class="text-[10px] bg-surface-container border border-surface-container rounded px-1 py-0.5" title="표시할 문서 개수">
+                        <option value="5" selected>5개</option>
+                        <option value="10">10개</option>
+                        <option value="20">20개</option>
+                        <option value="999">모두</option>
+                    </select>
+                    <button class="panel-max p-1 hover:bg-surface-container rounded" data-target="topdocs" aria-label="Top Documents 패널 확대">⤢</button>
+                </div>
             </div>
-            <div id="topDocs" class="flex-1 overflow-y-auto p-3 space-y-3"></div>
+            <div id="topDocs" class="flex-1 min-h-0 overflow-y-auto p-3 space-y-3"></div>
         </div>
-        <div id="hresizer1" class="h-1 cursor-row-resize hover:bg-primary/20 transition-colors"></div>
-        <div class="panel flex flex-col flex-1" data-panel="citations">
-            <div class="p-3 bg-surface-container-low border-b border-surface-container flex items-center justify-between z-10">
+        <div class="panel flex flex-col flex-1 min-h-0 border-t border-surface-container" data-panel="citations">
+            <div class="p-3 bg-surface-container-low border-b border-surface-container flex items-center justify-between z-10 shrink-0">
                 <div class="text-xs font-bold">Sentence Citations</div>
                 <button class="panel-max p-1 hover:bg-surface-container rounded" data-target="citations" aria-label="Sentence Citations 패널 확대">⤢</button>
             </div>
-            <div id="citations" class="flex-1 overflow-y-auto p-3 space-y-3"></div>
+            <div id="citations" class="flex-1 min-h-0 overflow-y-auto p-3 space-y-3"></div>
         </div>
     </div>
 </aside>
+
+<!-- 접힘 상태에서 다시 펼치는 세로 레일 버튼 (근거 있을 때만 노출) -->
+<button id="evidenceRail" class="hidden" type="button" aria-label="근거 패널 열기" title="근거 패널 열기">
+    <span class="material-symbols-outlined">bookmarks</span>
+    <span id="evidenceRailCount" class="evidence-rail-count"></span>
+</button>
 
 <div id="docModal" class="modal hidden fixed inset-0 z-[3000] flex items-center justify-center" aria-hidden="true">
     <div id="docModalBackdrop" class="absolute inset-0 bg-black/60"></div>

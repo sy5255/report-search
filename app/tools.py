@@ -44,12 +44,42 @@ TOOLS_SCHEMA = [
                 "required": ["query", "intent"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "draw_chart",
+            "description": "DB 조회로 얻은 통계·순위·추이 수치를 차트로 시각화합니다. 마크다운 표로 답할 때 함께 호출하면 사용자가 한눈에 이해합니다. 막대(bar)는 순위·비교, 꺾은선(line)은 시간 추이, 원형(pie)은 구성비에 사용하세요. 반드시 query_database로 실제 수치를 확인한 뒤 그 값으로 호출하세요.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "chart_type": {"type": "string", "enum": ["bar", "line", "pie"], "description": "차트 종류"},
+                    "title": {"type": "string", "description": "차트 제목"},
+                    "x_label": {"type": "string", "description": "x축 이름 (선택)"},
+                    "y_label": {"type": "string", "description": "y축 이름 (선택)"},
+                    "series": {
+                        "type": "array",
+                        "description": "데이터 포인트 목록 (2~12개 권장)",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": {"type": "string", "description": "항목 이름 (예: 불량명, 월)"},
+                                "value": {"type": "number", "description": "수치"}
+                            },
+                            "required": ["label", "value"]
+                        }
+                    }
+                },
+                "required": ["chart_type", "title", "series"]
+            }
+        }
     }
 ]
 
-def execute_tool(func_name: str, args: dict) -> Tuple[str, list]:
+def execute_tool(func_name: str, args: dict, index_names: list | None = None) -> Tuple[str, list]:
     """
     반환값: (LLM에게 전달할 결과 문자열, 프론트엔드/인용구를 위해 수집된 원본 문서 목록)
+    index_names: 검색할 인덱스 목록(UI 선택 반영). None/빈 값이면 DEFAULT_INDEX_NAME 사용.
     """
     try:
         if func_name == "query_database":
@@ -73,23 +103,36 @@ def execute_tool(func_name: str, args: dict) -> Tuple[str, list]:
         elif func_name == "search_documents":
             search_query = args.get("query", "")
             intent = args.get("intent", "일반검색")
-           
-            # 검색 실행
-            rag_result = rag_retrieve_rrf(
-                index_name=DEFAULT_INDEX_NAME, # 필요 시 기본 인덱스명 조정
-                query_text=search_query,
-                top_k=8
-            )
-            hits = rag_result.get("hits", {}).get("hits", [])
-           
+
+            # UI에서 선택한 인덱스 목록 반영 (외부 RAG API의 콤마 구분 지원이 불확실하므로
+            # 인덱스별로 개별 검색 후 병합 — 대부분 1개라 추가 비용 미미)
+            targets = [x for x in (index_names or []) if str(x).strip()] or [DEFAULT_INDEX_NAME]
+            hits = []
+            seen_ids = set()
+            for idx_name in targets:
+                try:
+                    rag_result = rag_retrieve_rrf(index_name=idx_name, query_text=search_query, top_k=8)
+                    for h in rag_result.get("hits", {}).get("hits", []):
+                        key = ((h.get("_source") or {}).get("doc_id"), h.get("_id"))
+                        if key in seen_ids:
+                            continue
+                        seen_ids.add(key)
+                        hits.append(h)
+                except Exception as e:
+                    print(f"[search_documents] 인덱스 '{idx_name}' 검색 실패(스킵): {e}")
+            # 점수순 정렬 후 총 8건 캡 (단일 인덱스일 때 기존 동작과 동일)
+            hits.sort(key=lambda h: -(h.get("_score") or 0))
+            hits = hits[:8]
+
             extracted_docs = []
             for hit in hits:
                 src = hit.get("_source", {})
-                content = src.get("merge_title_content", "")[:1500]
+                # citation 검증 evidence(2500자)와 동일 길이로 절단 — LLM이 본 것과 검증 대상 불일치 방지
+                content = src.get("merge_title_content", "")[:2500]
                 extracted_docs.append(f"[Title: {src.get('title')}] {content}")
-               
+
             result_str = f"(검색 의도: {intent}, 쿼리: {search_query})\n\n" + "\n---\n".join(extracted_docs)
-           
+
             # 결과 문자열과 원본 hits를 함께 반환
             return result_str, hits
 
