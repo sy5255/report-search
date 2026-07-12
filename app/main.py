@@ -388,6 +388,15 @@ async def api_chat_stream(request: Request):
         final_data = None
         is_first_agent_chunk = True
 
+        # 💡 [후속 질문 스티키] 직전 턴의 인텐트를 라우터 힌트로 전달
+        previous_intent = None
+        try:
+            prev_art = repo.get_latest_artifact(session_id, user)
+            if prev_art and isinstance(prev_art.get("rag_response"), dict):
+                previous_intent = prev_art["rag_response"].get("intent")
+        except Exception:
+            pass
+
         for chunk in run_agent_loop_stream(
             user_id=user,
             user_query=retrieval_query,
@@ -395,7 +404,8 @@ async def api_chat_stream(request: Request):
             excluded_indexes=EXCLUDED_TOPDOC_INDEXES,
             ui_top_k=ui_top_k,
             forced_intent=forced_intent,
-            index_names=index_names
+            index_names=index_names,
+            previous_intent=previous_intent
         ):
             # 💡 [핵심 해킹 로직] 에이전트 스트림 청크를 가로채어 배열 맨 앞에 로그를 끼워 넣습니다.
             if glossary_step_log:
@@ -594,6 +604,14 @@ async def api_chat(request: Request):
     retrieval_query = (query_norm.get("expanded_query") or rewritten_query).strip() or rewritten_query
 
     try:
+        previous_intent = None
+        try:
+            prev_art = repo.get_latest_artifact(session_id, user)
+            if prev_art and isinstance(prev_art.get("rag_response"), dict):
+                previous_intent = prev_art["rag_response"].get("intent")
+        except Exception:
+            pass
+
         agent_result = run_agent_loop(
             user_id=user,
             user_query=retrieval_query,
@@ -601,7 +619,8 @@ async def api_chat(request: Request):
             excluded_indexes=EXCLUDED_TOPDOC_INDEXES,
             ui_top_k=ui_top_k,
             forced_intent=forced_intent,
-            index_names=index_names
+            index_names=index_names,
+            previous_intent=previous_intent
         )
         final_answer = agent_result.get("final_answer", "응답을 생성하지 못했습니다.")
         citations_json = agent_result.get("citations", {"answer": [], "final": final_answer, "claims": []})

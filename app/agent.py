@@ -15,7 +15,7 @@ from app.tools import TOOLS_SCHEMA, execute_tool
 # =====================================================================
 # 🧠 1. 라우터 (문지기) 로직
 # =====================================================================
-def _call_intent_router(client, user_query: str) -> str:
+def _call_intent_router(client, user_query: str, previous_intent: str = None) -> str:
     # 💡 [버튼 강제 호출 대응] 프론트엔드에서 보낸 태그를 감지하여 LLM을 거치지 않고 즉시 라우팅
     if user_query.startswith("[DB_ANALYSIS]"):
         return "DB_ANALYSIS"
@@ -35,8 +35,9 @@ def _call_intent_router(client, user_query: str) -> str:
     2. "RAG_KNOWLEDGE": 특정 불량의 발생 원리, 가이드, 해결책 등 기술 문서를 찾아야 하는 경우
     3. "HYBRID_DB_RAG": 통계 조회와 문서(원리) 검색이 모두 필요한 경우
     4. "GENERAL_CHAT": 안부 인사, 단순 대화 등 도구 검색이 필요 없는 경우
-    5. "PROCESS_GUIDE": 분석 '의뢰 방법', 진행 '절차/프로세스', 리드타임, 담당자 배정 등 사내 분석 업무
-       운영 안내를 묻는 경우. (불량의 원인·분석 내용이 아니라 '어떻게 의뢰/진행하는가'를 물을 때)
+    5. "PROCESS_GUIDE": 분석 '의뢰 방법', 진행 '절차/프로세스', 리드타임(소요 기간), 담당자/문의처,
+       결과 확인 방법, 재분석·긴급 의뢰 등 사내 분석 업무 '운영 안내'를 묻는 경우.
+       (불량의 원인·분석 내용이 아니라 '어떻게 의뢰/진행/확인하는가'를 물을 때)
 
     [출력 예시]
     사용자: "최근 3개월 sf2 불량 순위" -> 출력: DB_ANALYSIS
@@ -45,6 +46,18 @@ def _call_intent_router(client, user_query: str) -> str:
     사용자: "불량 분석은 어떻게 의뢰하나요?" -> 출력: PROCESS_GUIDE
     사용자: "FA 분석 진행 프로세스 알려줘" -> 출력: PROCESS_GUIDE
     사용자: "BEOL 모듈 담당자 누구야?" -> 출력: PROCESS_GUIDE
+    사용자: "분석 결과는 어디서 확인해?" -> 출력: PROCESS_GUIDE
+    """
+
+    # 💡 [후속 질문 스티키] 직전 턴의 인텐트를 힌트로 제공.
+    # 후속 질문("그럼 리드타임은?", "결과는 어디서 봐?")은 재작성돼도 운영 어휘가 약해
+    # 다른 인텐트로 새기 쉬우므로, 같은 주제가 이어질 가능성을 라우터에 알려준다.
+    if previous_intent and previous_intent in INTENT_LABELS:
+        router_prompt += f"""
+    [직전 대화 참고]
+    이 세션의 직전 답변 인텐트는 "{previous_intent}" 였습니다.
+    새 질문이 직전 주제의 후속 질문(짧은 되물음, '그럼/그거/거기서' 등)으로 보이면
+    특별한 이유가 없는 한 같은 인텐트를 유지하세요.
     """
     try:
         response = client.chat.completions.create(
@@ -457,7 +470,7 @@ def _report_es_fallback_chunks(ctx: dict, excluded_indexes: set, per_report_k: i
     return out
 
 
-def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list, excluded_indexes: set, ui_top_k: int, forced_intent: str = None, index_names: list = None):
+def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list, excluded_indexes: set, ui_top_k: int, forced_intent: str = None, index_names: list = None, previous_intent: str = None):
     client = _make_client(user_id)
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
     
@@ -477,7 +490,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
         yield yield_step(f"🎯 요청하신 대로 '{_intent_label(intent)}' 방식으로 진행할게요")
     else:
         yield yield_step("🔍 질문을 읽고 어떤 방식으로 답변할지 정하고 있어요...")
-        intent = _call_intent_router(client, user_query)
+        intent = _call_intent_router(client, user_query, previous_intent=previous_intent)
         yield yield_step(f"🎯 '{_intent_label(intent)}' 방식으로 답변을 준비할게요")
 
     system_prompt = _get_specialist_prompt(intent, current_date)
@@ -839,14 +852,14 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
 # =====================================================================
 # 🧠 5. 기존 비스트리밍(동기) 방식 호환용 Wrapper 함수 (💡 삭제하면 안 됨!)
 # =====================================================================
-def run_agent_loop(user_id: str, user_query: str, previous_messages: list, excluded_indexes: set, ui_top_k: int, forced_intent: str = None, index_names: list = None) -> dict:
+def run_agent_loop(user_id: str, user_query: str, previous_messages: list, excluded_indexes: set, ui_top_k: int, forced_intent: str = None, index_names: list = None, previous_intent: str = None) -> dict:
     """
     기존 /api/chat 엔드포인트에서 호출할 수 있도록
     스트리밍 제너레이터를 돌려서 마지막 최종 결과 데이터만 추출해 반환합니다.
     """
     final_data = None
 
-    for chunk in run_agent_loop_stream(user_id, user_query, previous_messages, excluded_indexes, ui_top_k, forced_intent, index_names=index_names):
+    for chunk in run_agent_loop_stream(user_id, user_query, previous_messages, excluded_indexes, ui_top_k, forced_intent, index_names=index_names, previous_intent=previous_intent):
         try:
             chunk_dict = json.loads(chunk.strip())
             if chunk_dict.get("type") == "final":

@@ -2698,7 +2698,8 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
           suggested_actions: finalRes.suggested_actions,
           agent_steps: finalRes.agent_steps,
           verification: finalRes.verification || null,
-          related_docs: finalRes.related_docs || []
+          related_docs: finalRes.related_docs || [],
+          charts: finalRes.charts || []
         };
 
         // 인용 pill 변환(convertCitationPills)이 렌더 시점에 citation 개수를 참조하므로
