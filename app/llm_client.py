@@ -10,7 +10,7 @@ from app.config import (
 )
 
 ANSWER_MAX_TOKENS = 3000
-CITATION_MAX_TOKENS = 3000
+CITATION_MAX_TOKENS = 4000  # 인용 JSON은 claim×quote로 커질 수 있어 여유 확보(잘림 방지)
 REWRITE_MAX_TOKENS = 3000 #220
 
 def _safe_json_extract(text: str) -> dict:
@@ -228,11 +228,12 @@ def _build_citation_prompt(
             "No markdown fences.",
             "No trailing commas.",
             "All strings must be valid JSON strings.",
-            "Return up to 8 claims, covering the main factual statements of the answer.",
+            "Return up to 6 claims, covering the main factual statements of the answer.",
             "Each claim must be short and concise.",
             "Each claim should have 1 to 2 citations.",
             "Use only doc_id and chunk_id that exist in evidence.",
-            "'quote' MUST be copied verbatim (character-for-character) from the evidence text. Never paraphrase the quote.",
+            "'quote' MUST be copied verbatim (character-for-character) from the evidence text, "
+            "but keep it a SHORT snippet (at most ~120 characters). Never paraphrase the quote.",
             "Set support='supported' only when the evidence clearly states the claim; "
             "'partial' when related but not exact; 'unsupported' when no evidence backs it.",
             "For unsupported claims, return an empty citations array.",
@@ -339,6 +340,72 @@ def validate_citations(claims: list[dict] | None, rag_chunks: list[dict]) -> lis
     return out
 
 
+def _salvage_claims(text: str) -> list[dict]:
+    """토큰 상한으로 잘린 인용 JSON에서 **완성된 claim 객체만** 복구한다.
+    `{"claims":[ {..}, {..}, <잘림> ]}` 형태에서 균형 잡힌 {...} 객체를 순서대로 파싱하고,
+    처음으로 미완성(중괄호 불균형)인 객체를 만나면 멈춘다. 마지막 1개만 잘려도 나머지는 살린다."""
+    if not text:
+        return []
+    m = re.search(r'"claims"\s*:\s*\[', text)
+    if not m:
+        return []
+    i, n = m.end(), len(text)
+    claims = []
+    while i < n:
+        while i < n and text[i] in " \t\r\n,":
+            i += 1
+        if i >= n or text[i] == "]":
+            break
+        if text[i] != "{":
+            break
+        depth, j, in_str, esc = 0, i, False, False
+        while j < n:
+            ch = text[j]
+            if in_str:
+                if esc: esc = False
+                elif ch == "\\": esc = True
+                elif ch == '"': in_str = False
+            else:
+                if ch == '"': in_str = True
+                elif ch == "{": depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        j += 1
+                        break
+            j += 1
+        if depth != 0:
+            break  # 미완성(잘림) 객체 → 여기서 중단
+        try:
+            claims.append(json.loads(text[i:j]))
+        except Exception:
+            break
+        i = j
+    return claims
+
+
+def _call_claims(client: OpenAI, messages: list[dict], max_tokens: int) -> list[dict]:
+    """인용(claims) 생성 전용 호출. 잘린 JSON도 완성된 claim만 관대하게 복구한다."""
+    completion = client.chat.completions.create(
+        model="openai/gpt-oss-120b",
+        messages=messages,
+        temperature=0.0,
+        stream=False,
+        max_tokens=max_tokens,
+    )
+    text = completion.choices[0].message.content or ""
+    # 1) 엄격 파싱 우선
+    try:
+        return _safe_json_extract(text).get("claims") or []
+    except Exception as e:
+        print(f"[citation-json-truncated? salvaging] {e}")
+    # 2) 잘린 JSON에서 완성된 claim만 복구
+    salvaged = _salvage_claims(text)
+    if salvaged:
+        print(f"[citation-salvage] {len(salvaged)} claims 복구")
+    return salvaged
+
+
 def _call_json(client: OpenAI, messages: list[dict], max_tokens: int, temperature: float = 0.0) -> dict:
     completion = client.chat.completions.create(
         model="openai/gpt-oss-120b",
@@ -443,13 +510,7 @@ def llm_answer_with_citations(
     )
 
     try:
-        citation_json = _call_json(
-            client=client,
-            messages=citation_messages,
-            max_tokens=CITATION_MAX_TOKENS,
-            temperature=0.0,
-        )
-        claims = citation_json.get("claims") or []
+        claims = _call_claims(client, citation_messages, CITATION_MAX_TOKENS)
     except Exception as e:
         print(f"[citation-step-failed] {e}")
         claims = []

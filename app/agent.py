@@ -4,7 +4,8 @@ import datetime
 from app.llm_client import (
     _make_client,
     _build_citation_prompt,
-    _call_json,
+    _call_claims,
+    _derive_claims_from_markers,
     _normalize_claims_to_answer_list,
     validate_citations,
     llm_answer_with_citations,
@@ -844,8 +845,9 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                         final_answer=final_answer,
                         rag_chunks=rag_chunks,
                     )
-                    citation_res = _call_json(client, citation_messages, CITATION_MAX_TOKENS, 0.0)
-                    claims = validate_citations(citation_res.get("claims") or [], rag_chunks)
+                    claims = validate_citations(_call_claims(client, citation_messages, CITATION_MAX_TOKENS), rag_chunks)
+                    if not claims:  # 2차 인용이 비면 [n] 마커로 결정적 폴백 (패널 헛빔 방지)
+                        claims = _derive_claims_from_markers(final_answer, rag_chunks)
                     citations_json = {"answer": _normalize_claims_to_answer_list(claims), "final": final_answer, "claims": claims}
                 except Exception as e:
                     print(f"  ❌ 인용구 생성 실패: {e}")
