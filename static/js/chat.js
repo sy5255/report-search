@@ -437,7 +437,8 @@ function openDocFromPill(pill){
   if(docId) doc = docs.find(d => d && d.doc_id === docId) || null;
   if(!doc) doc = docs[n - 1] || null;
   if(doc){
-    openDocModal(doc, quote || null);
+    // quote로 하이라이트·스크롤, 못 찾으면 각주 문장으로 폴백 하이라이트
+    openDocModal(doc, quote || null, fn ? fn.sentence : null);
   } else {
     console.log("No evidence document for citation index: " + n);
   }
@@ -1360,10 +1361,8 @@ function appendMessage(role, content, metaText, msgId, extra = null){
         const cls = ok === v.claims_total ? "is-good" : (ok > 0 ? "is-mid" : "is-bad");
         parts.push(`<span class="verify-badge ${cls}" title="답변 속 주장 중 근거 문서로 뒷받침된 비율">근거 ${ok}/${v.claims_total}</span>`);
       }
-      if(v.numeric_ok === false){
-        const nums = (v.unmatched || []).join(", ");
-        parts.push(`<span class="verify-badge is-bad" title="답변 속 일부 수치가 DB 조회 결과에서 확인되지 않았습니다: ${escapeHtml(nums)}">⚠ 수치 확인 필요</span>`);
-      }
+      // (수치 에코 체크 배지는 제거됨 — DB 수치 근거는 '실행된 최종 SQL 쿼리 보기'로 확인.
+      //  numeric_ok는 Cognitive Trace의 보조 지표(DB 수치 환각 차단율)로만 사용.)
       if(parts.length) verifyHtml = `<div class="verify-badges mb-3">${parts.join("")}</div>`;
     }
 
@@ -2055,11 +2054,26 @@ function renderCitations(citations){
           const quote = (c.quote || "").trim();
           const item = document.createElement("div");
           item.className = "p-2 bg-surface-container-low dark:bg-[#101f3f] border border-surface-container dark:border-[#1f2b4a] border-dashed rounded cursor-pointer hover:bg-surface-container dark:hover:bg-[#1f2b4a]";
-          item.innerHTML = `
-            <div class="text-[11px] mb-1 font-mono break-words">${quote ? escapeHtml(quote) : '(원본 문서로 이동)'}</div>
-            <div class="text-[9px] text-secondary dark:text-[#94a3b8]">${escapeHtml(c.doc_id||"")}</div>
-          `;
-          item.onclick = () => openDocFromCitation(c.doc_id, c.chunk_id, quote || "");
+          if(quote){
+            // 인용문이 있으면 그대로 표시 (모노스페이스 인용 카드)
+            item.innerHTML = `
+              <div class="text-[11px] mb-1 font-mono break-words">${escapeHtml(quote)}</div>
+              <div class="text-[9px] text-secondary dark:text-[#94a3b8]">${escapeHtml(c.doc_id||"")}</div>
+            `;
+          } else {
+            // 인용문이 없으면 투박한 "(원본 문서로 이동)" 대신 문서 제목 + 이동 안내 카드
+            const docObj = Array.isArray(lastTopDocs) ? lastTopDocs.find(d => d && d.doc_id === c.doc_id) : null;
+            const rawTitle = (docObj && docObj.title) ? docObj.title : (c.doc_id || "원본 문서");
+            const docTitle = (typeof stripEnriched === "function") ? stripEnriched(rawTitle) : rawTitle;
+            item.innerHTML = `
+              <div class="text-[11px] mb-1 font-semibold break-words flex items-start gap-1">
+                <span class="material-symbols-outlined text-[14px] leading-none mt-0.5">description</span>
+                <span>${escapeHtml(docTitle)}</span>
+              </div>
+              <div class="text-[10px] text-primary dark:text-[#60a5fa] font-semibold flex items-center gap-0.5">원본에서 근거 확인 <span class="material-symbols-outlined text-[12px]">arrow_forward</span></div>
+            `;
+          }
+          item.onclick = () => openDocFromCitation(c.doc_id, c.chunk_id, quote || "", sentence);
           list.appendChild(item);
         });
       } else {
@@ -2071,7 +2085,7 @@ function renderCitations(citations){
 }
 
 
-function openDocFromCitation(docId, chunkId, quote){
+function openDocFromCitation(docId, chunkId, quote, fallbackText){
   let d = (lastTopDocs || []).find(x => x.doc_id === docId && (x.chunk_id === chunkId));
   if(!d) d = (lastTopDocs || []).find(x => x.doc_id === docId);
   if(!d){
@@ -2080,7 +2094,7 @@ function openDocFromCitation(docId, chunkId, quote){
       : alert("현재 TopDocs에 없는 문서입니다."));
     return;
   }
-  openDocModal(d, quote);
+  openDocModal(d, quote, fallbackText);
 }
 
 /* ---------- modal viewer ---------- */
@@ -2298,16 +2312,41 @@ function locateTextOffset(nodes, starts, pos){
   return null;
 }
 
-function highlightInViewer(quote){
+// 하이라이트 위치로 안정적으로 스크롤한다.
+// 모달 오픈/마크다운 렌더 직후엔 레이아웃이 아직 안정되지 않고, 문서 내 이미지가 뒤늦게
+// 로드되며 하이라이트 위치가 밀리므로: (1) rAF 2회로 레이아웃 안정 후 스크롤, (2) 뷰어 내
+// 이미지들이 로드될 때마다 재보정. 사용자가 직접 스크롤하면 자동 보정을 멈춘다.
+function _scrollMarkIntoView(mark){
+  if(!mark) return;
   const container = el("docModalMd");
-  if(!container || !quote) return;
+  const scroller = (container && container.closest && (container.closest(".modal-scroll") || container.parentElement)) || container;
+  let userScrolled = false;
+  const stop = () => { userScrolled = true; };
+  if(scroller) scroller.addEventListener("wheel", stop, { once:true, passive:true });
+  if(scroller) scroller.addEventListener("touchmove", stop, { once:true, passive:true });
+
+  const doScroll = () => { if(!userScrolled) mark.scrollIntoView({ behavior:"auto", block:"center", inline:"nearest" }); };
+  requestAnimationFrame(() => requestAnimationFrame(doScroll));
+
+  if(container){
+    container.querySelectorAll("img").forEach(img => {
+      if(img.complete) return;
+      img.addEventListener("load", doScroll, { once:true });
+      img.addEventListener("error", () => {}, { once:true });
+    });
+  }
+}
+
+// quote(정확 근거)로 먼저 하이라이트, 못 찾으면 fallbackText(각주 문장)로 재시도.
+function highlightInViewer(quote, fallbackText){
+  const container = el("docModalMd");
+  if(!container) return;
 
   clearMarks(container);
 
-  const mark = markFirstOccurrence(container, quote);
-  if(mark){
-    mark.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
-  }
+  let mark = quote ? markFirstOccurrence(container, quote) : null;
+  if(!mark && fallbackText) mark = markFirstOccurrence(container, fallbackText);
+  if(mark) _scrollMarkIntoView(mark);
 }
 
 // ✨ [업그레이드] 마크다운 전처리 함수 (다중 절단 조건 지원)
@@ -2328,7 +2367,7 @@ function preProcessMarkdown(mdText) {
   return t;
 }
 
-async function openDocModal(d, highlightQuote){
+async function openDocModal(d, highlightQuote, highlightFallback){
   const title = stripEnriched(d.title || "(no title)");
   el("docModalTitle").textContent = title;
 
@@ -2347,7 +2386,7 @@ async function openDocModal(d, highlightQuote){
       const mdWithImgs = injectImagesIntoMarkdown(mdNoMeta, assets);
 
       el("docModalMd").innerHTML = renderDocumentMarkdown(mdWithImgs);
-      if(highlightQuote) highlightInViewer(highlightQuote);
+      if(highlightQuote || highlightFallback) highlightInViewer(highlightQuote, highlightFallback);
 
     } catch(e){
       el("docModalMd").innerHTML = `<pre>${escapeHtml(String(e))}</pre>`;

@@ -261,10 +261,13 @@ def _extract_numbers(text: str) -> set:
 
 
 def _numeric_echo_check(final_answer: str, db_tool_results: list, allowed_extra: set) -> dict:
-    """DB 답변 속 숫자가 실제 도구 결과에 존재하는지 결정적으로 검사.
-    SQL <details> 블록과 코드펜스는 제외. 사용자 질문 속 숫자는 허용."""
+    """DB 답변 속 숫자가 실제 도구 결과에 존재하는지 결정적으로 검사(내부 가드/보조 지표용).
+    SQL <details> 블록·코드펜스·**마크다운 표 줄**은 제외한다. 표는 DB 결과 그 자체이고,
+    인용 문서·질문 속 숫자는 allowed_extra로 허용해 오탐(HYBRID의 문서/파생 숫자)을 없앤다."""
     ans = re.sub(r"<details>.*?</details>", " ", final_answer or "", flags=re.S | re.I)
     ans = re.sub(r"```.*?```", " ", ans, flags=re.S)
+    # 마크다운 표 줄(| ... |)은 렌더된 DB 결과이므로 검사 대상에서 제외
+    ans = "\n".join(ln for ln in ans.split("\n") if not ln.strip().startswith("|"))
     ans_nums = _extract_numbers(ans)
     src_nums = set(allowed_extra or set())
     for t in db_tool_results or []:
@@ -882,10 +885,14 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
             # 💡 [검증 요약] 숫자 에코 체크(DB) + claim 지원율
             verification = {"grounded": True}
             if used_db and db_tool_results:
+                # HYBRID는 인용 문서(top_docs)의 숫자도 정당한 근거이므로 허용집합에 포함 → 오탐 제거
+                allowed = _extract_numbers(user_query)
+                for d in top_docs_ui:
+                    allowed |= _extract_numbers(d.get("merge_title_content") or "")
                 verification.update(_numeric_echo_check(
                     final_answer=final_answer,
                     db_tool_results=db_tool_results,
-                    allowed_extra=_extract_numbers(user_query),
+                    allowed_extra=allowed,
                 ))
             claim_list = citations_json.get("answer") or []
             if claim_list:

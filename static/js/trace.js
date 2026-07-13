@@ -121,9 +121,10 @@
       statTile("질문 수", num(t.questions), `${num(t.sessions)}개 세션 · ${data.days}일`),
       statTile("사용자 만족도", pct(satisfaction), fbTotal ? `👍 ${num(t.fb_up)} / 👎 ${num(t.fb_down)}` : "피드백 없음"),
       statTile("근거 충족도", pct(q.groundedness), q.claims_rows ? `검증된 턴 ${num(q.claims_rows)}건 평균` : "검증 데이터 없음"),
-      statTile("수치 검증 통과율", pct(q.numeric_ok_rate), q.numeric_rows ? `DB 답변 ${num(q.numeric_rows)}건` : "DB 답변 없음"),
       statTile("근거 게이트 발동", num(q.gate_count), "근거 부족으로 답변 중단"),
       statTile("문서검색 0건 비율", pct(s.zero_hit_rate), s.rag_turns ? `문서검색 시도 ${num(s.rag_turns)}턴 기준 · 용어 평균 ${s.avg_terms ?? "—"}개` : "문서검색 턴 없음"),
+      // 보조 지표: DB 답변에서 결과·근거에 없는 숫자가 등장하지 않은 비율(수치 환각 차단). 대표 품질 지표는 아님.
+      statTile("DB 수치 환각 차단율", pct(q.numeric_ok_rate), q.numeric_rows ? `보조 지표 · DB 답변 ${num(q.numeric_rows)}건` : "DB 답변 없음"),
     ].join("");
 
     const daily = data.daily || [];

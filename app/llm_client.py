@@ -495,14 +495,14 @@ def _best_claim_for_sentence(sentence: str, claims: list[dict]) -> dict | None:
     return best if best_score >= 0.34 else None
 
 
-def _best_snippet_from_doc(sentence: str, doc_text: str, max_len: int = 180) -> str:
-    """각주 문장과 가장 겹치는 **문서 원문 구절**을 결정적으로 골라 반환(verbatim substring).
+def _best_snippet_from_doc(sentence: str, doc_text: str, max_len: int = 180):
+    """각주 문장과 가장 겹치는 **문서 원문 구절**을 결정적으로 골라 (스니펫, 점수) 반환(verbatim substring).
     각주마다 그 문장에 특화된 서로 다른 근거 스니펫을 만들어 툴팁 중복을 막는다.
-    관련성이 낮으면 빈 문자열."""
+    관련성이 낮으면 ("", 0.0)."""
     st = _sentence_tokens(sentence)
     text = str(doc_text or "").strip()
     if not st or not text:
-        return ""
+        return "", 0.0
     best, best_score = "", 0.0
     for seg in re.split(r"(?<=[.!?。\n])\s*", text):
         seg = seg.strip()
@@ -518,8 +518,69 @@ def _best_snippet_from_doc(sentence: str, doc_text: str, max_len: int = 180) -> 
         if score > best_score:
             best_score, best = score, seg
     if best_score < 0.12:
-        return ""
-    return best[:max_len].strip()
+        return "", 0.0
+    return best[:max_len].strip(), best_score
+
+
+def _best_doc_for_sentence(sentence: str, rag_chunks: list[dict], min_score: float = 0.16):
+    """문장을 가장 잘 뒷받침하는 문서를 고른다(모든 근거 문서 원문과 겹침 비교).
+    반환: (doc_index, snippet). 임계 미만이면 (None, "")."""
+    st = _sentence_tokens(sentence)
+    if not st:
+        return None, ""
+    best_i, best_score, best_snip = None, 0.0, ""
+    for i, c in enumerate(rag_chunks or []):
+        snip, score = _best_snippet_from_doc(sentence, c.get("merge_title_content") or "")
+        if score > best_score:
+            best_i, best_score, best_snip = i, score, snip
+    if best_i is None or best_score < min_score:
+        return None, ""
+    return best_i, best_snip
+
+
+def _footnotes_by_matching(text: str, rag_chunks: list[dict], max_notes: int = 12):
+    """마커가 없는 답변(HYBRID 등)에 대해 문장↔문서 매칭으로 각주와 인라인 [k] 마커를 결정적으로 생성.
+    코드펜스/표/헤딩/짧은 줄은 건너뛰고, 문서와 충분히 겹치는 문장에만 마커를 붙인다(과잉표시 방지).
+    반환: (footnote_answer, footnotes)."""
+    footnotes = []
+    n = 0
+    out_lines = []
+    in_fence = False
+    for raw_line in text.split("\n"):
+        stripped = raw_line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            out_lines.append(raw_line)
+            continue
+        if in_fence or stripped.startswith("|") or stripped.startswith("#") or len(stripped) < 8:
+            out_lines.append(raw_line)
+            continue
+        # 라인을 문장 단위로 나눠, 매칭 문서가 있는 문장에만 마커 삽입
+        new_parts = []
+        for seg in re.split(r"(?<=[.!?。])\s+", raw_line):
+            clean = _MARKER_RE.sub("", seg).strip().lstrip("#>-*•· ").strip()
+            if n >= max_notes or len(clean) < 8:
+                new_parts.append(seg)
+                continue
+            di, snip = _best_doc_for_sentence(clean, rag_chunks)
+            if di is None:
+                new_parts.append(seg)
+                continue
+            n += 1
+            new_parts.append(seg + f"[{n}]")
+            c = rag_chunks[di]
+            footnotes.append({
+                "claim": clean,
+                "support": "supported" if snip else "partial",
+                "citations": [{
+                    "doc_id": c.get("doc_id"),
+                    "chunk_id": c.get("chunk_id"),
+                    "quote": snip,
+                    "score": c.get("score"),
+                }],
+            })
+        out_lines.append(" ".join(new_parts))
+    return "\n".join(out_lines), footnotes
 
 
 def _build_footnotes(final_answer: str, claims: list[dict], rag_chunks: list[dict]):
@@ -529,11 +590,14 @@ def _build_footnotes(final_answer: str, claims: list[dict], rag_chunks: list[dic
     반환: (footnote_answer, footnotes)
       - footnote_answer: 마커가 [1],[2],[3]… 읽는 순서로 치환된 답변 마크다운.
       - footnotes: [{claim(문장), support, citations:[{doc_id,chunk_id,quote,score}]}] (읽는 순서).
-    마커가 하나도 없으면 (원문, []) 반환(호출부가 기존 claims로 폴백).
+    LLM 마커가 있으면 그걸 읽는 순서로 재번호, 없으면(HYBRID 등) 문장↔문서 매칭으로 각주를 생성한다.
     코드펜스/표 줄은 건드리지 않는다."""
     text = str(final_answer or "")
-    if not rag_chunks or "[" not in text:
+    if not rag_chunks:
         return text, []
+    # LLM이 붙인 [doc] 마커가 아예 없으면(HYBRID 툴 루프 답변) 문장↔문서 매칭으로 각주 생성
+    if "[" not in text:
+        return _footnotes_by_matching(text, rag_chunks)
 
     group_re = re.compile(r"\[\d{1,2}\](?:\s*\[\d{1,2}\])*")
     footnotes = []
@@ -581,7 +645,7 @@ def _build_footnotes(final_answer: str, claims: list[dict], rag_chunks: list[dic
                 c = rag_chunks[di]
                 did = c.get("doc_id")
                 # 1) 그 문장에 특화된 근거 스니펫을 문서 원문에서 결정적으로 추출(각주별로 다름 → 툴팁 중복 방지)
-                quote = _best_snippet_from_doc(sentence, c.get("merge_title_content") or "")
+                quote = _best_snippet_from_doc(sentence, c.get("merge_title_content") or "")[0]
                 # 2) 없으면 매칭된 claim의 verbatim quote(2차 인용 LLM)로 보완
                 if not quote and best:
                     for x in (best.get("citations") or []):
@@ -604,6 +668,10 @@ def _build_footnotes(final_answer: str, claims: list[dict], rag_chunks: list[dic
             })
         pieces.append(raw_line[last:])
         out_lines.append("".join(pieces))
+
+    # 마커가 하나도 없었으면(HYBRID 등 툴 루프 답변) 문장↔문서 매칭으로 각주를 결정적으로 생성
+    if n_counter == 0:
+        return _footnotes_by_matching(text, rag_chunks)
 
     return "\n".join(out_lines), footnotes
 
