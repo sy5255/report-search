@@ -116,15 +116,19 @@ def _build_answer_prompt(
     user_question: str,
     rag_chunks: list[dict],
     previous_messages: list[dict] | None = None,
-    style_rules: str | None = None
+    style_rules: str | None = None,
+    plain_output: bool = False
 ) -> list[dict]:
+    """plain_output=True면 JSON 래핑 없이 마크다운 본문만 출력하도록 지시
+    (토큰 스트리밍용 — 델타가 그대로 사람이 읽을 수 있는 텍스트가 됨)."""
     system = (
         "You are a helpful RAG answerer.\n"
         "You must use ONLY the provided EVIDENCE for factual claims.\n"
         "Do NOT invent facts.\n"
         "If evidence is insufficient, clearly say what is uncertain.\n"
         "Write a natural, professional Korean answer.\n"
-        "Return STRICT JSON only.\n"
+        + ("Output ONLY the markdown answer text. No JSON. No code fences around the whole answer.\n"
+           if plain_output else "Return STRICT JSON only.\n")
     )
 
     evidence_lines = []
@@ -138,32 +142,45 @@ def _build_answer_prompt(
             "score": c.get("score"),
         })
 
-    user_payload = {
-        "task": "Answer the question naturally in Korean using ONLY the evidence.",
-        "output_schema": {
-            "answer_markdown": "Markdown formatted answer string"
-        },
-        "rules": [
-            "Return JSON only.",
-            "Do not wrap the JSON with markdown fences.",
-            "No trailing commas.",
-            "All strings must be valid JSON strings.",
-            "Answer in Korean.",
-            "Put the full answer into 'answer_markdown' as a single markdown string.",
-            "The markdown must be inside a JSON string, not printed as raw markdown.",
-            "If you do not return valid JSON, the response will be rejected.",
-            "Example valid output: {\"answer_markdown\":\"## 제목\\n\\n- 항목1\\n- 항목2\"}",
-            "Use markdown headings, bullet lists, or tables when they improve readability.",
-            "If the user asks for a table, output a markdown table.",
-            "If the user asks for code, output a markdown code block inside the answer_markdown string.",
-            "After each factual sentence, append an inline citation marker like [1] or [2] "
-            "referencing the 'no' of the evidence that supports it. "
-            "Use ONLY evidence numbers that exist. Do not put markers inside tables or code blocks.",
-            "If evidence is insufficient, say so clearly."
-        ],
-        "question": user_question,
-        "evidence": evidence_lines
-    }
+    common_rules = [
+        "Answer in Korean.",
+        "Use markdown headings, bullet lists, or tables when they improve readability.",
+        "If the user asks for a table, output a markdown table.",
+        "After each factual sentence, append an inline citation marker like [1] or [2] "
+        "referencing the 'no' of the evidence that supports it. "
+        "Use ONLY evidence numbers that exist. Do not put markers inside tables or code blocks.",
+        "If evidence is insufficient, say so clearly."
+    ]
+    if plain_output:
+        user_payload = {
+            "task": "Answer the question naturally in Korean using ONLY the evidence.",
+            "rules": [
+                "Output ONLY the final markdown answer text.",
+                "Do NOT wrap the answer in JSON or in a surrounding code fence.",
+            ] + common_rules,
+            "question": user_question,
+            "evidence": evidence_lines
+        }
+    else:
+        user_payload = {
+            "task": "Answer the question naturally in Korean using ONLY the evidence.",
+            "output_schema": {
+                "answer_markdown": "Markdown formatted answer string"
+            },
+            "rules": [
+                "Return JSON only.",
+                "Do not wrap the JSON with markdown fences.",
+                "No trailing commas.",
+                "All strings must be valid JSON strings.",
+                "Put the full answer into 'answer_markdown' as a single markdown string.",
+                "The markdown must be inside a JSON string, not printed as raw markdown.",
+                "If you do not return valid JSON, the response will be rejected.",
+                "Example valid output: {\"answer_markdown\":\"## 제목\\n\\n- 항목1\\n- 항목2\"}",
+                "If the user asks for code, output a markdown code block inside the answer_markdown string.",
+            ] + common_rules,
+            "question": user_question,
+            "evidence": evidence_lines
+        }
 
     if style_rules:
         user_payload["style_rules"] = style_rules
@@ -430,6 +447,26 @@ def _strip_code_fence(text: str) -> str:
             t = "\n".join(lines).strip()
 
     return t
+
+
+def stream_answer_markdown(client: OpenAI, messages: list[dict],
+                           max_tokens: int = ANSWER_MAX_TOKENS, temperature: float = 0.1):
+    """(제너레이터) 답변 생성을 토큰 스트림으로 — 델타 문자열을 순서대로 yield.
+    _build_answer_prompt(plain_output=True)와 함께 사용해 델타가 그대로 마크다운이 되게 한다."""
+    completion = client.chat.completions.create(
+        model="openai/gpt-oss-120b",
+        messages=messages,
+        temperature=temperature,
+        stream=True,
+        max_tokens=max_tokens,
+    )
+    for chunk in completion:
+        try:
+            delta = chunk.choices[0].delta.content if chunk.choices else None
+        except Exception:
+            delta = None
+        if delta:
+            yield delta
 
 
 def _call_answer_json_or_fallback_markdown(

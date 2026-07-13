@@ -447,12 +447,30 @@ def build_expanded_query(
 
     return base_query or original_query
 
+# 💡 [속도] 용어사전 TTL 캐시 — 매 요청 MySQL 5천행 조인+엔트리 재구성을 피한다.
+# 사전 수정 반영은 최대 TTL(60초)만큼 지연되며, 이는 관리 워크플로우상 허용 범위.
+_TERM_ENTRIES_CACHE: Dict[tuple, tuple] = {}  # {scope_key: (expires_at_ts, term_entries)}
+_TERM_ENTRIES_TTL_SEC = 60
+
+
+def get_term_entries_cached(scope_candidates: List[str] | None = None) -> List[Dict[str, Any]]:
+    import time
+    key = tuple(sorted(set(["all"] + [str(s or "").strip() for s in (scope_candidates or []) if str(s or "").strip()])))
+    now = time.time()
+    hit = _TERM_ENTRIES_CACHE.get(key)
+    if hit and hit[0] > now:
+        return hit[1]
+    rows = load_term_dictionary(scope_candidates=scope_candidates)
+    entries = build_term_entries(rows)
+    _TERM_ENTRIES_CACHE[key] = (now + _TERM_ENTRIES_TTL_SEC, entries)
+    return entries
+
+
 def normalize_and_expand_query(
     query_text: str,
     scope_candidates: List[str] | None = None,
 ) -> Dict[str, Any]:
-    rows = load_term_dictionary(scope_candidates=scope_candidates)
-    term_entries = build_term_entries(rows)
+    term_entries = get_term_entries_cached(scope_candidates)
 
     detected_terms = detect_terms_in_query(query_text, term_entries)
     normalized_query = apply_canonical_rewrite(query_text, detected_terms)

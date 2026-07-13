@@ -1499,6 +1499,7 @@ function appendMessage(role, content, metaText, msgId, extra = null){
 
   if(role === "assistant" && msgId && !isPending){
     wireMessageActionBar(div, msgId);
+    wireTableChartButton(div);  // 표가 있으면 '차트로 보기' 버튼 (LLM 0회 온디맨드)
   }
 
   if(role === "assistant" && msgId){
@@ -1755,6 +1756,100 @@ function _pieSvg(s){
   }).join("");
   const legend = s.map((d,i)=>`<div class="mc-leg-item"><span class="mc-leg-dot" style="background:${CHART_PALETTE[i%CHART_PALETTE.length]}"></span>${escapeHtml(String(d.label||""))} <span class="mc-leg-val">${escapeHtml(_niceNum(d.value))}</span></div>`).join("");
   return `<div class="mc-pie-wrap"><svg viewBox="0 0 180 180" class="mc-pie" role="img">${arcs}</svg><div class="mc-legend">${legend}</div></div>`;
+}
+
+/* ---------- 표 → 차트 온디맨드 (LLM 0회) ----------
+   답변 속 첫 마크다운 표를 파싱해 '차트로 보기' 버튼으로 즉시 SVG 변환.
+   라벨 열 = 첫 비숫자 열, 값 열 = 첫 숫자 열. 2~12행일 때만 차트화. */
+function parseMarkdownTable(md){
+  const text = String(md || "");
+  const lines = text.split("\n");
+  // 표 시작: |...| 행 + 바로 다음 구분행(|---|)
+  for(let i = 0; i < lines.length - 1; i++){
+    const h = lines[i].trim();
+    const sep = lines[i+1].trim();
+    if(!h.startsWith("|") || !/^\|[\s:|-]+\|$/.test(sep)) continue;
+    const headers = h.split("|").slice(1, -1).map(s => s.trim());
+    const rows = [];
+    for(let j = i + 2; j < lines.length; j++){
+      const r = lines[j].trim();
+      if(!r.startsWith("|")) break;
+      const cells = r.split("|").slice(1, -1).map(s => s.trim());
+      if(cells.length) rows.push(cells);
+    }
+    if(rows.length < 2 || rows.length > 12 || headers.length < 2) return null;
+
+    const toNum = (s) => {
+      // 완전한 숫자 셀만 값으로 인정 (예: "2026-01"이 parseFloat로 2026이 되는 오인 방지)
+      const cleaned = String(s).trim().replace(/,/g, "").replace(/[%건개회원명건수]+$/g, "").trim();
+      if(!/^-?\d+(\.\d+)?$/.test(cleaned)) return null;
+      const n = parseFloat(cleaned);
+      return Number.isFinite(n) ? n : null;
+    };
+    const numericRatio = (ci) => rows.filter(r => toNum(r[ci]) !== null).length / rows.length;
+
+    let valueCol = -1, labelCol = -1;
+    for(let c = 0; c < headers.length; c++){
+      if(valueCol === -1 && numericRatio(c) >= 0.8) valueCol = c;
+      if(labelCol === -1 && numericRatio(c) < 0.5) labelCol = c;
+    }
+    if(valueCol === -1 || labelCol === -1 || valueCol === labelCol) return null;
+
+    const series = rows
+      .map(r => ({ label: r[labelCol] || "", value: toNum(r[valueCol]) }))
+      .filter(p => p.label && p.value !== null)
+      .slice(0, 12);
+    if(series.length < 2) return null;
+
+    // 라벨이 날짜/월 패턴이면 꺾은선이 자연스러움
+    const dateLike = series.filter(p => /^\d{4}[-./년]|^\d{1,2}월|^\d{4}$/.test(p.label)).length >= series.length * 0.6;
+    return {
+      chart_type: dateLike ? "line" : "bar",
+      title: `${headers[labelCol]}별 ${headers[valueCol]}`,
+      series,
+    };
+  }
+  return null;
+}
+
+function wireTableChartButton(div){
+  const raw = div.dataset ? div.dataset.rawMarkdown : "";
+  if(!raw) return;
+  const bar = div.querySelector(".msg-action-bar");
+  if(!bar || bar.querySelector('[data-action="table-chart"]')) return;
+  const spec = parseMarkdownTable(raw);
+  if(!spec) return;
+
+  const btn = document.createElement("button");
+  btn.className = "msg-action-btn";
+  btn.type = "button";
+  btn.setAttribute("data-action", "table-chart");
+  btn.title = "표 데이터를 차트로 보기";
+  btn.innerHTML = `<span class="material-symbols-outlined">bar_chart</span><span>차트로 보기</span>`;
+  bar.insertBefore(btn, bar.children[1] || null);
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    let holder = div.querySelector(".table-chart-holder");
+    if(holder){
+      holder.classList.toggle("hidden");
+      return;
+    }
+    holder = document.createElement("div");
+    holder.className = "table-chart-holder mt-3";
+    const draw = (ctype) => {
+      holder.innerHTML = `
+        <div class="flex items-center gap-1 mb-1">
+          ${["bar","line","pie"].map(t => `<button class="tc-type px-2 py-0.5 text-[10px] font-bold rounded border ${t===ctype?"border-primary text-primary":"border-surface-container text-secondary"}" data-t="${t}" type="button">${t==="bar"?"막대":t==="line"?"꺾은선":"도넛"}</button>`).join("")}
+        </div>
+        ${renderChartSvg(Object.assign({}, spec, { chart_type: ctype }))}`;
+      holder.querySelectorAll(".tc-type").forEach(b =>
+        b.addEventListener("click", (ev) => { ev.stopPropagation(); draw(b.dataset.t); }));
+    };
+    draw(spec.chart_type);
+    const content = div.querySelector(".content");
+    if(content) content.insertAdjacentElement("afterend", holder);
+  });
 }
 
 /* ---------- TopDocs render ---------- */
@@ -2646,6 +2741,23 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
               statusTextNode.textContent = displayThought;
               statusTextNode.style.opacity = '1';
             }, 150);
+          }
+        } else if (parsed.type === "token") {
+          // 💡 [토큰 스트리밍] 답변 본문이 생성되는 대로 pending 버블에 점진 표시.
+          // 중간엔 plain text로 보여주고, final 도착 시 마크다운 렌더로 교체된다.
+          if (pendNode) {
+            let prev = pendNode.querySelector(".stream-preview");
+            if (!prev) {
+              prev = document.createElement("div");
+              prev.className = "stream-preview mt-3 text-sm leading-relaxed whitespace-pre-wrap text-on-surface dark:text-[#e7eefc]";
+              const host = pendNode.querySelector(".content") || pendNode;
+              host.appendChild(prev);
+            }
+            prev.textContent += ((parsed.data && parsed.data.text) || "");
+            const area = el("chatArea");
+            if (area && area.scrollHeight - area.scrollTop - area.clientHeight < 240) {
+              area.scrollTop = area.scrollHeight;  // 바닥 근처일 때만 자동 스크롤
+            }
           }
         } else if (parsed.type === "final") {
           finalRes = parsed.data;

@@ -333,14 +333,16 @@ async def api_chat_stream(request: Request):
         yield json.dumps({"type": "step", "message": "🔄 질문을 이해하고 검색에 맞게 다듬고 있어요..."}, ensure_ascii=False) + "\n"
 
         rewritten_query = user_text
-        try:
-            rewritten_query = rewrite_query_with_history(
-                user_id=user,
-                user_question=user_text,
-                previous_messages=previous_messages,
-            )
-        except Exception as e:
-            print(f"Query rewrite failed: {e}")
+        # 💡 [속도] 히스토리가 없으면 rewrite는 해소할 참조가 없어 원문 반환이므로 LLM 호출 생략
+        if previous_messages:
+            try:
+                rewritten_query = rewrite_query_with_history(
+                    user_id=user,
+                    user_question=user_text,
+                    previous_messages=previous_messages,
+                )
+            except Exception as e:
+                print(f"Query rewrite failed: {e}")
 
         query_norm = {
             "original_query": rewritten_query,
@@ -576,14 +578,16 @@ async def api_chat(request: Request):
         print(f"Failed to load previous messages: {e}")
 
     rewritten_query = user_text
-    try:
-        rewritten_query = rewrite_query_with_history(
-            user_id=user,
-            user_question=user_text,
-            previous_messages=previous_messages,
-        )
-    except Exception as e:
-        print(f"Query rewrite failed: {e}")
+    # 💡 [속도] 히스토리가 없으면 rewrite는 해소할 참조가 없어 원문 반환이므로 LLM 호출 생략
+    if previous_messages:
+        try:
+            rewritten_query = rewrite_query_with_history(
+                user_id=user,
+                user_question=user_text,
+                previous_messages=previous_messages,
+            )
+        except Exception as e:
+            print(f"Query rewrite failed: {e}")
 
     query_norm = {
         "original_query": rewritten_query,
