@@ -160,11 +160,12 @@ def _build_answer_prompt(
             "Use markdown headings, bullet lists, or tables when they improve readability.",
             "If the user asks for a table, output a markdown table.",
             "If the user asks for code, output a markdown code block inside the answer_markdown string.",
-            "Write in natural, connected Korean paragraphs. When a sentence or clause relies on a "
-            "specific evidence item, append an inline citation marker like [1] at the end of that "
-            "sentence/clause, referencing the 'no' of the evidence. Do NOT force a marker on every "
-            "sentence, and do NOT fragment the writing into one-fact-per-line just to add markers — "
-            "cite where the evidence is actually used. "
+            "Write in natural, connected Korean paragraphs. Cite each major factual claim by "
+            "appending an inline citation marker like [1] at the end of the sentence/clause that "
+            "relies on a specific evidence item, so the reader can trace the key statements to "
+            "sources (a well-cited answer usually has several markers across it). Do NOT force a "
+            "marker on every sentence, and do NOT fragment the writing into one-fact-per-line just "
+            "to add markers. "
             "Use ONLY evidence numbers that exist. Do not put markers inside tables or code blocks.",
             "If evidence is insufficient, say so clearly."
         ],
@@ -528,7 +529,7 @@ def _best_snippet_from_doc(sentence: str, doc_text: str, max_len: int = 180):
     return best[:max_len].strip(), best_score
 
 
-def _best_doc_for_sentence(sentence: str, rag_chunks: list[dict], min_score: float = 0.16):
+def _best_doc_for_sentence(sentence: str, rag_chunks: list[dict], min_score: float = 0.12):
     """문장을 가장 잘 뒷받침하는 문서를 고른다(모든 근거 문서 원문과 겹침 비교).
     반환: (doc_index, snippet). 임계 미만이면 (None, "")."""
     st = _sentence_tokens(sentence)
@@ -569,7 +570,8 @@ def _footnotes_by_matching(text: str, rag_chunks: list[dict], max_notes: int = 1
                 new_parts.append(seg)
                 continue
             di, snip = _best_doc_for_sentence(clean, rag_chunks)
-            if di is None:
+            # 임계를 낮춘 만큼(0.12) 단일 공통어 오탐을 막기 위해 공유 콘텐츠 토큰 2개 이상 요구
+            if di is None or len(_sentence_tokens(clean) & _sentence_tokens(snip)) < 2:
                 new_parts.append(seg)
                 continue
             n += 1

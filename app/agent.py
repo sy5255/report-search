@@ -219,9 +219,9 @@ def _get_specialist_prompt(intent: str, current_date: str) -> str:
 # =====================================================================
 def _get_suggested_actions(intent: str, db_used: bool = False) -> list:
     if intent == "DB_ANALYSIS":
+        # 보고서 심층분석(REPORT_ANALYSIS) 진입점은 제거 — 기능이 부실·과해 노출하지 않음.
         actions = [
             {"label": "📖 관련 사내 문서도 찾아보기", "action": "[RAG_KNOWLEDGE]"},
-            {"label": "🧩 이 보고서 심층분석", "action": "[REPORT_ANALYSIS]"},
         ]
         # DB 쿼리가 실행되었을 때만 '재검색' 기능 활성화
         if db_used:
@@ -233,11 +233,6 @@ def _get_suggested_actions(intent: str, db_used: bool = False) -> list:
     elif intent == "RAG_KNOWLEDGE":
         return [
             {"label": "📊 DB 통계로도 확인해보기", "action": "[DB_ANALYSIS]"}
-        ]
-    elif intent == "REPORT_ANALYSIS":
-        return [
-            {"label": "📊 DB 통계로도 확인해보기", "action": "[DB_ANALYSIS]"},
-            {"label": "📖 관련 사내 문서도 찾아보기", "action": "[RAG_KNOWLEDGE]"},
         ]
     elif intent == "HYBRID_DB_RAG":
         return []
