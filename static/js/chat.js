@@ -241,19 +241,14 @@ function renderMarkdownSafe(mdText){
 
 // document 모달 호출 시 인덱스로 찾기 위해 래핑 함수를 하나 만듦
 window.openDocFromCitationIndex = function(idxStr) {
-  // citations에서 idx 인덱스에 해당하는 것을 찾아서 열어줍니다.
+  // 인라인 [n]은 근거 문서 번호 → 전역 topDocs[n-1]로 매핑 (claims 인덱싱이 아님).
+  // pill 클릭은 메시지별 근거를 쓰는 openDocFromPill을 사용하고, 이 함수는 하위호환용 폴백.
   const idx = parseInt(idxStr, 10) - 1;
-  const ans = (lastCitations && lastCitations.answer) ? lastCitations.answer : [];
-  if (ans[idx] && ans[idx].citations && ans[idx].citations.length > 0) {
-     const c = ans[idx].citations[0];
-     openDocFromCitation(c.doc_id, c.chunk_id, c.quote || "");
+  if(idx < 0) return;
+  if (Array.isArray(lastTopDocs) && lastTopDocs[idx]) {
+     openDocModal(lastTopDocs[idx], null);
   } else {
-    // topDocs에서 idx로 바로 찾기 (fallback)
-    if(lastTopDocs && lastTopDocs[idx]) {
-       openDocModal(lastTopDocs[idx], null);
-    } else {
-       console.log("No document found for index: " + idxStr);
-    }
+     console.log("No document found for index: " + idxStr);
   }
 };
 
@@ -376,11 +371,79 @@ function addCodeCopyButtons(container){
   });
 }
 
+// 메시지별 근거(evidence) 사이드맵: msgId → {topDocs, citations}
+// 인라인 [n]이 "그 메시지의" 근거 문서를 가리키도록 하기 위한 것.
+// (전역 lastTopDocs/lastCitations는 마지막 렌더된 답변만 담아, 답변 간 [n] 오염이 생겼음)
+window.__msgEvidence = window.__msgEvidence || {};
+
+function setMsgEvidence(msgId, topDocs, citations){
+  if(!msgId) return;
+  window.__msgEvidence[msgId] = {
+    topDocs: Array.isArray(topDocs) ? topDocs : [],
+    citations: citations || null,
+  };
+}
+
+// 노드(pill 등)가 속한 .msg의 근거 엔트리를 반환 (전역 폴백 없음). 없으면 null.
+function _msgEvidenceEntry(node){
+  let p = node;
+  while(p && p.nodeType === 1){
+    if(p.classList && p.classList.contains("msg") && p.dataset && p.dataset.msgId){
+      return window.__msgEvidence[p.dataset.msgId] || null;
+    }
+    p = p.parentElement;
+  }
+  return null;
+}
+
+// 노드(pill 등)가 속한 .msg의 근거를 반환. 메시지별 엔트리 우선, 없으면 전역으로 폴백.
+function _evidenceForNode(node){
+  const ev = _msgEvidenceEntry(node);
+  if(ev) return ev;
+  return {
+    topDocs: Array.isArray(lastTopDocs) ? lastTopDocs : [],
+    citations: lastCitations || null,
+  };
+}
+
+// citations(claims)에서 doc_id → verbatim quote 맵을 1회 구성.
+// 근거 문서에 대응하는 AI 인용문이 있으면 툴팁에 그대로 보여주기 위함.
+function _docQuoteMap(citations){
+  const map = {};
+  const ans = (citations && Array.isArray(citations.answer)) ? citations.answer : [];
+  ans.forEach(claim => {
+    const cs = (claim && Array.isArray(claim.citations)) ? claim.citations : [];
+    cs.forEach(c => {
+      if(c && c.doc_id && c.quote && !map[c.doc_id]) map[c.doc_id] = c.quote;
+    });
+  });
+  return map;
+}
+
+// citation pill([n])의 근거 문서 모달을 연다. [n] ↔ 그 메시지의 topDocs[n-1] (1:1).
+function openDocFromPill(pill){
+  if(!pill) return;
+  const n = parseInt((pill.textContent || "").trim(), 10);
+  if(!n) return;
+  const ev = _evidenceForNode(pill);
+  const doc = (ev && Array.isArray(ev.topDocs)) ? ev.topDocs[n - 1] : null;
+  if(doc){
+    openDocModal(doc, null);
+  } else {
+    console.log("No evidence document for citation index: " + n);
+  }
+}
+
 function convertCitationPills(container){
   // [n] 텍스트를 citation pill로 변환 (DOM 기반).
   // 조건: 유효한 citation 번호(1..N)일 때만, 표/코드/링크 내부는 제외 → 오변환 방지.
+  // 번호 상한 N은 "그 메시지"의 근거 문서(topDocs) 개수 — 답변 LLM의 [n]은 근거 문서 번호이기 때문.
+  // 반드시 그 메시지의 근거 엔트리가 있어야 변환한다(전역 폴백 금지). 히스토리 로드 시엔
+  // 아직 엔트리가 없어 [n]이 평문으로 남고, 메시지 선택 시 loadEvidenceByAssistantMsgId가
+  // 엔트리를 채운 뒤 다시 변환한다 → 답변 간 근거 오염 방지.
   if(!container) return;
-  const total = (lastCitations && Array.isArray(lastCitations.answer)) ? lastCitations.answer.length : 0;
+  const ev = _msgEvidenceEntry(container);
+  const total = (ev && Array.isArray(ev.topDocs)) ? ev.topDocs.length : 0;
   if(!total) return;
 
   const SKIP_TAGS = ["A", "CODE", "PRE", "SCRIPT", "STYLE", "BUTTON", "TABLE", "THEAD", "TBODY", "TH", "TD", "SUMMARY", "KBD"];
@@ -411,7 +474,7 @@ function convertCitationPills(container){
       const pill = document.createElement("span");
       pill.className = "citation-pill";
       pill.textContent = String(n);
-      pill.addEventListener("click", () => window.openDocFromCitationIndex(String(n)));
+      pill.addEventListener("click", () => openDocFromPill(pill));
       frag.appendChild(pill);
       last = m.index + m[0].length;
       changed = true;
@@ -457,22 +520,19 @@ function attachCitationHovers(scope){
     pill.addEventListener("mouseenter", () => {
       const idx = parseInt(pill.textContent.trim(), 10);
       if(!idx) return;
-      const ans = (lastCitations && Array.isArray(lastCitations.answer)) ? lastCitations.answer : [];
-      const item = ans[idx - 1];
+      // [n]은 "그 메시지"의 근거 문서 번호 → topDocs[n-1]로 매핑 (claims 인덱싱이 아님).
+      const ev = _evidenceForNode(pill);
+      const doc = (ev && Array.isArray(ev.topDocs)) ? ev.topDocs[idx - 1] : null;
       let quote = "";
       let docHint = "";
-      if(item){
-        quote = (item.quote || item.cited_quote || item.sentence || item.text || "").toString();
-        docHint = (item.doc_id || item.title || "").toString();
-      }
-      if(!quote){
-        const td = Array.isArray(lastTopDocs) ? lastTopDocs[idx - 1] : null;
-        if(td){
-          quote = td.title || td.snippet || "(인용 문장이 없습니다)";
-          docHint = td.doc_id || td.index || "";
-        } else {
-          quote = "(인용 문장을 찾을 수 없습니다)";
-        }
+      if(doc){
+        docHint = (doc.title || doc.doc_id || doc._index || "").toString();
+        // 그 근거 문서에 대응하는 AI 인용문(verbatim quote)이 있으면 그대로, 없으면 문서 본문 스니펫
+        const qmap = _docQuoteMap(ev.citations);
+        const q = (doc.doc_id && qmap[doc.doc_id]) ? qmap[doc.doc_id] : "";
+        quote = (q || doc.merge_title_content || doc.title || "(인용 문장이 없습니다)").toString();
+      } else {
+        quote = "(인용 문장을 찾을 수 없습니다)";
       }
       tip.innerHTML = `
         <span class="ct-label">인용 [${idx}]</span>
@@ -1536,8 +1596,11 @@ async function loadEvidenceByAssistantMsgId(assistantMsgId){
 
     lastCitations = art.citations || null;
     renderCitations(lastCitations);  // 항상 호출: 비면 서브패널 숨김 로직이 돌게 함
-    if(art.citations){
-      // 히스토리 로드 시점엔 citation 개수를 몰라 [n]이 평문으로 남아 있음 → 지금 pill로 변환
+    // 이 메시지의 근거를 사이드맵에 저장 → [n] pill이 이 메시지 근거(topDocs)를 정확히 가리킴
+    setMsgEvidence(assistantMsgId, docs, art.citations);
+    // 히스토리 로드 시점엔 근거 개수를 몰라 [n]이 평문으로 남아 있음 → 지금 pill로 변환
+    // (근거 문서가 있으면 citations가 비어도 변환해야 함 — [n]은 문서 번호이므로)
+    if(docs && docs.length){
       const msgNode = document.querySelector(`.msg.assistant[data-msg-id="${CSS.escape(assistantMsgId)}"]`);
       if(msgNode) enhanceRenderedMessage(msgNode);
     }
@@ -2797,11 +2860,14 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
           charts: finalRes.charts || []
         };
 
-        // 인용 pill 변환(convertCitationPills)이 렌더 시점에 citation 개수를 참조하므로
+        // 인용 pill 변환(convertCitationPills)이 렌더 시점에 근거 문서 개수를 참조하므로
         // appendMessage보다 먼저 세팅해야 한다.
         currentEvidenceAssistantMsgId = finalRes.assistant_msg_id || null;
         lastTopDocs = finalRes.top_docs || [];
         lastCitations = finalRes.citations || {answer:[], final:finalRes.assistant_text};
+        // 이 답변의 근거를 메시지별 사이드맵에 저장 → 이 메시지의 [n]은 항상 자기 근거를 가리킴
+        // (전역만 쓰면 다음 답변이 오면 이전 답변의 [n]이 최신 근거로 오염됨)
+        setMsgEvidence(finalRes.assistant_msg_id, lastTopDocs, lastCitations);
 
         appendMessage("assistant", finalRes.assistant_text, new Date().toISOString(), finalRes.assistant_msg_id || null, extraData);
         setSelectedAssistantMsg(finalRes.assistant_msg_id || "");

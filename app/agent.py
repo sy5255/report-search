@@ -517,7 +517,10 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
         yield yield_step("📖 사내 기술 문서를 검색하고 있어요...")
         fast_chunks = _rag_fallback_chunks(user_query, excluded_indexes, index_names=index_names)
         top_docs_ui = fast_chunks[:ui_top_k]
-        rag_chunks = fast_chunks[:8]
+        # 인용 근거(rag_chunks)를 화면 표시 문서(top_docs_ui)와 동일 리스트로 통일한다.
+        # 답변 LLM의 [n]은 enumerate(rag_chunks,1)의 번호이므로, [n] ↔ top_docs[n-1]가 1:1로 맞아야
+        # 프론트에서 [n] 클릭/호버가 올바른 근거 문서를 가리킨다.
+        rag_chunks = top_docs_ui
 
         # 근거 게이트: 검색 0건이면 자유 생성 차단 + 정직 응답 (기존 원칙 유지)
         if not rag_chunks:
@@ -675,8 +678,9 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
             if all_collected_hits:
                 hits_visible = _dedupe_and_filter_hits(all_collected_hits, excluded_indexes)
                 top_docs_ui = [_to_ui_doc_from_hit(h) for h in hits_visible[:ui_top_k]]
-                # 인용 근거는 8청크로 제한 (인용 프롬프트 입력 토큰 ~33% 절감, 상위 근거 품질 유지)
-                rag_chunks = [_to_ui_doc_from_hit(h) for h in hits_visible[:8]]
+                # 인용 근거(rag_chunks)를 화면 표시 문서(top_docs_ui)와 동일 리스트로 통일.
+                # 답변 LLM의 [n] = enumerate(rag_chunks,1) 번호 → [n] ↔ top_docs[n-1] 1:1 정합.
+                rag_chunks = top_docs_ui
 
             # 💡 [Phase 3: REPORT_ANALYSIS] KG로 근거를 조립해 생성에 투입 (전용 경로)
             if intent == "REPORT_ANALYSIS":
