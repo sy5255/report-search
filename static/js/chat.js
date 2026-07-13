@@ -2742,23 +2742,6 @@ async function sendMessage(overrideActionTag = null, specificQuery = null){
               statusTextNode.style.opacity = '1';
             }, 150);
           }
-        } else if (parsed.type === "token") {
-          // 💡 [토큰 스트리밍] 답변 본문이 생성되는 대로 pending 버블에 점진 표시.
-          // 중간엔 plain text로 보여주고, final 도착 시 마크다운 렌더로 교체된다.
-          if (pendNode) {
-            let prev = pendNode.querySelector(".stream-preview");
-            if (!prev) {
-              prev = document.createElement("div");
-              prev.className = "stream-preview mt-3 text-sm leading-relaxed whitespace-pre-wrap text-on-surface dark:text-[#e7eefc]";
-              const host = pendNode.querySelector(".content") || pendNode;
-              host.appendChild(prev);
-            }
-            prev.textContent += ((parsed.data && parsed.data.text) || "");
-            const area = el("chatArea");
-            if (area && area.scrollHeight - area.scrollTop - area.clientHeight < 240) {
-              area.scrollTop = area.scrollHeight;  // 바닥 근처일 때만 자동 스크롤
-            }
-          }
         } else if (parsed.type === "final") {
           finalRes = parsed.data;
         }

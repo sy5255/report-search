@@ -4,13 +4,10 @@ import datetime
 from app.llm_client import (
     _make_client,
     _build_citation_prompt,
-    _build_answer_prompt,
     _call_json,
     _normalize_claims_to_answer_list,
-    _strip_code_fence,
     validate_citations,
     llm_answer_with_citations,
-    stream_answer_markdown,
     CITATION_MAX_TOKENS
 )
 from app.tools import TOOLS_SCHEMA, execute_tool
@@ -538,46 +535,20 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
 
         yield yield_step("✅ 참고 문서를 찾았어요! 문서 내용만 바탕으로 답변을 정리하고 있어요...")
         final_answer = ""
-        parts = []
+        citations_json = {"answer": [], "final": "", "claims": []}
         try:
-            answer_messages = _build_answer_prompt(
-                user_question=user_query, rag_chunks=rag_chunks,
+            synth = llm_answer_with_citations(
+                user_id=user_id, user_question=user_query, rag_chunks=rag_chunks,
                 previous_messages=previous_messages,
-                style_rules=RAG_SYNTHESIS_STYLE_RULES, plain_output=True,
+                style_rules=RAG_SYNTHESIS_STYLE_RULES, client=client,
             )
-            for delta in stream_answer_markdown(client, answer_messages):
-                parts.append(delta)
-                yield json.dumps({"type": "token", "data": {"text": delta}}, ensure_ascii=False) + "\n"
-            final_answer = _strip_code_fence("".join(parts)).strip()
+            final_answer = (synth.get("answer_markdown") or "").strip()
+            citations_json = {"answer": synth.get("answer") or [], "final": final_answer, "claims": synth.get("claims") or []}
         except Exception as e:
-            print(f"  ❌ 스트리밍 합성 실패: {e}")
-            final_answer = _strip_code_fence("".join(parts)).strip()
-
-        citations_json = {"answer": [], "final": final_answer, "claims": []}
+            print(f"  ❌ RAG 합성 실패: {e}")
         if not final_answer:
-            # 스트리밍이 완전히 실패하면 기존 비스트리밍 합성으로 1회 재시도
-            try:
-                synth = llm_answer_with_citations(
-                    user_id=user_id, user_question=user_query, rag_chunks=rag_chunks,
-                    previous_messages=previous_messages,
-                    style_rules=RAG_SYNTHESIS_STYLE_RULES, client=client,
-                )
-                final_answer = (synth.get("answer_markdown") or "").strip() or "근거 문서를 바탕으로 답변을 생성하지 못했습니다."
-                citations_json = {"answer": synth.get("answer") or [], "final": final_answer, "claims": synth.get("claims") or []}
-            except Exception as e2:
-                print(f"  ❌ 합성 재시도 실패: {e2}")
-                final_answer = "근거 문서를 바탕으로 답변을 생성하지 못했습니다."
-                citations_json = {"answer": [], "final": final_answer, "claims": []}
-        else:
-            # 인용 추출(사후 매핑) + 코드 검증 (기존 HYBRID 경로와 동일 파이프라인)
-            try:
-                citation_messages = _build_citation_prompt(
-                    user_question=user_query, final_answer=final_answer, rag_chunks=rag_chunks)
-                citation_res = _call_json(client, citation_messages, CITATION_MAX_TOKENS, 0.0)
-                claims = validate_citations(citation_res.get("claims") or [], rag_chunks)
-                citations_json = {"answer": _normalize_claims_to_answer_list(claims), "final": final_answer, "claims": claims}
-            except Exception as e:
-                print(f"  ❌ 인용구 생성 실패: {e}")
+            final_answer = "근거 문서를 바탕으로 답변을 생성하지 못했습니다."
+            citations_json = {"answer": [], "final": final_answer, "claims": []}
 
         verification = {"grounded": True}
         claim_list = citations_json.get("answer") or []
@@ -766,32 +737,23 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                     f"✅ 근거 {len(all_chunks)}건(DB 기록 {len(ctx.get('db_rows') or [])}·연결 문서 {kg_doc_count}·검색 보완 {len(es_chunks)})을 확보했어요! "
                     "근거 내용만 바탕으로 심층분석을 정리하고 있어요..."
                 )
-                # 합성(토큰 스트리밍) → 인용 추출. 실패 시 루프 답변으로 폴백(기존 동작).
-                streamed_parts = []
+                # 합성 → 인용 추출(비스트리밍, 완성 마크다운으로 한 번에). 실패 시 루프 답변 유지.
                 try:
-                    answer_messages = _build_answer_prompt(
-                        user_question=user_query, rag_chunks=all_chunks,
+                    synth = llm_answer_with_citations(
+                        user_id=user_id, user_question=user_query, rag_chunks=all_chunks,
                         previous_messages=prev_for_synth,
                         style_rules=(RAG_SYNTHESIS_STYLE_RULES if degraded else REPORT_ANALYSIS_STYLE_RULES),
-                        plain_output=True,
+                        client=client,
                     )
-                    for delta in stream_answer_markdown(client, answer_messages):
-                        streamed_parts.append(delta)
-                        yield json.dumps({"type": "token", "data": {"text": delta}}, ensure_ascii=False) + "\n"
+                    if (synth.get("answer_markdown") or "").strip():
+                        final_answer = synth["answer_markdown"]
+                    citations_json = {
+                        "answer": synth.get("answer") or [],
+                        "final": final_answer,
+                        "claims": synth.get("claims") or [],
+                    }
                 except Exception as e:
-                    print(f"  ❌ 보고서 심층분석 스트리밍 실패, 루프 답변으로 폴백: {e}")
-                streamed_answer = _strip_code_fence("".join(streamed_parts)).strip()
-                if streamed_answer:
-                    final_answer = streamed_answer
-                    try:
-                        citation_messages = _build_citation_prompt(
-                            user_question=user_query, final_answer=final_answer, rag_chunks=all_chunks)
-                        citation_res = _call_json(client, citation_messages, CITATION_MAX_TOKENS, 0.0)
-                        claims = validate_citations(citation_res.get("claims") or [], all_chunks)
-                        citations_json = {"answer": _normalize_claims_to_answer_list(claims), "final": final_answer, "claims": claims}
-                    except Exception as e:
-                        print(f"  ❌ 인용구 생성 실패: {e}")
-                        citations_json = {"answer": [], "final": final_answer, "claims": []}
+                    print(f"  ❌ 보고서 심층분석 합성 실패, 루프 답변으로 폴백: {e}")
 
                 # 근거 패널용 문서: DB 사실 chunk도 포함해 노출(연결문서가 적어도 패널이 비지 않도록).
                 # DB 사실 카드는 프론트가 kg_source/doc_id 접두어로 구분해 "📊 DB 분석 기록"으로 렌더.
