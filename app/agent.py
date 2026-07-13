@@ -7,6 +7,7 @@ from app.llm_client import (
     _call_claims,
     _derive_claims_from_markers,
     _normalize_claims_to_answer_list,
+    _build_footnotes,
     validate_citations,
     llm_answer_with_citations,
     CITATION_MAX_TOKENS
@@ -852,6 +853,11 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                     claims = validate_citations(_call_claims(client, citation_messages, CITATION_MAX_TOKENS), rag_chunks)
                     if not claims:  # 2차 인용이 비면 [n] 마커로 결정적 폴백 (패널 헛빔 방지)
                         claims = _derive_claims_from_markers(final_answer, rag_chunks)
+                    # 각주 정합: 인라인 [n] ↔ 패널 n번 = 그 문장 (마커가 있을 때만)
+                    fa2, footnotes = _build_footnotes(final_answer, claims, rag_chunks)
+                    if footnotes:
+                        final_answer = fa2
+                        claims = footnotes
                     citations_json = {"answer": _normalize_claims_to_answer_list(claims), "final": final_answer, "claims": claims}
                 except Exception as e:
                     print(f"  ❌ 인용구 생성 실패: {e}")

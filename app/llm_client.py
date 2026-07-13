@@ -471,6 +471,125 @@ def _derive_claims_from_markers(final_answer: str, rag_chunks: list[dict]) -> li
     return out
 
 
+def _sentence_tokens(s: str) -> set:
+    return set(re.findall(r"[0-9A-Za-z가-힣]+", _normalize_ws(s)))
+
+
+def _best_claim_for_sentence(sentence: str, claims: list[dict]) -> dict | None:
+    """답변 문장과 토큰이 가장 많이 겹치는 claim을 반환(Jaccard). 임계 미만이면 None.
+    각주 문장에 2차 인용 LLM의 verbatim quote·지원등급을 붙이기 위한 매칭."""
+    st = _sentence_tokens(sentence)
+    if not st:
+        return None
+    best, best_score = None, 0.0
+    for claim in claims or []:
+        ct = _sentence_tokens(claim.get("claim") or "")
+        if not ct:
+            continue
+        inter = len(st & ct)
+        if not inter:
+            continue
+        score = inter / len(st | ct)
+        if score > best_score:
+            best_score, best = score, claim
+    return best if best_score >= 0.34 else None
+
+
+def _build_footnotes(final_answer: str, claims: list[dict], rag_chunks: list[dict]):
+    """답변의 인라인 [doc] 마커(=근거 문서 번호)를 **읽는 순서대로 각주 [1..M]로 재번호**하고,
+    각주별 근거 목록을 만든다. 인라인 [i] ↔ 우측 패널 i번 = 그 문장이 되도록 정합.
+
+    반환: (footnote_answer, footnotes)
+      - footnote_answer: 마커가 [1],[2],[3]… 읽는 순서로 치환된 답변 마크다운.
+      - footnotes: [{claim(문장), support, citations:[{doc_id,chunk_id,quote,score}]}] (읽는 순서).
+    마커가 하나도 없으면 (원문, []) 반환(호출부가 기존 claims로 폴백).
+    코드펜스/표 줄은 건드리지 않는다."""
+    text = str(final_answer or "")
+    if not rag_chunks or "[" not in text:
+        return text, []
+
+    # 문서별 대표 verbatim quote (2차 인용 claims에서 확보) — 문장 매칭 실패 시 폴백
+    doc_quote = {}
+    for c in claims or []:
+        for x in (c.get("citations") or []):
+            did = x.get("doc_id")
+            q = (x.get("quote") or "").strip()
+            if did and q and did not in doc_quote:
+                doc_quote[did] = q
+
+    group_re = re.compile(r"\[\d{1,2}\](?:\s*\[\d{1,2}\])*")
+    footnotes = []
+    n_counter = 0
+    out_lines = []
+    in_fence = False
+    for raw_line in text.split("\n"):
+        stripped = raw_line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            out_lines.append(raw_line)
+            continue
+        if in_fence or stripped.startswith("|") or "[" not in raw_line:
+            out_lines.append(raw_line)
+            continue
+
+        pieces = []
+        last = 0
+        for m in group_re.finditer(raw_line):
+            before = raw_line[last:m.start()]
+            pieces.append(before)
+            last = m.end()
+
+            nums = _MARKER_RE.findall(m.group(0))
+            doc_idxs, seen = [], set()
+            for ns in nums:
+                di = int(ns) - 1
+                if 0 <= di < len(rag_chunks) and di not in seen:
+                    seen.add(di)
+                    doc_idxs.append(di)
+            if not doc_idxs:
+                continue  # 유효 문서 없는 마커 → 제거(치환 없음)
+
+            n_counter += 1
+            pieces.append(f"[{n_counter}]")
+
+            # 문장 텍스트: 마커 앞 텍스트에서 마지막 종결부호 이후 조각
+            seg = re.split(r"(?<=[.!?。])\s+", before.strip())
+            sentence_raw = seg[-1] if seg else before
+            sentence = _MARKER_RE.sub("", sentence_raw).strip().lstrip("#>-*•· ").strip()
+
+            best = _best_claim_for_sentence(sentence, claims)
+            cites, has_quote = [], False
+            for di in doc_idxs:
+                c = rag_chunks[di]
+                did = c.get("doc_id")
+                quote = ""
+                if best:
+                    for x in (best.get("citations") or []):
+                        if x.get("doc_id") == did and (x.get("quote") or "").strip():
+                            quote = x["quote"].strip()
+                            break
+                if not quote:
+                    quote = doc_quote.get(did, "")
+                if quote:
+                    has_quote = True
+                cites.append({
+                    "doc_id": did,
+                    "chunk_id": c.get("chunk_id"),
+                    "quote": quote,
+                    "score": c.get("score"),
+                })
+            support = "supported" if ((best and best.get("support") == "supported") or has_quote) else "partial"
+            footnotes.append({
+                "claim": sentence or (best.get("claim") if best else ""),
+                "support": support,
+                "citations": cites,
+            })
+        pieces.append(raw_line[last:])
+        out_lines.append("".join(pieces))
+
+    return "\n".join(out_lines), footnotes
+
+
 def llm_answer_with_citations(
     user_id: str,
     user_question: str,
@@ -525,10 +644,19 @@ def llm_answer_with_citations(
         if derived:
             claims = derived
 
+    # 💡 [각주 정합] 인라인 [doc] 마커를 읽는 순서 각주 [1..M]로 재번호하고 각주 목록을 만든다.
+    # → 인라인 [i] ↔ 우측 패널 i번 = 그 문장. (마커가 있을 때만 적용; 없으면 기존 claims 유지)
+    footnote_answer, footnotes = _build_footnotes(final_answer, claims, rag_chunks)
+    if footnotes:
+        final_answer = footnote_answer
+        panel_claims = footnotes
+    else:
+        panel_claims = claims
+
     return {
         "answer_markdown": final_answer,
-        "claims": claims,
-        "answer": _normalize_claims_to_answer_list(claims),
+        "claims": panel_claims,
+        "answer": _normalize_claims_to_answer_list(panel_claims),
         "final": final_answer,
     }
 

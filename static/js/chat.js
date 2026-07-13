@@ -240,15 +240,20 @@ function renderMarkdownSafe(mdText){
 }
 
 // document 모달 호출 시 인덱스로 찾기 위해 래핑 함수를 하나 만듦
+// 인라인 [n]은 읽는 순서 각주 번호 → 전역 citations.answer[n-1](각주)로 매핑.
+// pill 클릭은 메시지별 근거를 쓰는 openDocFromPill을 사용하고, 이 함수는 하위호환용 폴백.
 window.openDocFromCitationIndex = function(idxStr) {
-  // 인라인 [n]은 근거 문서 번호 → 전역 topDocs[n-1]로 매핑 (claims 인덱싱이 아님).
-  // pill 클릭은 메시지별 근거를 쓰는 openDocFromPill을 사용하고, 이 함수는 하위호환용 폴백.
-  const idx = parseInt(idxStr, 10) - 1;
-  if(idx < 0) return;
-  if (Array.isArray(lastTopDocs) && lastTopDocs[idx]) {
-     openDocModal(lastTopDocs[idx], null);
+  const n = parseInt(idxStr, 10);
+  if(!n) return;
+  const ans = (lastCitations && Array.isArray(lastCitations.answer)) ? lastCitations.answer : [];
+  const fn = ans[n - 1];
+  if(fn && Array.isArray(fn.citations) && fn.citations.length){
+    const c = fn.citations[0];
+    openDocFromCitation(c.doc_id, c.chunk_id, c.quote || "");
+  } else if(Array.isArray(lastTopDocs) && lastTopDocs[n - 1]){
+    openDocModal(lastTopDocs[n - 1], null);
   } else {
-     console.log("No document found for index: " + idxStr);
+    console.log("No document found for index: " + idxStr);
   }
 };
 
@@ -406,29 +411,33 @@ function _evidenceForNode(node){
   };
 }
 
-// citations(claims)에서 doc_id → verbatim quote 맵을 1회 구성.
-// 근거 문서에 대응하는 AI 인용문이 있으면 툴팁에 그대로 보여주기 위함.
-function _docQuoteMap(citations){
-  const map = {};
-  const ans = (citations && Array.isArray(citations.answer)) ? citations.answer : [];
-  ans.forEach(claim => {
-    const cs = (claim && Array.isArray(claim.citations)) ? claim.citations : [];
-    cs.forEach(c => {
-      if(c && c.doc_id && c.quote && !map[c.doc_id]) map[c.doc_id] = c.quote;
-    });
-  });
-  return map;
+// 그 메시지의 각주 n번(citations.answer[n-1])을 반환. 인라인 [n]은 읽는 순서 각주 번호.
+function _footnoteForNode(node, n){
+  const ev = _evidenceForNode(node);
+  const ans = (ev && ev.citations && Array.isArray(ev.citations.answer)) ? ev.citations.answer : [];
+  return { ev, fn: (n >= 1 && n <= ans.length) ? ans[n - 1] : null };
 }
 
-// citation pill([n])의 근거 문서 모달을 연다. [n] ↔ 그 메시지의 topDocs[n-1] (1:1).
+// citation pill([n]) 클릭 → 그 각주가 인용한 문서 모달을 연다.
+// [n] ↔ 각주 n(=그 문장) ↔ 그 문장이 인용한 근거 문서. 모두 그 메시지 범위 내에서 해석.
 function openDocFromPill(pill){
   if(!pill) return;
   const n = parseInt((pill.textContent || "").trim(), 10);
   if(!n) return;
-  const ev = _evidenceForNode(pill);
-  const doc = (ev && Array.isArray(ev.topDocs)) ? ev.topDocs[n - 1] : null;
+  const { ev, fn } = _footnoteForNode(pill, n);
+  let docId = null, chunkId = null, quote = "";
+  if(fn && Array.isArray(fn.citations) && fn.citations.length){
+    docId = fn.citations[0].doc_id;
+    chunkId = fn.citations[0].chunk_id;
+    quote = fn.citations[0].quote || "";
+  }
+  // 문서는 "그 메시지"의 topDocs에서 doc_id로 조회(전역 오염 방지). 없으면 n번째 문서로 폴백.
+  const docs = (ev && Array.isArray(ev.topDocs)) ? ev.topDocs : [];
+  let doc = null;
+  if(docId) doc = docs.find(d => d && d.doc_id === docId) || null;
+  if(!doc) doc = docs[n - 1] || null;
   if(doc){
-    openDocModal(doc, null);
+    openDocModal(doc, quote || null);
   } else {
     console.log("No evidence document for citation index: " + n);
   }
@@ -437,13 +446,14 @@ function openDocFromPill(pill){
 function convertCitationPills(container){
   // [n] 텍스트를 citation pill로 변환 (DOM 기반).
   // 조건: 유효한 citation 번호(1..N)일 때만, 표/코드/링크 내부는 제외 → 오변환 방지.
-  // 번호 상한 N은 "그 메시지"의 근거 문서(topDocs) 개수 — 답변 LLM의 [n]은 근거 문서 번호이기 때문.
+  // 번호 상한 N은 "그 메시지"의 각주(citations.answer) 개수 — 인라인 [n]은 읽는 순서 각주 번호이기 때문.
   // 반드시 그 메시지의 근거 엔트리가 있어야 변환한다(전역 폴백 금지). 히스토리 로드 시엔
   // 아직 엔트리가 없어 [n]이 평문으로 남고, 메시지 선택 시 loadEvidenceByAssistantMsgId가
   // 엔트리를 채운 뒤 다시 변환한다 → 답변 간 근거 오염 방지.
   if(!container) return;
   const ev = _msgEvidenceEntry(container);
-  const total = (ev && Array.isArray(ev.topDocs)) ? ev.topDocs.length : 0;
+  const ans = (ev && ev.citations && Array.isArray(ev.citations.answer)) ? ev.citations.answer : [];
+  const total = ans.length;
   if(!total) return;
 
   const SKIP_TAGS = ["A", "CODE", "PRE", "SCRIPT", "STYLE", "BUTTON", "TABLE", "THEAD", "TBODY", "TH", "TD", "SUMMARY", "KBD"];
@@ -520,19 +530,20 @@ function attachCitationHovers(scope){
     pill.addEventListener("mouseenter", () => {
       const idx = parseInt(pill.textContent.trim(), 10);
       if(!idx) return;
-      // [n]은 "그 메시지"의 근거 문서 번호 → topDocs[n-1]로 매핑 (claims 인덱싱이 아님).
-      const ev = _evidenceForNode(pill);
-      const doc = (ev && Array.isArray(ev.topDocs)) ? ev.topDocs[idx - 1] : null;
+      // [n]은 "그 메시지"의 각주 번호 → citations.answer[n-1](그 문장)로 매핑.
+      const { ev, fn } = _footnoteForNode(pill, idx);
       let quote = "";
       let docHint = "";
-      if(doc){
-        docHint = (doc.title || doc.doc_id || doc._index || "").toString();
-        // 그 근거 문서에 대응하는 AI 인용문(verbatim quote)이 있으면 그대로, 없으면 문서 본문 스니펫
-        const qmap = _docQuoteMap(ev.citations);
-        const q = (doc.doc_id && qmap[doc.doc_id]) ? qmap[doc.doc_id] : "";
-        quote = (q || doc.merge_title_content || doc.title || "(인용 문장이 없습니다)").toString();
+      if(fn){
+        const c = (Array.isArray(fn.citations) && fn.citations.length) ? fn.citations[0] : null;
+        // 각주의 verbatim 인용문이 있으면 그대로, 없으면 그 문장 텍스트를 보여줌
+        quote = ((c && c.quote) ? c.quote : (fn.sentence || "(인용 문장이 없습니다)")).toString();
+        docHint = (c && c.doc_id ? c.doc_id : "").toString();
       } else {
-        quote = "(인용 문장을 찾을 수 없습니다)";
+        // 폴백: 각주가 없으면 근거 문서 스니펫
+        const doc = (ev && Array.isArray(ev.topDocs)) ? ev.topDocs[idx - 1] : null;
+        quote = (doc ? (doc.merge_title_content || doc.title || "(인용 문장이 없습니다)") : "(인용 문장을 찾을 수 없습니다)").toString();
+        docHint = (doc && doc.doc_id ? doc.doc_id : "").toString();
       }
       tip.innerHTML = `
         <span class="ct-label">인용 [${idx}]</span>
@@ -1596,11 +1607,12 @@ async function loadEvidenceByAssistantMsgId(assistantMsgId){
 
     lastCitations = art.citations || null;
     renderCitations(lastCitations);  // 항상 호출: 비면 서브패널 숨김 로직이 돌게 함
-    // 이 메시지의 근거를 사이드맵에 저장 → [n] pill이 이 메시지 근거(topDocs)를 정확히 가리킴
+    // 이 메시지의 근거를 사이드맵에 저장 → [n] pill이 이 메시지 각주를 정확히 가리킴
     setMsgEvidence(assistantMsgId, docs, art.citations);
     // 히스토리 로드 시점엔 근거 개수를 몰라 [n]이 평문으로 남아 있음 → 지금 pill로 변환
-    // (근거 문서가 있으면 citations가 비어도 변환해야 함 — [n]은 문서 번호이므로)
-    if(docs && docs.length){
+    // (각주(citations.answer)가 있어야 [n]↔각주 매핑이 성립)
+    const ansLen = (art.citations && Array.isArray(art.citations.answer)) ? art.citations.answer.length : 0;
+    if(ansLen){
       const msgNode = document.querySelector(`.msg.assistant[data-msg-id="${CSS.escape(assistantMsgId)}"]`);
       if(msgNode) enhanceRenderedMessage(msgNode);
     }
