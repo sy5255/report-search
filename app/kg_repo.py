@@ -25,6 +25,11 @@ def _to_ui_doc(meta: dict, report_index: str | None = None) -> dict:
         "additionalField": {
             "storage": meta.get("storage") or {},
             "assets": meta.get("assets") or [],
+            # top-5 ES 문서 카드와 동일한 #태그(분석담당자/발행날짜/보고서링크)를 그리도록
+            # pickMailMeta가 읽는 키를 additionalField에 채운다.
+            "mail_from": meta.get("mail_from") or "",
+            "mail_date": meta.get("mail_date") or "",
+            "report_links": meta.get("report_links") or [],
         },
         "_index": "kg-related",
     }

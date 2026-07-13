@@ -1962,16 +1962,18 @@ function renderTopDocsFiltered(){
     if(meta.mailFrom) tagsHtml += `<span class="px-2 py-0.5 bg-surface-container-high dark:bg-[#1f2b4a] text-secondary dark:text-[#94a3b8] text-[9px] rounded">#${escapeHtml(meta.mailFrom)}</span>`;
     if(meta.mailDate) tagsHtml += `<span class="px-2 py-0.5 bg-surface-container-high dark:bg-[#1f2b4a] text-secondary dark:text-[#94a3b8] text-[9px] rounded">#${escapeHtml(meta.mailDate)}</span>`;
     
-    // 💡 [Phase 3] KG 연결 근거 배지 (심층분석 근거 문서의 provenance 표시)
+    // 💡 [Phase 3] KG 연결/검색보완 provenance — top-5 문서의 유사도 Score 자리(우측 상단)에 표시.
+    // KG 문서는 score가 없으므로 그 자리에 "KG 연결"/"검색 보완" 라벨을 달아 카드 룩을 통일한다.
     const kgSrc = d.kg_source || (d._index === "kg-related" ? "kg" : "");
+    let provBadge = "";
     if(kgSrc === "search"){
-      tagsHtml += `<span class="px-2 py-0.5 bg-surface-container-high dark:bg-[#1f2b4a] text-secondary dark:text-[#94a3b8] text-[9px] rounded" title="KG 연결 문서가 없어 시맨틱 검색으로 보완된 근거">🔎 검색 보완</span>`;
+      provBadge = `<span class="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-surface-container-high dark:bg-[#1f2b4a] text-secondary dark:text-[#94a3b8]" title="KG 연결 문서가 없어 시맨틱 검색으로 보완된 근거">🔎 검색 보완</span>`;
     }else if(kgSrc && kgSrc !== "db"){
       const tipParts = [];
       if(d.kg_evidence) tipParts.push(d.kg_evidence);
       if(d.kg_confidence != null) tipParts.push(`신뢰도 ${Number(d.kg_confidence).toFixed(2)}`);
       const tip = tipParts.join(" · ") || "지식그래프로 연결된 원본 보고서 문서";
-      tagsHtml += `<span class="px-2 py-0.5 bg-rag/10 text-rag-strong dark:text-rag text-[9px] font-semibold rounded" title="${escapeHtml(tip)}">🧩 KG 연결</span>`;
+      provBadge = `<span class="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-rag/10 text-rag-strong dark:text-rag" title="${escapeHtml(tip)}">🧩 KG 연결</span>`;
     }
 
     // 💡 [복구 완료] 분석보고서 URL(edmLinks) 클릭 기능 복구 (이슈 4 해결)
@@ -1992,7 +1994,7 @@ function renderTopDocsFiltered(){
     card.innerHTML = `
       <div class="flex justify-between items-start mb-2">
         <span class="px-2 py-0.5 bg-surface-container-highest dark:bg-[#334155] text-[9px] font-bold rounded">TOP ${escapeHtml(String(d.rank || (i+1)))}</span>
-        ${score ? `<span class="text-[10px] font-bold text-primary dark:text-[#60a5fa]">Score: ${escapeHtml(score)}</span>` : ''}
+        ${score ? `<span class="text-[10px] font-bold text-primary dark:text-[#60a5fa]">Score: ${escapeHtml(score)}</span>` : provBadge}
       </div>
       <h3 class="text-[12px] font-bold mb-1 leading-tight line-clamp-2">${escapeHtml(title)}</h3>
       ${d._index ? `<div class="text-[9px] text-secondary dark:text-[#94a3b8] mb-2">🗂️ ${escapeHtml(d._index)}</div>` : ''}
@@ -2061,16 +2063,14 @@ function renderCitations(citations){
               <div class="text-[9px] text-secondary dark:text-[#94a3b8]">${escapeHtml(c.doc_id||"")}</div>
             `;
           } else {
-            // 인용문이 없으면 투박한 "(원본 문서로 이동)" 대신 문서 제목 + 이동 안내 카드
+            // 인용문이 없으면 문서 제목 + 이동 안내. 타이포는 인용문 카드와 동일하게 통일
+            // (primary=text-[11px] font-mono, secondary=text-[9px] text-secondary) → 두 상태가 이질감 없음.
             const docObj = Array.isArray(lastTopDocs) ? lastTopDocs.find(d => d && d.doc_id === c.doc_id) : null;
             const rawTitle = (docObj && docObj.title) ? docObj.title : (c.doc_id || "원본 문서");
             const docTitle = (typeof stripEnriched === "function") ? stripEnriched(rawTitle) : rawTitle;
             item.innerHTML = `
-              <div class="text-[11px] mb-1 font-semibold break-words flex items-start gap-1">
-                <span class="material-symbols-outlined text-[14px] leading-none mt-0.5">description</span>
-                <span>${escapeHtml(docTitle)}</span>
-              </div>
-              <div class="text-[10px] text-primary dark:text-[#60a5fa] font-semibold flex items-center gap-0.5">원본에서 근거 확인 <span class="material-symbols-outlined text-[12px]">arrow_forward</span></div>
+              <div class="text-[11px] mb-1 font-mono break-words">${escapeHtml(docTitle)}</div>
+              <div class="text-[9px] text-secondary dark:text-[#94a3b8] flex items-center gap-0.5">원본에서 근거 확인 <span class="material-symbols-outlined text-[11px]">arrow_forward</span></div>
             `;
           }
           item.onclick = () => openDocFromCitation(c.doc_id, c.chunk_id, quote || "", sentence);
