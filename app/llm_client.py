@@ -124,7 +124,10 @@ def _build_answer_prompt(
         "You must use ONLY the provided EVIDENCE for factual claims.\n"
         "Do NOT invent facts.\n"
         "If evidence is insufficient, clearly say what is uncertain.\n"
-        "Write a natural, professional Korean answer.\n"
+        "Write a thorough, natural, well-connected Korean explanation that reads like an expert "
+        "analyst: connect sentences into flowing paragraphs, and explain the mechanism(원리), "
+        "cause(원인), and implication(함의) when the evidence supports it. "
+        "Do NOT write terse one-fact-per-line lists.\n"
         "Return STRICT JSON only.\n"
     )
 
@@ -157,8 +160,11 @@ def _build_answer_prompt(
             "Use markdown headings, bullet lists, or tables when they improve readability.",
             "If the user asks for a table, output a markdown table.",
             "If the user asks for code, output a markdown code block inside the answer_markdown string.",
-            "After each factual sentence, append an inline citation marker like [1] or [2] "
-            "referencing the 'no' of the evidence that supports it. "
+            "Write in natural, connected Korean paragraphs. When a sentence or clause relies on a "
+            "specific evidence item, append an inline citation marker like [1] at the end of that "
+            "sentence/clause, referencing the 'no' of the evidence. Do NOT force a marker on every "
+            "sentence, and do NOT fragment the writing into one-fact-per-line just to add markers — "
+            "cite where the evidence is actually used. "
             "Use ONLY evidence numbers that exist. Do not put markers inside tables or code blocks.",
             "If evidence is insufficient, say so clearly."
         ],
