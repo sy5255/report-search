@@ -495,6 +495,33 @@ def _best_claim_for_sentence(sentence: str, claims: list[dict]) -> dict | None:
     return best if best_score >= 0.34 else None
 
 
+def _best_snippet_from_doc(sentence: str, doc_text: str, max_len: int = 180) -> str:
+    """각주 문장과 가장 겹치는 **문서 원문 구절**을 결정적으로 골라 반환(verbatim substring).
+    각주마다 그 문장에 특화된 서로 다른 근거 스니펫을 만들어 툴팁 중복을 막는다.
+    관련성이 낮으면 빈 문자열."""
+    st = _sentence_tokens(sentence)
+    text = str(doc_text or "").strip()
+    if not st or not text:
+        return ""
+    best, best_score = "", 0.0
+    for seg in re.split(r"(?<=[.!?。\n])\s*", text):
+        seg = seg.strip()
+        if len(seg) < 4:
+            continue
+        ct = _sentence_tokens(seg)
+        if not ct:
+            continue
+        inter = len(st & ct)
+        if not inter:
+            continue
+        score = inter / len(st | ct)
+        if score > best_score:
+            best_score, best = score, seg
+    if best_score < 0.12:
+        return ""
+    return best[:max_len].strip()
+
+
 def _build_footnotes(final_answer: str, claims: list[dict], rag_chunks: list[dict]):
     """답변의 인라인 [doc] 마커(=근거 문서 번호)를 **읽는 순서대로 각주 [1..M]로 재번호**하고,
     각주별 근거 목록을 만든다. 인라인 [i] ↔ 우측 패널 i번 = 그 문장이 되도록 정합.
@@ -507,15 +534,6 @@ def _build_footnotes(final_answer: str, claims: list[dict], rag_chunks: list[dic
     text = str(final_answer or "")
     if not rag_chunks or "[" not in text:
         return text, []
-
-    # 문서별 대표 verbatim quote (2차 인용 claims에서 확보) — 문장 매칭 실패 시 폴백
-    doc_quote = {}
-    for c in claims or []:
-        for x in (c.get("citations") or []):
-            did = x.get("doc_id")
-            q = (x.get("quote") or "").strip()
-            if did and q and did not in doc_quote:
-                doc_quote[did] = q
 
     group_re = re.compile(r"\[\d{1,2}\](?:\s*\[\d{1,2}\])*")
     footnotes = []
@@ -562,14 +580,14 @@ def _build_footnotes(final_answer: str, claims: list[dict], rag_chunks: list[dic
             for di in doc_idxs:
                 c = rag_chunks[di]
                 did = c.get("doc_id")
-                quote = ""
-                if best:
+                # 1) 그 문장에 특화된 근거 스니펫을 문서 원문에서 결정적으로 추출(각주별로 다름 → 툴팁 중복 방지)
+                quote = _best_snippet_from_doc(sentence, c.get("merge_title_content") or "")
+                # 2) 없으면 매칭된 claim의 verbatim quote(2차 인용 LLM)로 보완
+                if not quote and best:
                     for x in (best.get("citations") or []):
                         if x.get("doc_id") == did and (x.get("quote") or "").strip():
                             quote = x["quote"].strip()
                             break
-                if not quote:
-                    quote = doc_quote.get(did, "")
                 if quote:
                     has_quote = True
                 cites.append({
