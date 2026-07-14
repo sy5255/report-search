@@ -4,6 +4,22 @@
     <meta charset="utf-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>{% block title %}Intellectual Curator{% endblock %}</title>
+
+    <!-- 세션 만료 시(어떤 버튼/요청이든) 로그인 화면으로 자동 이동. 인증 페이지에만 로드되는
+         base.html에 있으므로 로그인 화면(login.html, base 미상속)에선 동작하지 않아 루프 없음. -->
+    <script>
+      (function () {
+        var _origFetch = window.fetch.bind(window);
+        window.fetch = function () {
+          return _origFetch.apply(null, arguments).then(function (resp) {
+            if (resp && resp.status === 401) {
+              window.location.href = "/";
+            }
+            return resp;
+          });
+        };
+      })();
+    </script>
     
     <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable-dynamic-subset.min.css"/>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet"/>

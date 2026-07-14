@@ -7,7 +7,8 @@ from datetime import datetime
 from email.utils import parsedate_to_datetime
 
 from fastapi import FastAPI, Request, Response, HTTPException, Query
-from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, StreamingResponse, JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -95,6 +96,22 @@ def _require_user(request: Request) -> str:
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
     return user
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_handler(request: Request, exc: StarletteHTTPException):
+    # 세션 만료(401)로 페이지를 열/새로고침할 때 {"detail":"Unauthorized"} 원문 대신
+    # 로그인 화면(/)으로 리다이렉트한다. 브라우저 내비게이션(Accept: text/html, 非 /api)만 대상이고,
+    # API/fetch(Accept: */*) 및 다른 상태코드는 기존 JSON 응답을 그대로 유지한다(프론트가 처리).
+    if exc.status_code == 401 \
+            and "text/html" in request.headers.get("accept", "") \
+            and not request.url.path.startswith("/api/"):
+        return RedirectResponse(url="/", status_code=302)
+    return JSONResponse(
+        {"detail": exc.detail},
+        status_code=exc.status_code,
+        headers=getattr(exc, "headers", None),
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
