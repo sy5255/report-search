@@ -556,7 +556,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
         verification = {"grounded": True}
         claim_list = citations_json.get("answer") or []
         if claim_list:
-            verification["claims_supported"] = sum(1 for c in claim_list if c.get("support") == "supported")
+            verification["claims_supported"] = sum(1 for c in claim_list if c.get("support") in ("supported", "partial"))
             verification["claims_total"] = len(claim_list)
 
         final_result = {
@@ -777,7 +777,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                 ))
                 claim_list = citations_json.get("answer") or []
                 if claim_list:
-                    verification["claims_supported"] = sum(1 for c in claim_list if c.get("support") == "supported")
+                    verification["claims_supported"] = sum(1 for c in claim_list if c.get("support") in ("supported", "partial"))
                     verification["claims_total"] = len(claim_list)
 
                 final_result = {
@@ -891,7 +891,7 @@ def run_agent_loop_stream(user_id: str, user_query: str, previous_messages: list
                 ))
             claim_list = citations_json.get("answer") or []
             if claim_list:
-                verification["claims_supported"] = sum(1 for c in claim_list if c.get("support") == "supported")
+                verification["claims_supported"] = sum(1 for c in claim_list if c.get("support") in ("supported", "partial"))
                 verification["claims_total"] = len(claim_list)
 
             # 💡 [4. 최종 완료 로그 및 데이터 반환]
