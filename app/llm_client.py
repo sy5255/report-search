@@ -114,8 +114,9 @@ def _build_context_summary(previous_messages: list[dict] | None, max_items: int 
     return out
 
 
-def _format_glossary_block(glossary: list[dict]) -> str:
-    """감지된 사내 용어 목록을 답변 LLM용 '권위 사전' system 메시지 문자열로 조립."""
+def _format_glossary_block(glossary: list[dict], unknown_acronyms: list[str] | None = None) -> str:
+    """감지된 사내 용어 목록(+미등록 약어 전개 금지 목록)을 답변 LLM용 system 메시지로 조립."""
+    parts = []
     lines = []
     for g in (glossary or []):
         canon = (g.get("canonical_name") or "").strip()
@@ -128,15 +129,132 @@ def _format_glossary_block(glossary: list[dict]) -> str:
         desc_part = f" — {desc}" if desc else ""
         type_part = f" ({typ})" if typ else ""
         lines.append(f"- 정식명칭 '{canon}'{type_part}{alias_part}{desc_part}")
-    body = "\n".join(lines)
-    return (
-        "[사내 용어 GLOSSARY — 권위 기준]\n"
-        "아래는 사내 표준 용어사전입니다. EVIDENCE(근거 문서)에는 약어가 비일관적이거나 잘못 표기될 수 "
-        "있습니다. 이 GLOSSARY를 권위 있는 기준으로 삼으세요. 해당 용어를 답변에 쓸 때는 정식 명칭을 "
-        "사용하고, 최초 언급 시 약어를 괄호로 병기하세요(예: 정식명칭(약어)). 근거 문서의 약어를 그대로 "
-        "베끼지 마세요. 이 용어 정규화는 필수이며, 사실을 지어내는 것이 아닙니다.\n\n"
-        f"{body}"
-    )
+    if lines:
+        parts.append(
+            "[사내 용어 GLOSSARY — 권위 기준]\n"
+            "아래는 사내 표준 용어사전입니다. EVIDENCE(근거 문서)에는 약어가 비일관적이거나 잘못 표기될 수 "
+            "있습니다. 이 GLOSSARY를 권위 있는 기준으로 삼으세요. 해당 용어를 답변에 쓸 때는 정식 명칭을 "
+            "사용하고, 최초 언급 시 약어를 괄호로 병기하세요(예: 정식명칭(약어)). 근거 문서의 약어를 그대로 "
+            "베끼지 마세요. 이 용어 정규화는 필수이며, 사실을 지어내는 것이 아닙니다.\n\n"
+            + "\n".join(lines)
+        )
+    acr = [a for a in (unknown_acronyms or []) if a]
+    if acr:
+        parts.append(
+            "[전개 금지 — 뜻 미확인 약어]\n"
+            "다음 약어들은 사내 전용 용어로 보이지만 GLOSSARY에 등록되어 있지 않아 뜻을 확인할 수 없습니다. "
+            "반드시 원문 표기 그대로 사용하고, 절대 풀어쓰거나(전개하거나) 뜻을 추측해 괄호로 병기하지 "
+            "마세요. 일반 상식의 동명 약어와 다른 사내 고유 의미일 수 있습니다. 뜻 설명이 꼭 필요하면 "
+            "'사내 용어사전에 미등록된 약어'라고만 명시하세요.\n"
+            f"목록: {', '.join(acr)}"
+        )
+    return "\n\n".join(parts)
+
+
+# ---------- 용어 가드: 근거 없는 약어 전개(할루시네이션) 결정적 탐지/제거 ----------
+
+def _norm_guard_text(s: str) -> str:
+    return re.sub(r"[\s\-_·/]+", " ", str(s or "").lower()).strip()
+
+
+_ACRONYM_SIDE_RE = re.compile(r"^[A-Z][A-Z0-9\-]{1,7}$")
+# 패턴 A: 약어(풀이) — 예: PID(Plasma Induced Damage), PID(비례적분미분)
+_EXPANSION_A_RE = re.compile(r"\b([A-Z][A-Z0-9\-]{1,7})\s*\(([^()\n]{2,80})\)")
+# 패턴 B: 풀이(약어) — 예: 플라즈마 유발 손상(PID). 괄호 앞 최대 6단어 캡처
+_EXPANSION_B_RE = re.compile(
+    r"((?:[A-Za-z가-힣0-9\-·]+\s){0,5}[A-Za-z가-힣0-9\-·]+)\s*\(([A-Z][A-Z0-9\-]{1,7})\)"
+)
+
+
+def _find_unverified_expansions(answer: str, evidence_texts: list[str], glossary: list[dict]) -> list[dict]:
+    """
+    답변 속 '약어(풀이)'/'풀이(약어)' 병기 중, 약어가 GLOSSARY에 없고 풀이도 근거 원문에 없는
+    쌍(=LLM이 임의로 지어낸 전개)을 찾아 반환. [{match, abbr, expansion, pattern}]
+    """
+    text = str(answer or "")
+    if not text:
+        return []
+
+    evidence_blob = _norm_guard_text(" ".join(evidence_texts or []))
+
+    allowed_abbrs = set()
+    allowed_names = set()
+    for g in (glossary or []):
+        cn = _norm_guard_text(g.get("canonical_name") or "")
+        if cn:
+            allowed_names.add(cn)
+            allowed_abbrs.add(cn)
+        for f in (g.get("surface_forms") or []):
+            nf = _norm_guard_text(f)
+            if nf:
+                allowed_abbrs.add(nf)
+
+    def _abbr_ok(abbr: str) -> bool:
+        return _norm_guard_text(abbr) in allowed_abbrs
+
+    def _phrase_in_evidence(phrase: str) -> bool:
+        np = _norm_guard_text(phrase)
+        return bool(np) and (np in evidence_blob or np in allowed_names)
+
+    violations = []
+    seen_spans = set()
+
+    # 패턴 A: 약어(풀이)
+    for m in _EXPANSION_A_RE.finditer(text):
+        abbr, exp = m.group(1), m.group(2).strip()
+        # 풀이로 보이지 않는 괄호(수치·URL·전대문자 토큰·인용마커 등)는 스킵
+        if "http" in exp.lower() or "/" in exp:
+            continue
+        if not re.search(r"[a-z가-힣]", exp) and " " not in exp:
+            continue
+        if len(re.findall(r"[A-Za-z가-힣]", exp)) < 3:
+            continue
+        if _abbr_ok(abbr):
+            continue
+        if _phrase_in_evidence(exp):
+            continue
+        span = m.span()
+        if span in seen_spans:
+            continue
+        seen_spans.add(span)
+        violations.append({"match": m.group(0), "abbr": abbr, "expansion": exp, "pattern": "A"})
+
+    # 패턴 B: 풀이(약어) — 캡처가 문장 앞부분을 더 물 수 있어 접미(마지막 k단어) 축소 검증
+    for m in _EXPANSION_B_RE.finditer(text):
+        exp, abbr = m.group(1).strip(), m.group(2)
+        if _ACRONYM_SIDE_RE.fullmatch(exp):
+            continue  # 전대문자 토큰(코드명 쌍 등)은 풀이로 취급하지 않음
+        if _abbr_ok(abbr):
+            continue
+        words = exp.split()
+        verified = False
+        for k in range(len(words), 0, -1):
+            if _phrase_in_evidence(" ".join(words[-k:])):
+                verified = True
+                break
+        if verified:
+            continue
+        span = m.span()
+        if span in seen_spans:
+            continue
+        seen_spans.add(span)
+        violations.append({"match": m.group(0), "abbr": abbr, "expansion": exp, "pattern": "B"})
+
+    return violations
+
+
+def _strip_unverified_expansions(answer: str, violations: list[dict]) -> str:
+    """
+    교정 재생성 후에도 남은 위반을 결정적으로 제거. 패턴 A('약어(풀이)')만 안전하게 치환
+    (약어 원문만 남김). 패턴 B는 캡처 경계가 문장 일부를 물 수 있어 치환하지 않고 로그만 남긴다.
+    """
+    out = str(answer or "")
+    for v in (violations or []):
+        if v.get("pattern") == "A":
+            out = out.replace(v["match"], v["abbr"])
+        else:
+            print(f"[term-guard] pattern-B violation left as-is (unsafe to strip): {v['match']!r}")
+    return out
 
 
 def _build_answer_prompt(
@@ -144,7 +262,8 @@ def _build_answer_prompt(
     rag_chunks: list[dict],
     previous_messages: list[dict] | None = None,
     style_rules: str | None = None,
-    glossary: list[dict] | None = None
+    glossary: list[dict] | None = None,
+    unknown_acronyms: list[str] | None = None
 ) -> list[dict]:
     system = (
         "You are a helpful RAG answerer.\n"
@@ -158,6 +277,10 @@ def _build_answer_prompt(
         "If a GLOSSARY system message is provided, follow its terminology-normalization instructions: "
         "use the official canonical name and expand abbreviations; this is REQUIRED and is not "
         "considered inventing facts.\n"
+        "CRITICAL: abbreviations in this domain are company-internal. NEVER expand or spell out an "
+        "abbreviation that is not defined in the GLOSSARY or verbatim in the EVIDENCE — guessing an "
+        "expansion from general knowledge is a serious error. Keep unknown abbreviations exactly as "
+        "written in the evidence.\n"
         "Return STRICT JSON only.\n"
     )
 
@@ -201,6 +324,11 @@ def _build_answer_prompt(
             "abbreviations (put the abbreviation in parentheses on first mention). Do not blindly "
             "copy an abbreviation from evidence when the glossary gives its official name. This "
             "normalization is required and is not inventing facts.",
+            "NEVER expand, spell out, or guess the meaning of an abbreviation that is not in the "
+            "GLOSSARY and not spelled out verbatim in the evidence. Company-internal abbreviations "
+            "often differ from their common textbook meaning. Keep such abbreviations exactly as "
+            "written. If asked what one means and no evidence defines it, answer that it is not "
+            "registered in the internal term dictionary.",
             "If evidence is insufficient, say so clearly."
         ],
         "question": user_question,
@@ -211,10 +339,12 @@ def _build_answer_prompt(
         user_payload["style_rules"] = style_rules
 
     messages = [{"role": "system", "content": system}]
-    # 💡 권위 용어사전을 별도 system 메시지로 직접 주입한다. (_build_context_summary는 system role을
-    #    제거하므로 그 경로를 절대 태우지 않는다 — 이게 기존 사전이 답변 LLM에 도달 못 하던 원인이었음.)
-    if glossary:
-        messages.append({"role": "system", "content": _format_glossary_block(glossary)})
+    # 💡 권위 용어사전 + 전개 금지 약어 목록을 별도 system 메시지로 직접 주입한다.
+    #    (_build_context_summary는 system role을 제거하므로 그 경로를 절대 태우지 않는다 —
+    #     이게 기존 사전이 답변 LLM에 도달 못 하던 원인이었음.)
+    glossary_block = _format_glossary_block(glossary or [], unknown_acronyms)
+    if glossary_block:
+        messages.append({"role": "system", "content": glossary_block})
     messages.extend(_build_context_summary(previous_messages))
     messages.append({
         "role": "user",
@@ -733,16 +863,19 @@ def llm_answer_with_citations(
     if client is None:
         client = _make_client(user_id)
 
-    # 💡 [권위 용어사전] 질문 + 근거 문서에서 사내 용어를 감지해 사전을 만들고 답변 프롬프트에 주입한다.
-    #    문서에 적힌 (때로 잘못된) 약어를 정식 명칭으로 정규화하게 함. DB 이슈 시엔 조용히 생략.
+    # 💡 [권위 용어사전 + 전개 금지 목록] 질문 + 근거 문서에서 ① 등록 용어를 감지해 사전을 만들고
+    #    ② 사전에 없는 약어는 '전개 금지 목록'으로 수집해 함께 주입한다. DB 이슈 시엔 조용히 생략.
+    evidence_texts = [(c.get("merge_title_content") or "") for c in (rag_chunks or [])]
+    glossary, unknown_acronyms = [], []
     try:
-        from app.query_normalizer import build_glossary_from_texts
-        glossary = build_glossary_from_texts(
-            [user_question] + [(c.get("merge_title_content") or "") for c in (rag_chunks or [])]
-        )
+        from app.query_normalizer import build_glossary_from_texts, extract_unknown_acronyms
+        glossary = build_glossary_from_texts([user_question] + evidence_texts)
+        unknown_acronyms = extract_unknown_acronyms([user_question] + evidence_texts)
+        if unknown_acronyms:
+            # 사전 등록 플라이휠의 씨앗 — 이 로그의 약어를 term_aliases에 등록하면 정규화 대상이 된다.
+            print(f"[unknown-acronyms] {', '.join(unknown_acronyms)}")
     except Exception as e:
         print(f"[glossary-build-failed] {e}")
-        glossary = []
 
     # 1차: markdown 답변 생성
     answer_messages = _build_answer_prompt(
@@ -751,6 +884,7 @@ def llm_answer_with_citations(
         previous_messages=previous_messages,
         style_rules=style_rules,
         glossary=glossary,
+        unknown_acronyms=unknown_acronyms,
     )
 
     answer_json = _call_answer_json_or_fallback_markdown(
@@ -764,6 +898,36 @@ def llm_answer_with_citations(
 
     if not final_answer:
         final_answer = "근거 문서를 바탕으로 답변을 생성하지 못했습니다."
+
+    # 💡 [용어 가드] 근거·사전 어디에도 없는 약어 전개(임의 풀이)를 결정적으로 탐지.
+    #    위반 시에만 1회 교정 재생성(평상시 추가 LLM 호출 0) → 그래도 남으면 안전한 것만 제거.
+    violations = _find_unverified_expansions(final_answer, evidence_texts, glossary)
+    if violations:
+        print(f"[term-guard] unverified expansions: {[v['match'] for v in violations]}")
+        guard_msg = (
+            "[용어 가드 — 재작성 지시]\n"
+            "직전 답변에 근거 문서와 GLOSSARY 어디에도 없는 약어 풀이(전개)가 포함되었습니다. "
+            "아래 병기 표현을 모두 제거하고, 해당 약어는 근거 문서의 원문 표기 그대로만 사용해 "
+            "같은 내용을 다시 작성하세요. 그 외 내용과 인용 마커는 유지하세요.\n"
+            + "\n".join(f"- {v['match']}" for v in violations)
+        )
+        try:
+            retry_json = _call_answer_json_or_fallback_markdown(
+                client=client,
+                messages=answer_messages
+                + [{"role": "assistant", "content": final_answer},
+                   {"role": "system", "content": guard_msg}],
+                max_tokens=ANSWER_MAX_TOKENS,
+                temperature=0.0,
+            )
+            retry_answer = (retry_json.get("answer_markdown") or "").strip()
+            if retry_answer:
+                final_answer = retry_answer
+        except Exception as e:
+            print(f"[term-guard-regen-failed] {e}")
+        remaining = _find_unverified_expansions(final_answer, evidence_texts, glossary)
+        if remaining:
+            final_answer = _strip_unverified_expansions(final_answer, remaining)
 
     # 2차: claims + citations 생성
     citation_messages = _build_citation_prompt(

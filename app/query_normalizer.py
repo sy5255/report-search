@@ -516,6 +516,56 @@ def build_glossary_from_texts(
     return items[:max_terms]
 
 
+# 도메인과 무관하게 흔한 일반 약어 — '전개 금지 목록'에 넣을 가치가 없어 제외
+_ACRONYM_STOPLIST = {
+    "OK", "NG", "NO", "YES", "ID", "QA", "VS", "PS", "AM", "PM", "TBD", "ETC", "FAQ",
+    "PDF", "URL", "API", "CSV", "PNG", "JPG", "SVG", "HTML", "HTTP", "HTTPS", "JSON",
+    "AND", "OR", "NOT", "THE", "FOR", "TOP", "ALL", "NEW",
+}
+
+_ACRONYM_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9\-]{1,7}\b")
+
+
+def extract_unknown_acronyms(
+    texts: List[str],
+    scope_candidates: List[str] | None = None,
+    term_entries: List[Dict[str, Any]] | None = None,
+    max_items: int = 20,
+) -> List[str]:
+    """
+    질문+근거 문서 텍스트에서 '사전에 등록되지 않은' 약어 토큰을 수집한다.
+    답변 LLM에 '전개 금지(뜻 미확인) 목록'으로 주입해, 모델이 폐쇄 도메인 약어를
+    임의로 풀어쓰는 할루시네이션을 차단하는 데 사용. 빈도순 정렬 후 max_items개 캡.
+    term_entries를 주입하면 DB 없이 순수 함수로 동작(테스트용).
+    """
+    if term_entries is None:
+        term_entries = get_term_entries_cached(scope_candidates)
+
+    # 사전에 등록된 모든 표기(정식명+alias)의 정규화 집합 — 등록된 약어는 unknown이 아님
+    registered = set()
+    for t in (term_entries or []):
+        registered.add(normalize_alias_text(t.get("canonical_name") or ""))
+        for a in (t.get("aliases") or []):
+            registered.add(normalize_alias_text(a.get("alias_text") or ""))
+    registered.discard("")
+
+    freq: Dict[str, int] = {}
+    for t in (texts or []):
+        s = str(t or "").strip()
+        if not s:
+            continue
+        for m in _ACRONYM_TOKEN_RE.finditer(s[:_GLOSSARY_TEXT_CUT]):
+            tok = m.group(0).rstrip("-")
+            if len(tok) < 2 or tok in _ACRONYM_STOPLIST:
+                continue
+            if normalize_alias_text(tok) in registered:
+                continue
+            freq[tok] = freq.get(tok, 0) + 1
+
+    ordered = sorted(freq.items(), key=lambda kv: (-kv[1], kv[0]))
+    return [tok for tok, _ in ordered[:max_items]]
+
+
 def normalize_and_expand_query(
     query_text: str,
     scope_candidates: List[str] | None = None,
