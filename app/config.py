@@ -33,6 +33,11 @@ USER_TYPE = "AD_ID"
 DEFAULT_INDEX_NAME = "rp-ifa-ver2-full"
 DEFAULT_TOP_K = 8
 
+# ===== Visual Analytics =====
+# Visual Analytics 탭에 임베드할 외부 대시보드 URL (환경변수로 관리).
+# 미설정 시 안내 문구만 표시. 대상 사이트가 X-Frame-Options/CSP로 프레이밍을 막으면 임베드 불가.
+ANALYTICS_EMBED_URL = os.getenv("ANALYTICS_EMBED_URL", "")
+
 # (선택) 인덱스 옵션: MVP는 고정 리스트로 제공
 INDEX_OPTIONS = [
     "rp-ifa-ver1-full",

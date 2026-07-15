@@ -21,6 +21,7 @@ from app.config import (
     MAIL_ROOT,
     PARSE_ROOT,
     ALLOWED_VIEW_ROOTS,
+    ANALYTICS_EMBED_URL,
 )
 from app.db_schema import ensure_tables
 from app import repo
@@ -218,10 +219,12 @@ async def archive_page(request: Request):
 @app.get("/analytics", response_class=HTMLResponse)
 async def analytics_page(request: Request):
     user = _require_user(request)
-    # Phase 5에서 구현할 시각화 페이지
-    return templates.TemplateResponse("base.html", {
+    # 외부 대시보드 URL(ANALYTICS_EMBED_URL)을 네비 아래 전체 영역에 iframe으로 임베드
+    return templates.TemplateResponse("analytics.html", {
         "request": request,
-        "user_id": user
+        "user_id": user,
+        "active_tab": "analytics",
+        "analytics_url": ANALYTICS_EMBED_URL,
     })
 
 @app.get("/trace", response_class=HTMLResponse)
@@ -426,6 +429,13 @@ async def api_chat_stream(request: Request):
             index_names=index_names,
             previous_intent=previous_intent
         ):
+            # 💡 [중단] 클라이언트가 연결을 끊었으면(Esc/취소 등) 남은 에이전트 스텝을 더 실행하지 않고
+            #     즉시 종료해 서버 자원을 해제한다. break 시 제너레이터를 더 pull하지 않아 다음 LLM/툴
+            #     호출이 발생하지 않는다(진행 중인 호출 1건이 끝난 직후 종료).
+            if await request.is_disconnected():
+                print("[chat_stream] client disconnected — aborting agent loop")
+                break
+
             # 💡 [핵심 해킹 로직] 에이전트 스트림 청크를 가로채어 배열 맨 앞에 로그를 끼워 넣습니다.
             if glossary_step_log:
                 try:
