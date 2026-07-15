@@ -3174,18 +3174,18 @@ document.addEventListener("DOMContentLoaded", async () => {
       if(isSending){ abortActiveStream(); return; }
       return;
     }
+    // Alt+N — new session (Ctrl+N은 브라우저가 '새 창'으로 예약해 페이지가 가로챌 수 없어 Alt+N 사용)
+    if(e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "n"){
+      e.preventDefault();
+      if(typeof newSession === "function") newSession();
+      return;
+    }
     if(!cmd) return;
     // Ctrl/Cmd+K — focus session search
     if(e.key.toLowerCase() === "k"){
       e.preventDefault();
       const inp = el("sessionSearchInput");
       if(inp){ inp.focus(); inp.select(); }
-      return;
-    }
-    // Ctrl/Cmd+N — new session
-    if(e.key.toLowerCase() === "n"){
-      e.preventDefault();
-      if(typeof newSession === "function") newSession();
       return;
     }
     // Ctrl/Cmd+/ — help modal
