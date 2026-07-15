@@ -1333,7 +1333,7 @@ function appendMessage(role, content, metaText, msgId, extra = null){
   }
 
   if(role === "assistant" && extra) {
-    let agentName = "Intellectual Curator";
+    let agentName = "IFA Curator";
     let agentIcon = "robot_2";
     let agentColor = "text-secondary dark:text-[#94a3b8]";
 

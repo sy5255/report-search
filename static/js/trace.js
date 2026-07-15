@@ -155,7 +155,7 @@
 
     const b = data.built || {}, e = data.edges || {}, c = data.coverage || {};
     $("kgTiles").innerHTML = [
-      statTile("마지막 빌드", b.last_built_at ? esc(String(b.last_built_at).slice(0, 16)) : "미빌드", "24h 주기 자동 갱신"),
+      statTile("마지막 빌드", b.last_built_at ? esc(String(b.last_built_at).slice(2, 16)) : "미빌드", "24h 주기 자동 갱신"),
       statTile("색인 문서", num(b.docs_indexed), "아카이브 문서"),
       statTile("색인 DB 행", num(b.reports_indexed), "v_ai_defect_search"),
       statTile("문서↔보고서 연결", num(e.doc_report), `커버리지 ${pct(c.docs_linked_report_pct)}`),

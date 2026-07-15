@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-    <title>{% block title %}Intellectual Curator{% endblock %}</title>
+    <title>{% block title %}IFA Curator{% endblock %}</title>
 
     <!-- 세션 만료 시(어떤 버튼/요청이든) 로그인 화면으로 자동 이동. 인증 페이지에만 로드되는
          base.html에 있으므로 로그인 화면(login.html, base 미상속)에선 동작하지 않아 루프 없음. -->
@@ -78,12 +78,12 @@
 
     <header class="glass border-b border-surface-container flex items-center justify-between px-6 h-16 w-full shrink-0 z-50">
         <div class="flex items-center gap-8">
-            <div class="flex items-center gap-2.5">
+            <a href="/chat" class="flex items-center gap-2.5 hover:opacity-80 transition-opacity" aria-label="IFA Curator 홈(채팅)으로 이동">
                 <img src="{{ url_for('static', path='/images/logo.svg') }}" alt="" width="32" height="32" class="shrink-0"/>
                 <div class="flex items-baseline gap-2">
-                    <h1 class="text-xl font-bold tracking-tight font-headline">Intellectual Curator</h1>
+                    <h1 class="text-xl font-bold tracking-tight font-headline">IFA Curator</h1>
                 </div>
-            </div>
+            </a>
             <nav class="hidden md:flex items-center gap-6">
                 <a href="/chat" class="text-sm font-medium transition-colors {% if active_tab == 'knowledge_base' %} border-b-2 border-primary text-on-surface pb-1 {% else %} text-secondary hover:text-on-surface {% endif %}">Knowledge Base</a>
                 <a href="/archive" class="text-sm font-medium transition-colors {% if active_tab == 'archive' %} border-b-2 border-primary text-on-surface pb-1 {% else %} text-secondary hover:text-on-surface {% endif %}">Digital Archive</a>
