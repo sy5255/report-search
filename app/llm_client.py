@@ -8,6 +8,7 @@ from app.config import (
     SEND_SYSTEM_NAME,
     USER_TYPE,
 )
+# build_glossary_from_texts는 함수 내부에서 지연 import한다(모듈 로드 시 app.db/mysql 의존을 끌지 않게).
 
 ANSWER_MAX_TOKENS = 3000
 CITATION_MAX_TOKENS = 4000  # 인용 JSON은 claim×quote로 커질 수 있어 여유 확보(잘림 방지)
@@ -113,11 +114,37 @@ def _build_context_summary(previous_messages: list[dict] | None, max_items: int 
     return out
 
 
+def _format_glossary_block(glossary: list[dict]) -> str:
+    """감지된 사내 용어 목록을 답변 LLM용 '권위 사전' system 메시지 문자열로 조립."""
+    lines = []
+    for g in (glossary or []):
+        canon = (g.get("canonical_name") or "").strip()
+        if not canon:
+            continue
+        typ = (g.get("term_type") or "").strip()
+        desc = (g.get("description") or "").strip()
+        forms = [f for f in (g.get("surface_forms") or []) if f]
+        alias_part = f" [문서 표기: {', '.join(forms)}]" if forms else ""
+        desc_part = f" — {desc}" if desc else ""
+        type_part = f" ({typ})" if typ else ""
+        lines.append(f"- 정식명칭 '{canon}'{type_part}{alias_part}{desc_part}")
+    body = "\n".join(lines)
+    return (
+        "[사내 용어 GLOSSARY — 권위 기준]\n"
+        "아래는 사내 표준 용어사전입니다. EVIDENCE(근거 문서)에는 약어가 비일관적이거나 잘못 표기될 수 "
+        "있습니다. 이 GLOSSARY를 권위 있는 기준으로 삼으세요. 해당 용어를 답변에 쓸 때는 정식 명칭을 "
+        "사용하고, 최초 언급 시 약어를 괄호로 병기하세요(예: 정식명칭(약어)). 근거 문서의 약어를 그대로 "
+        "베끼지 마세요. 이 용어 정규화는 필수이며, 사실을 지어내는 것이 아닙니다.\n\n"
+        f"{body}"
+    )
+
+
 def _build_answer_prompt(
     user_question: str,
     rag_chunks: list[dict],
     previous_messages: list[dict] | None = None,
-    style_rules: str | None = None
+    style_rules: str | None = None,
+    glossary: list[dict] | None = None
 ) -> list[dict]:
     system = (
         "You are a helpful RAG answerer.\n"
@@ -128,6 +155,9 @@ def _build_answer_prompt(
         "analyst: connect sentences into flowing paragraphs, and explain the mechanism(원리), "
         "cause(원인), and implication(함의) when the evidence supports it. "
         "Do NOT write terse one-fact-per-line lists.\n"
+        "If a GLOSSARY system message is provided, follow its terminology-normalization instructions: "
+        "use the official canonical name and expand abbreviations; this is REQUIRED and is not "
+        "considered inventing facts.\n"
         "Return STRICT JSON only.\n"
     )
 
@@ -167,6 +197,10 @@ def _build_answer_prompt(
             "marker on every sentence, and do NOT fragment the writing into one-fact-per-line just "
             "to add markers. "
             "Use ONLY evidence numbers that exist. Do not put markers inside tables or code blocks.",
+            "If a GLOSSARY is provided, normalize terms to the official canonical name and expand "
+            "abbreviations (put the abbreviation in parentheses on first mention). Do not blindly "
+            "copy an abbreviation from evidence when the glossary gives its official name. This "
+            "normalization is required and is not inventing facts.",
             "If evidence is insufficient, say so clearly."
         ],
         "question": user_question,
@@ -177,6 +211,10 @@ def _build_answer_prompt(
         user_payload["style_rules"] = style_rules
 
     messages = [{"role": "system", "content": system}]
+    # 💡 권위 용어사전을 별도 system 메시지로 직접 주입한다. (_build_context_summary는 system role을
+    #    제거하므로 그 경로를 절대 태우지 않는다 — 이게 기존 사전이 답변 LLM에 도달 못 하던 원인이었음.)
+    if glossary:
+        messages.append({"role": "system", "content": _format_glossary_block(glossary)})
     messages.extend(_build_context_summary(previous_messages))
     messages.append({
         "role": "user",
@@ -695,12 +733,24 @@ def llm_answer_with_citations(
     if client is None:
         client = _make_client(user_id)
 
+    # 💡 [권위 용어사전] 질문 + 근거 문서에서 사내 용어를 감지해 사전을 만들고 답변 프롬프트에 주입한다.
+    #    문서에 적힌 (때로 잘못된) 약어를 정식 명칭으로 정규화하게 함. DB 이슈 시엔 조용히 생략.
+    try:
+        from app.query_normalizer import build_glossary_from_texts
+        glossary = build_glossary_from_texts(
+            [user_question] + [(c.get("merge_title_content") or "") for c in (rag_chunks or [])]
+        )
+    except Exception as e:
+        print(f"[glossary-build-failed] {e}")
+        glossary = []
+
     # 1차: markdown 답변 생성
     answer_messages = _build_answer_prompt(
         user_question=user_question,
         rag_chunks=rag_chunks,
         previous_messages=previous_messages,
         style_rules=style_rules,
+        glossary=glossary,
     )
 
     answer_json = _call_answer_json_or_fallback_markdown(

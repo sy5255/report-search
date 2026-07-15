@@ -466,6 +466,56 @@ def get_term_entries_cached(scope_candidates: List[str] | None = None) -> List[D
     return entries
 
 
+_GLOSSARY_TEXT_CUT = 1200  # 청크당 감지에 사용할 앞부분 길이(프롬프트/시간 통제)
+
+
+def build_glossary_from_texts(
+    texts: List[str],
+    scope_candidates: List[str] | None = None,
+    term_entries: List[Dict[str, Any]] | None = None,
+    max_terms: int = 15,
+) -> List[Dict[str, Any]]:
+    """
+    질문 + 근거 문서 텍스트에서 사내 용어(정식명/등록 alias)를 감지해 '권위 용어사전'을 만든다.
+    답변 합성 LLM에 주입해 문서에 적힌 (때로 잘못된) 약어를 정식 명칭으로 정규화하는 데 사용.
+
+    반환: [{term_id, canonical_name, term_type, description, surface_forms}] (등장 표기 집합 포함),
+          description 있는 것 우선 + priority 순으로 정렬 후 max_terms개로 캡.
+    term_entries를 주입하면 DB 없이 순수 함수로 동작(테스트용).
+    """
+    if term_entries is None:
+        term_entries = get_term_entries_cached(scope_candidates)
+
+    agg: Dict[int, Dict[str, Any]] = {}
+    for t in (texts or []):
+        s = str(t or "").strip()
+        if not s:
+            continue
+        for d in detect_terms_in_query(s[:_GLOSSARY_TEXT_CUT], term_entries):
+            tid = d["term_id"]
+            entry = agg.get(tid)
+            if entry is None:
+                entry = {
+                    "term_id": tid,
+                    "canonical_name": d["canonical_name"],
+                    "term_type": d["term_type"],
+                    "description": d.get("description") or "",
+                    "priority": int(d.get("priority") or 100),
+                    "surface_forms": [],
+                }
+                agg[tid] = entry
+            surface = str(d.get("matched_text") or "").strip()
+            # 정식명과 다른 표기(약어 등)만 병기 목적으로 수집
+            if surface and normalize_alias_text(surface) != normalize_alias_text(entry["canonical_name"]) \
+               and surface not in entry["surface_forms"]:
+                entry["surface_forms"].append(surface)
+
+    items = list(agg.values())
+    # description 있는 것 우선 → priority 낮은(중요) 순 → 이름
+    items.sort(key=lambda x: (0 if x["description"] else 1, x["priority"], x["canonical_name"]))
+    return items[:max_terms]
+
+
 def normalize_and_expand_query(
     query_text: str,
     scope_candidates: List[str] | None = None,
