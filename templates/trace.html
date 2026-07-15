@@ -88,7 +88,7 @@
 
   .kg-explorer-body { display: grid; grid-template-columns: minmax(0, 3fr) minmax(240px, 2fr); gap: 16px; }
   @media (max-width: 900px) { .kg-explorer-body { grid-template-columns: 1fr; } }
-  .kg-graph { min-height: 380px; border: 1px dashed var(--color-outline-variant); border-radius: 12px; position: relative; }
+  .kg-graph { height: 380px; border: 1px dashed var(--color-outline-variant); border-radius: 12px; position: relative; }
   .kg-graph svg { width: 100%; height: 100%; display: block; }
   .kg-node { cursor: pointer; }
   .kg-node circle { transition: filter var(--duration-fast) var(--ease-out-soft); }
@@ -114,11 +114,11 @@
   .kg-type-chip.is-on { opacity: 1; color: var(--color-on-surface); background: var(--color-surface-container-low); }
   .kg-type-chip .dot { width: 9px; height: 9px; border-radius: 3px; }
 
-  .kg-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .kg-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; height: 380px; }
   .kg-side-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .kg-side-title { font-family: var(--font-display); font-weight: 800; font-size: 15px; }
   .kg-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--color-outline-variant); color: var(--color-secondary); }
-  .kg-doc-list { overflow-y: auto; max-height: 320px; display: flex; flex-direction: column; gap: 6px; }
+  .kg-doc-list { overflow-y: auto; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
   .kg-doc-item {
     text-align: left; padding: 8px 10px; border: 1px solid var(--color-outline-variant); border-radius: 10px;
     background: var(--color-surface-container-low); cursor: pointer;
