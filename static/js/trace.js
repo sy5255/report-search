@@ -137,7 +137,7 @@
       daily.map(d => ({ d: d.d, g: d.grounded === null || d.grounded === undefined ? 0 : Math.round(d.grounded * 100) })),
       [{ key: "g", color: "var(--chart-1)", label: "근거 충족도" }], { unit: "%" });
 
-    renderHBars($("chartIntents"), (data.intents || []).map(i => {
+    renderHBars($("chartIntents"), (data.intents || []).filter(i => i.intent !== "REPORT_ANALYSIS").map(i => {
       const meta = INTENT_META[i.intent] || { label: i.intent, color: "var(--chart-4)" };
       return { label: meta.label, value: i.cnt, color: meta.color };
     }), { nameHeader: "분석 방식", valueHeader: "대화 수", unit: "건" });
@@ -168,7 +168,7 @@
       return { label: meta.label, value: s.cnt, color: meta.color };
     }), { nameHeader: "연결 방식", valueHeader: "엣지 수", unit: "건" });
 
-    renderHBars($("chartKgTerms"), (data.top_terms || []).map(tm => ({
+    renderHBars($("chartKgTerms"), (data.top_terms || []).slice(0, 8).map(tm => ({
       label: tm.canonical_name || `#${tm.term_id}`,
       value: tm.docs,
       color: "var(--chart-2)",
@@ -733,7 +733,8 @@
         b.type = "button";
         b.className = "kg-chip";
         b.dataset.termId = String(t.term_id);
-        b.textContent = t.canonical_name || `#${t.term_id}`;
+        b.title = `유형: ${t.term_type || "-"}`;
+        b.innerHTML = `<span class="kg-chip-dot" style="background:${typeColor(t.term_type)}"></span>${esc(t.canonical_name || `#${t.term_id}`)}`;
         b.addEventListener("click", () => selectTerm(t.term_id, t.canonical_name, t.term_type));
         chips.appendChild(b);
       });

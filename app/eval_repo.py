@@ -389,7 +389,7 @@ def get_kg_stats() -> dict:
                     SELECT t.term_id, td.canonical_name, td.term_type, COUNT(*) c
                     FROM kg_doc_term t JOIN term_dictionary td ON td.term_id = t.term_id
                     GROUP BY t.term_id, td.canonical_name, td.term_type
-                    ORDER BY c DESC LIMIT 8
+                    ORDER BY c DESC LIMIT 20
                 """)
             ]
         except Exception as e:

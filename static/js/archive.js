@@ -611,11 +611,66 @@ async function loadDictionaryTerms() {
                 targetSelect.appendChild(opt);
             });
         }
-        renderDictionaryTable(allDictionaryTerms);
+        renderDictCategoryFilter();
+        applyDictFilters();
 
     } catch (error) {
         tbody.innerHTML = `<tr><td colspan="4" class="px-8 py-8 text-center text-error text-sm font-bold">데이터 로딩 오류</td></tr>`;
     }
+}
+
+// 카테고리(유형) 다중 선택 필터 — 빈 셋 = 전체
+let activeDictTypes = new Set();
+const DICT_TYPE_META = {
+    defect:    { label: "불량", color: "var(--chart-1)" },
+    chemistry: { label: "성분", color: "var(--chart-2)" },
+    process:   { label: "공정", color: "var(--chart-3)" },
+    node:      { label: "노드", color: "var(--chart-4)" },
+};
+function _dictTypeMeta(t) { return DICT_TYPE_META[t] || { label: t || "기타", color: "var(--color-secondary)" }; }
+
+function renderDictCategoryFilter() {
+    const host = document.getElementById("dictCategoryFilter");
+    if (!host) return;
+    const present = [];
+    const seen = new Set();
+    (allDictionaryTerms || []).forEach(t => {
+        const k = t.term_type || "기타";
+        if (!seen.has(k)) { seen.add(k); present.push(k); }
+    });
+    present.sort();
+    if (!present.length) { host.innerHTML = ""; return; }
+    host.innerHTML = `<span class="text-[11px] font-bold text-secondary uppercase tracking-wider mr-1">Category</span>` +
+        present.map(k => {
+            const m = _dictTypeMeta(k);
+            const on = activeDictTypes.has(k);
+            return `<button type="button" data-cat="${escapeHtml(k)}" class="dict-cat-chip inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${on ? "border-primary text-primary bg-primary/10" : "border-surface-container text-secondary hover:bg-surface-container-high"}">
+                <span class="w-2 h-2 rounded-sm" style="background:${m.color}"></span>${escapeHtml(m.label)}</button>`;
+        }).join("");
+    host.querySelectorAll(".dict-cat-chip").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const k = btn.getAttribute("data-cat");
+            if (activeDictTypes.has(k)) activeDictTypes.delete(k); else activeDictTypes.add(k);
+            renderDictCategoryFilter();  // 활성 상태 반영
+            applyDictFilters();
+        });
+    });
+}
+
+// 텍스트 검색 AND 카테고리 필터를 결합해 렌더 (페이지는 renderDictionaryTable이 1페이지로 리셋)
+function applyDictFilters() {
+    const input = document.getElementById("dictSearchInput");
+    const query = (input ? input.value : "").toLowerCase().trim();
+    const filtered = (allDictionaryTerms || []).filter(term => {
+        if (activeDictTypes.size && !activeDictTypes.has(term.term_type || "기타")) return false;
+        if (!query) return true;
+        const cName = (term.canonical_name || "").toLowerCase();
+        const tType = (term.term_type || "").toLowerCase();
+        const desc = (term.description || "").toLowerCase();
+        const als = (term.aliases || "").toLowerCase();
+        return cName.includes(query) || tType.includes(query) || desc.includes(query) || als.includes(query);
+    });
+    renderDictionaryTable(filtered);
 }
 
 // 페이지네이션 상태 (페이지당 5개)
@@ -749,21 +804,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (dictSearchInput) {
-        dictSearchInput.addEventListener("input", (e) => {
-            const query = e.target.value.toLowerCase().trim();
-            if (!query) {
-                renderDictionaryTable(allDictionaryTerms);
-                return;
-            }
-            const filteredTerms = allDictionaryTerms.filter(term => {
-                const cName = (term.canonical_name || "").toLowerCase();
-                const tType = (term.term_type || "").toLowerCase();
-                const desc = (term.description || "").toLowerCase();
-                const als = (term.aliases || "").toLowerCase();
-                return cName.includes(query) || tType.includes(query) || desc.includes(query) || als.includes(query);
-            });
-            renderDictionaryTable(filteredTerms);
-        });
+        // 텍스트 검색 + 카테고리 필터를 결합해 렌더
+        dictSearchInput.addEventListener("input", () => applyDictFilters());
     }
 
     // 2-2. 제안 모드(라디오 버튼) 전환 시 입력 필드 변경 로직
