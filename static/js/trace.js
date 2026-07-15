@@ -534,7 +534,23 @@
     return t.trimStart();
   }
 
-  async function openDocViewer(title, rel){
+  // chat.js injectImagesIntoMarkdown 이식: [Image_position] 마커를 첨부 이미지로 순차 치환
+  // (assets 없으면 마커 제거). Knowledge Base의 문서 모달과 동일하게 이미지를 함께 보여준다.
+  function injectImagesIntoMarkdown(mdText, assets){
+    if(!mdText) return mdText || "";
+    const imgs = (assets || []).map(a => (a && a.path) ? a : null).filter(Boolean);
+    if(!imgs.length) return mdText.replace(/\[Image_position\]/gi, "");
+    let i = 0;
+    return mdText.replace(/\[Image_position\]/gi, () => {
+      if(i >= imgs.length) return "";
+      const a = imgs[i++];
+      const url = `/api/view/asset?rel=${encodeURIComponent(a.path)}`;
+      const alt = esc((a.file_name || a.path || "image").replace(/[\r\n]+/g, " "));
+      return `\n<div class="md-embed-img-wrap"><img class="md-embed-img" src="${url}" alt="${alt}" loading="lazy" onclick="window.open('${url}','_blank')"></div>\n`;
+    });
+  }
+
+  async function openDocViewer(title, rel, assets){
     const modal = $("kgDocModal"), body = $("kgDocBody"), head = $("kgDocTitle");
     if(!modal || !body) return;
     head.textContent = title || "(제목 없음)";
@@ -543,7 +559,7 @@
     modal.setAttribute("aria-hidden", "false");
     try {
       const raw = await fetch(`/api/view/md?rel=${encodeURIComponent(rel)}`, { credentials: "include" }).then(r => r.text());
-      const md = preProcessDocMd(raw);
+      const md = injectImagesIntoMarkdown(preProcessDocMd(raw), assets);
       body.innerHTML = (typeof marked !== "undefined")
         ? marked.parse(md)
         : `<pre style="white-space:pre-wrap">${esc(md)}</pre>`;
@@ -599,7 +615,7 @@
         <span class="m">${esc(d.mail_date || "")}${d.freq ? ` · 언급 ${num(d.freq)}회` : ""}</span>`;
       item.addEventListener("click", () => {
         const rel = (((d.additionalField || {}).storage) || {}).parsed_md_rel_path;
-        if(rel) openDocViewer(d.title || d.doc_id, rel);
+        if(rel) openDocViewer(d.title || d.doc_id, rel, ((d.additionalField || {}).assets) || []);
       });
       list.appendChild(item);
     });
@@ -637,9 +653,9 @@
       box.innerHTML = `<div class="empty-note">조건에 맞는 연결이 없습니다</div>`;
       return;
     }
-    const rows = links.map(l => `
+    const rows = links.map((l, i) => `
       <tr>
-        <td><span class="doc-link" data-rel="${esc(l.rel_path)}" title="${esc(l.title)}">${esc(l.title)}</span>
+        <td><span class="doc-link" data-rel="${esc(l.rel_path)}" data-idx="${i}" title="${esc(l.title)}">${esc(l.title)}</span>
             <span style="font-size:9px;color:var(--color-secondary)">${esc(l.mail_date || "")}</span></td>
         <td>#${esc(l.report_index)}</td>
         <td><span class="kg-src-badge ${esc(l.source)}">${esc(l.source)}</span></td>
@@ -652,7 +668,8 @@
     box.querySelectorAll(".doc-link").forEach(a => {
       a.addEventListener("click", () => {
         const rel = a.getAttribute("data-rel");
-        if(rel) openDocViewer(a.getAttribute("title") || "", rel);
+        const l = links[parseInt(a.getAttribute("data-idx"), 10)] || {};
+        if(rel) openDocViewer(a.getAttribute("title") || "", rel, l.assets || []);
       });
     });
   }

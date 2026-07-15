@@ -1181,8 +1181,8 @@ function renderWelcomeScreen(){
   if(!chat) return;
 
   const suggestions = [
-    { icon: "monitoring",   text: "최근 3개월 동안 가장 많이 발생한 불량명 순위 5개",          hint: "DB 통계" },
-    { icon: "description",  text: "Wet Etch 공정에서 파티클 불량의 주요 원인과 가이드를 찾아줘", hint: "문서 검색" },
+    { icon: "monitoring",   text: "최근 6개월 동안 가장 많이 발생한 불량명 순위 5개를 알려줘",   hint: "DB 통계" },
+    { icon: "description",  text: "void 불량에 대해 설명해줘",                                  hint: "문서 검색" },
     { icon: "support_agent", text: "불량 분석은 어떻게 의뢰하고 진행되나요?",                   hint: "분석 프로세스 안내" }
   ];
 

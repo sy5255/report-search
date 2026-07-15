@@ -143,6 +143,7 @@ def get_link_samples(source: str = "", q: str = "", limit: int = 50) -> list:
             "confidence": float(r["confidence"] or 0),
             "evidence": r.get("evidence") or "",
             "rel_path": ((meta.get("storage") or {}).get("parsed_md_rel_path")) or "",
+            "assets": meta.get("assets") or [],  # 문서 뷰어 이미지 표시용
         })
         if len(out) >= limit:
             break

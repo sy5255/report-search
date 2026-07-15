@@ -618,18 +618,36 @@ async function loadDictionaryTerms() {
     }
 }
 
-// 테이블에 데이터 그리기 + 관리자 권한 분기
+// 페이지네이션 상태 (페이지당 5개)
+const DICT_PAGE_SIZE = 5;
+let dictPageList = [];
+let dictPage = 1;
+
+// 렌더 진입점: 리스트를 받아 1페이지부터 페이지네이션해 그린다 (검색 필터도 이 함수를 호출)
 function renderDictionaryTable(termsToRender) {
+    dictPageList = termsToRender || [];
+    dictPage = 1;
+    _renderDictPage();
+}
+
+function _renderDictPage() {
     const tbody = document.getElementById("dictionaryTableBody");
     if (!tbody) return;
     tbody.innerHTML = "";
 
-    if (termsToRender.length === 0) {
+    if (dictPageList.length === 0) {
         tbody.innerHTML = `<tr><td colspan="4" class="px-8 py-12 text-center text-secondary text-sm font-bold bg-surface-container-lowest/50 rounded-xl">검색 조건에 맞는 용어가 없습니다.</td></tr>`;
+        _renderDictPagination();
         return;
     }
 
-    termsToRender.forEach(term => {
+    const totalPages = Math.ceil(dictPageList.length / DICT_PAGE_SIZE);
+    if (dictPage > totalPages) dictPage = totalPages;
+    if (dictPage < 1) dictPage = 1;
+    const start = (dictPage - 1) * DICT_PAGE_SIZE;
+    const pageTerms = dictPageList.slice(start, start + DICT_PAGE_SIZE);
+
+    pageTerms.forEach(term => {
         const description = term.description ? escapeHtml(term.description) : `<span class="text-outline italic">설명 없음</span>`;
         const aliases = term.aliases ? `<div class="mt-2 text-[11px] text-primary bg-primary/5 inline-block px-2 py-0.5 rounded border border-primary/10 font-semibold">Aliases: ${escapeHtml(term.aliases)}</div>` : '';
 
@@ -666,6 +684,54 @@ function renderDictionaryTable(termsToRender) {
             </td>
         `;
         tbody.appendChild(tr);
+    });
+
+    _renderDictPagination();
+}
+
+// 번호 페이지네이션 컨트롤 (현재±2 윈도우 + 처음/끝 + ‹ ›). 총 1페이지면 숨김.
+function _renderDictPagination() {
+    const box = document.getElementById("dictPagination");
+    if (!box) return;
+    const totalPages = Math.ceil(dictPageList.length / DICT_PAGE_SIZE);
+    if (totalPages <= 1) { box.innerHTML = ""; return; }
+
+    const btn = (label, page, opts = {}) => {
+        const { active = false, disabled = false, ellipsis = false } = opts;
+        if (ellipsis) return `<span class="px-2 text-secondary text-sm select-none">…</span>`;
+        const base = "min-w-[32px] h-8 px-2 rounded-lg text-sm font-bold transition-colors border";
+        const cls = active
+            ? "bg-primary text-on-primary border-primary"
+            : (disabled
+                ? "text-outline border-transparent cursor-not-allowed opacity-50"
+                : "text-on-surface border-surface-container hover:bg-surface-container-high");
+        return `<button type="button" class="dict-page-btn ${base} ${cls}" ${disabled ? "disabled" : `data-page="${page}"`}>${label}</button>`;
+    };
+
+    const pages = [];
+    pages.push(btn("‹", dictPage - 1, { disabled: dictPage <= 1 }));
+    const win = 2;
+    let last = 0;
+    for (let p = 1; p <= totalPages; p++) {
+        if (p === 1 || p === totalPages || (p >= dictPage - win && p <= dictPage + win)) {
+            if (last && p - last > 1) pages.push(btn("", 0, { ellipsis: true }));
+            pages.push(btn(String(p), p, { active: p === dictPage }));
+            last = p;
+        }
+    }
+    pages.push(btn("›", dictPage + 1, { disabled: dictPage >= totalPages }));
+    box.innerHTML = pages.join("");
+
+    box.querySelectorAll(".dict-page-btn[data-page]").forEach(b => {
+        b.addEventListener("click", () => {
+            const p = parseInt(b.getAttribute("data-page"), 10);
+            if (!isNaN(p) && p !== dictPage) {
+                dictPage = p;
+                _renderDictPage();
+                const tbody = document.getElementById("dictionaryTableBody");
+                if (tbody && tbody.scrollIntoView) tbody.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+        });
     });
 }
 
