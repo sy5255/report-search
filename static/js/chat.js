@@ -601,8 +601,13 @@ function buildQueryInterpretationCard(data){
   if(!hasMeaningful) return "";
 
   const tagsHtml = buildDetectedTermTags(detectedTerms);
-  const summaryText = detectedTerms.length
-    ? `🔎 검색 해석 적용됨 · ${detectedTerms.map(x => "#" + (x.canonical_name || x.matched_text || "")).filter(Boolean).join(" ")}`
+  // detected_terms는 정규화 치환용으로 등장 위치별 항목을 유지하므로,
+  // 표시할 때는 canonical_name 기준으로 중복을 제거한다 (buildDetectedTermTags와 동일 기준)
+  const summaryNames = [...new Set(
+    detectedTerms.map(x => String(x.canonical_name || x.matched_text || "").trim()).filter(Boolean)
+  )];
+  const summaryText = summaryNames.length
+    ? `🔎 검색 해석 적용됨 · ${summaryNames.map(n => "#" + n).join(" ")}`
     : "🔎 검색 해석 적용됨";
 
   const detailsRows = [];
